@@ -96,6 +96,7 @@ flowchart LR
 - **TLS: step-ca** as internal certificate authority with an ACME provisioner; **cert-manager** points at it as an ACME issuer, so every internal service gets real, auto-renewed certificates. Its root cert is baked into agent-runner images — no self-signed warnings, no `NODE_TLS_REJECT_UNAUTHORIZED=0` creeping into agent-written code.
 - **DNS: Technitium DNS** serving an internal zone (e.g. `*.lab`) pointed at the cluster ingress: `temporal.lab`, `grafana.lab`, `git.lab`, `mail.lab`, preview deploys as `pr-123.app.lab`. No hosts-file sprawl, no `srv01:8443`-style addresses; combined with step-ca, internal URLs behave exactly like production ones — which matters because agents (and Playwright) hit them constantly.
 - **Mail: MailPit** as the SMTP sink for all non-prod outbound mail — test emails never reach real people. Its REST API doubles as a *test surface*: QASquad and ProductProbe agents verify signup confirmations, resets, and notification content by reading the trap.
+- **Container registry: GHCR** (`ghcr.io`). Engine images (`agent-<backend>`, worker, gateway) and product images push here from CI; `GITHUB_TOKEN` covers push auth with zero new credentials since source, Actions, and images all live on GitHub already. Chosen over self-hosting a registry (one more stateful service to operate — GC, storage, backups) and over Docker Hub (free-tier pull-rate limits are a real risk for an automated pipeline pulling repeatedly).
 
 ### 5.2 Temporal
 - Official Helm chart, Postgres persistence (shared Postgres instance, separate DB).
