@@ -64,15 +64,31 @@ jobs:
           context: .
           file: images/worker/Dockerfile
           push: ${{ github.ref == 'refs/heads/main' }}
-          tags: |
-            ghcr.io/${{ github.repository }}/worker:${{ github.sha }}
-            ghcr.io/${{ github.repository }}/worker:main
+          tags: ghcr.io/${{ github.repository }}/worker:${{ github.sha }}
 
       - uses: docker/build-push-action@v6
         with:
           context: images/agent-claude
           file: images/agent-claude/Dockerfile
           push: ${{ github.ref == 'refs/heads/main' }}
-          tags: |
-            ghcr.io/${{ github.repository }}/agent-claude:${{ github.sha }}
-            ghcr.io/${{ github.repository }}/agent-claude:main
+          tags: ghcr.io/${{ github.repository }}/agent-claude:${{ github.sha }}
+
+  bump-platform:
+    runs-on: ubuntu-latest
+    needs: build-images
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/checkout@v4
+        with:
+          repository: flair-hr/agentops-platform
+          token: ${{ secrets.PLATFORM_REPO_TOKEN }}
+          path: platform
+
+      - name: Bump engine image tags in platform GitOps
+        env:
+          PLATFORM_REPO_TOKEN: ${{ secrets.PLATFORM_REPO_TOKEN }}
+          ENGINE_SHA: ${{ github.sha }}
+          PLATFORM_DIR: platform
+        run: bash scripts/bump-platform-engine-tags.sh
