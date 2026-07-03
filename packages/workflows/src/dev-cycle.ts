@@ -24,6 +24,8 @@ export interface DevCycleState {
   cumulativeTokens: number;
   babysitRounds: number;
   prRef: string | null;
+  workspaceRef: string;
+  branch: string;
 }
 
 const MAX_VERDICT_CALLS = 2;
@@ -40,6 +42,8 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     cumulativeTokens: 0,
     babysitRounds: 0,
     prRef: null,
+    workspaceRef: '',
+    branch: '',
   };
 
   let cancelled = false;
@@ -72,6 +76,10 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
   });
   setHandler(stateQuery, () => state);
 
+  const prepared = await activities.prepareWorkspace({ taskId: input.taskId, repo: input.repo });
+  state.workspaceRef = prepared.workspaceRef;
+  state.branch = prepared.branch;
+
   const waitForResumeOrCancel = async (): Promise<boolean> => {
     await condition(() => cancelled || state.status === 'running');
     return cancelled;
@@ -97,7 +105,7 @@ type RoutableStage = keyof Routing;
       backend,
       model: modelName,
       promptRef: `${stage}.md`,
-      workspaceRef: input.repo,
+      workspaceRef: state.workspaceRef,
       limits: { maxTokens: input.config.brakes.maxTokens, timeoutMs: 600_000 },
     });
     state.cumulativeTokens += result.tokensIn + result.tokensOut;
@@ -149,6 +157,7 @@ type RoutableStage = keyof Routing;
     if (cancelled) {
       state.stage = 'failed';
       state.status = 'failed';
+      await activities.cleanupWorkspace(state.workspaceRef, input.repo);
       return state;
     }
     if (stopRequested) {
@@ -202,6 +211,7 @@ type RoutableStage = keyof Routing;
       if (await waitForResumeOrCancel()) {
         state.stage = 'failed';
         state.status = 'failed';
+        await activities.cleanupWorkspace(state.workspaceRef, input.repo);
         return state;
       }
       action = evaluate();
@@ -219,14 +229,13 @@ type RoutableStage = keyof Routing;
   }
 
   state.stage = 'pr';
-  const branch = `agentops/${input.taskId}`;
   const findingsSummary = `full_verify: ${fullVerifyVerdict}; review: ${reviewVerdict ?? 'not-run'}`;
   const prBody = exhausted
     ? `Repair attempts exhausted after ${state.implementAttempts} implement attempt(s). Opening PR with outstanding findings.\n${findingsSummary}`
     : `Automated PR for task ${input.taskId}.`;
   const { prRef } = await activities.openPr({
     repo: input.repo,
-    branch,
+    branch: state.branch,
     title: input.goal,
     body: prBody,
   });
@@ -258,6 +267,7 @@ type RoutableStage = keyof Routing;
       if (await waitForResumeOrCancel()) {
         state.stage = 'failed';
         state.status = 'failed';
+        await activities.cleanupWorkspace(state.workspaceRef, input.repo);
         return state;
       }
       state.stage = 'pr_babysit';
@@ -272,7 +282,7 @@ type RoutableStage = keyof Routing;
       await runStageAgent('implement', implementAttempt);
       state.implementAttempts = implementAttempt;
       state.iterations += 1;
-      await activities.pushBranch(branch, `${input.taskId}-${implementAttempt}`);
+      await activities.pushBranch(state.workspaceRef, state.branch, `${input.taskId}-${implementAttempt}`);
       state.stage = 'pr_babysit';
       continue;
     }
@@ -282,5 +292,6 @@ type RoutableStage = keyof Routing;
 
   state.stage = 'done';
   state.status = 'done';
+  await activities.cleanupWorkspace(state.workspaceRef, input.repo);
   return state;
 }
