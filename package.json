@@ -1,0 +1,40 @@
+{
+  "name": "agentops-engine",
+  "private": true,
+  "version": "0.0.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "lint": "eslint .",
+    "format": "prettier --check .",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "vitest run --config vitest.config.ts",
+    "test:policies-coverage": "vitest run --config vitest.coverage.config.ts",
+    "e2e": "vitest run --config vitest.e2e.config.ts",
+    "build": "pnpm -r run build",
+    "worker": "pnpm --filter @agentops/worker run start",
+    "engine": "pnpm --filter @agentops/cli run engine"
+  },
+  "devDependencies": {
+    "@agentops/activities": "workspace:*",
+    "@agentops/backends": "workspace:*",
+    "@agentops/contracts": "workspace:*",
+    "@agentops/ports": "workspace:*",
+    "@agentops/prompts": "workspace:*",
+    "@agentops/worker": "workspace:*",
+    "@agentops/workflows": "workspace:*",
+    "@temporalio/testing": "^1.11.0",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^26.1.0",
+    "@vitest/coverage-v8": "^4.1.9",
+    "eslint": "^10.6.0",
+    "eslint-import-resolver-typescript": "^4.4.5",
+    "eslint-plugin-import": "^2.32.0",
+    "prettier": "^3.9.4",
+    "tsx": "^4.22.5",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.62.1",
+    "vitest": "^4.1.9"
+  }
+}
