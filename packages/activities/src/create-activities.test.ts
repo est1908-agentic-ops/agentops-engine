@@ -4,6 +4,7 @@ import { MemoryTrackerPort, MemoryScmPort } from '@agentops/ports';
 import { createActivities } from './create-activities';
 import { InMemoryStatsStore } from './stats-store';
 import { InMemoryStageResultStore } from './stage-result-store';
+import { MemoryWorkspaceManager } from './workspace/memory-workspace-manager';
 
 function buildDeps() {
   return {
@@ -12,6 +13,7 @@ function buildDeps() {
     scm: new MemoryScmPort(),
     stats: new InMemoryStatsStore(),
     stageResults: new InMemoryStageResultStore(),
+    workspaces: new MemoryWorkspaceManager(),
   };
 }
 
@@ -93,6 +95,19 @@ describe('createActivities', () => {
     const { prRef } = await activities.openPr({ repo: 'demo/repo', branch: 'b', title: 't', body: 'b' });
     deps.scm.scriptFeedback(prRef, [{ ciStatus: 'green', unresolvedThreads: 0, comments: [] }]);
     await expect(activities.getPrFeedback(prRef)).resolves.toMatchObject({ ciStatus: 'green' });
-    await expect(activities.pushBranch('branch', 'hash')).resolves.toBeUndefined();
+    await expect(activities.pushBranch('/some/workspace', 'branch', 'hash')).resolves.toBeUndefined();
+  });
+});
+
+describe('createActivities — workspace lifecycle', () => {
+  it('prepareWorkspace and cleanupWorkspace delegate to the workspaces dependency', async () => {
+    const deps = buildDeps();
+    const activities = createActivities(deps);
+
+    const prepared = await activities.prepareWorkspace({ taskId: 't1', repo: 'owner/repo' });
+    expect(prepared).toEqual({ workspaceRef: 'memory://owner/repo/t1', branch: 'agentops/t1', baseBranch: 'main' });
+
+    await activities.cleanupWorkspace(prepared.workspaceRef, 'owner/repo');
+    expect((deps.workspaces as MemoryWorkspaceManager).isCleanedUp(prepared.workspaceRef)).toBe(true);
   });
 });

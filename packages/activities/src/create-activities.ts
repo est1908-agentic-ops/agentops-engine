@@ -3,6 +3,7 @@ import type { Issue, OpenPrRequest, OpenPrResult, ScmPort, TrackerPort } from '@
 import type { AgentRunRequest, AgentRunResult, PrFeedback, RunStats } from '@agentops/contracts';
 import type { StageResultRecord, StageResultStore } from './stage-result-store';
 import type { StatsStore } from './stats-store';
+import type { PreparedWorkspace, Workspaces } from './workspace/workspace-manager';
 
 export interface ActivityDependencies {
   backends: Record<string, AgentBackend>;
@@ -10,6 +11,7 @@ export interface ActivityDependencies {
   scm: ScmPort;
   stats: StatsStore;
   stageResults: StageResultStore;
+  workspaces: Workspaces;
 }
 
 export function createActivities(deps: ActivityDependencies) {
@@ -36,14 +38,20 @@ export function createActivities(deps: ActivityDependencies) {
     async getPrFeedback(prRef: string): Promise<PrFeedback> {
       return deps.scm.getPrFeedback(prRef);
     },
-    async pushBranch(branch: string, contentHash: string): Promise<void> {
-      await deps.scm.push(branch, contentHash);
+    async pushBranch(workspaceRef: string, branch: string, contentHash: string): Promise<void> {
+      await deps.scm.push(workspaceRef, branch, contentHash);
     },
     async recordStageResult(result: StageResultRecord): Promise<void> {
       deps.stageResults.record(result);
     },
     async recordRunStats(stats: RunStats): Promise<void> {
       deps.stats.record(stats);
+    },
+    async prepareWorkspace(req: { taskId: string; repo: string }): Promise<PreparedWorkspace> {
+      return deps.workspaces.prepare(req.taskId, req.repo);
+    },
+    async cleanupWorkspace(workspaceRef: string, repo: string): Promise<void> {
+      await deps.workspaces.cleanup(workspaceRef, repo);
     },
   };
 }
