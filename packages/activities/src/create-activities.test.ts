@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { AgentBackend } from '@agentops/backends';
 import { StubBackend } from '@agentops/backends';
 import { MemoryTrackerPort, MemoryScmPort } from '@agentops/ports';
+import { PromptPack } from '@agentops/prompts';
 import { createActivities } from './create-activities';
 import { InMemoryStatsStore } from './stats-store';
 import { InMemoryStageResultStore } from './stage-result-store';
@@ -14,6 +16,7 @@ function buildDeps() {
     stats: new InMemoryStatsStore(),
     stageResults: new InMemoryStageResultStore(),
     workspaces: new MemoryWorkspaceManager(),
+    prompts: new PromptPack(),
   };
 }
 
@@ -30,6 +33,7 @@ describe('createActivities', () => {
       backend: 'stub',
       model: 'stub-v1',
       promptRef: 'implement.md',
+      promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' },
       workspaceRef: 'demo/repo',
       limits: { maxTokens: 1000, timeoutMs: 60_000 },
     });
@@ -47,6 +51,7 @@ describe('createActivities', () => {
         backend: 'nonexistent',
         model: 'x',
         promptRef: 'implement.md',
+        promptContext: {},
         workspaceRef: 'demo/repo',
         limits: { maxTokens: 1000, timeoutMs: 60_000 },
       }),
@@ -109,5 +114,53 @@ describe('createActivities — workspace lifecycle', () => {
 
     await activities.cleanupWorkspace(prepared.workspaceRef, 'owner/repo');
     expect((deps.workspaces as MemoryWorkspaceManager).isCleanedUp(prepared.workspaceRef)).toBe(true);
+  });
+});
+
+describe('createActivities — prompt rendering', () => {
+  it('renders promptRef/promptContext into prompt text before calling the backend', async () => {
+    let receivedPrompt = '';
+    const fakeBackend: AgentBackend = {
+      async run(req) {
+        receivedPrompt = req.prompt;
+        return { output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 };
+      },
+    };
+    const activities = createActivities({ ...buildDeps(), backends: { stub: fakeBackend } });
+
+    await activities.runAgent({
+      taskId: 't1',
+      stage: 'implement',
+      attempt: 1,
+      callIndex: 1,
+      backend: 'stub',
+      model: 'stub-v1',
+      promptRef: 'implement.md',
+      promptContext: { taskId: 't1', goal: 'add a widget', fullVerifyFindings: '', reviewFindings: '' },
+      workspaceRef: 'demo/repo',
+      limits: { maxTokens: 1000, timeoutMs: 60_000 },
+    });
+
+    expect(receivedPrompt).toContain('add a widget');
+  });
+
+  it('throws when promptContext is missing a variable the template requires', async () => {
+    const deps = buildDeps();
+    const activities = createActivities(deps);
+
+    await expect(
+      activities.runAgent({
+        taskId: 't1',
+        stage: 'implement',
+        attempt: 1,
+        callIndex: 1,
+        backend: 'stub',
+        model: 'stub-v1',
+        promptRef: 'implement.md',
+        promptContext: { taskId: 't1', goal: 'g' },
+        workspaceRef: 'demo/repo',
+        limits: { maxTokens: 1000, timeoutMs: 60_000 },
+      }),
+    ).rejects.toThrow(/fullVerifyFindings/);
   });
 });

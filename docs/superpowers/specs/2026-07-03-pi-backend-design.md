@@ -7,19 +7,17 @@ Milestone: M1, sub-project 2 of 5 (see [claude-backend design](2026-07-03-claude
 
 `ModelRefSchema.backend` already enumerates `pi` as a valid value (it has since M0), and ARCHITECTURE.md's Phase 1 gate (§4) explicitly names "Agent Runner Jobs for ≥2 backends (claude, pi) + stub" — even though the later M1–M9 milestone table (§8.1) deferred `pi` to M5 alongside `cursor`. Pulling it into M1 resolves that inconsistency rather than purely adding scope, and gives multi-backend routing (ARCHITECTURE.md's "pluggable everything" principle) a real second data point from day one instead of only after `claude` is battle-tested alone.
 
-## Prerequisite: verify `pi`'s actual CLI contract before implementing
+## Prerequisite: verified `pi` CLI contract (2026-07-03)
 
-**This is the one thing this doc cannot responsibly design in detail.** Unlike the [claude backend](2026-07-03-claude-backend-design.md), where the invocation shape is grounded in the real `claude` CLI (with exactly one flag — `--effort` — flagged as unverified), this doc has no confirmed specifics for `pi`'s headless invocation. Writing exact flag names here would be guessing, and AGENTS.md's "no secrets/no assumptions baked in as fact" spirit applies just as much to CLI contracts as it does to credentials — a wrong guess baked into a design doc tends to get implemented as if it were verified.
+Verified against `pi --help` / `pi --version` (v0.80.2) and [pi JSON mode docs](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/json.md):
 
-Before implementation starts, confirm against `pi`'s real docs/`--help` output:
+1. **Non-interactive/headless invocation:** `--print` / `-p` runs non-interactively and exits. In print mode, pi also reads piped stdin and merges it into the initial prompt (`cat README.md | pi -p "Summarize this text"`). `PiBackend` pipes the rendered prompt via stdin (same as `ProcessCliBackend`).
+2. **Structured output:** `--mode json` emits newline-delimited JSON events (JSONL) to stdout — not a single JSON blob. Final assistant text is extracted from `message_end` (role `assistant`) or `agent_end` events. Token usage is not reported in the JSONL stream; `tokensIn`/`tokensOut` report `0`.
+3. **Auth mechanism:** API-key via `--api-key` or provider env vars; `/login` for OAuth. Auth failures surface as stderr like `No API key found for google`.
+4. **Permission/autonomy bypass flag:** No `--dangerously-skip-permissions` equivalent. Tools are enabled by default in print mode; `--no-tools` / `--tools` allowlists exist but are not used by `PiBackend` (M1 uses default tool access).
+5. **Turn/iteration limit flag and exit codes:** No `--max-turns` flag observed. `--thinking <level>` maps effort (`low`/`medium`/`high`/`xhigh`). Exit code `0` on success; nonzero with stderr on auth/process failure.
 
-1. **Non-interactive/headless invocation** — the equivalent of `claude -p` / `codex exec`. Does it read the prompt from stdin, a file argument, or only an inline argv string (which would reopen the ARG_MAX concern the claude backend's design resolved via stdin)?
-2. **Structured output** — is there a `--output-format json`-equivalent that reports token usage and a clean final-text field, or is stdout plain text only (in which case token accounting degrades to "unknown," same as this doc's fallback path below)?
-3. **Auth mechanism** — ARCHITECTURE.md §5.5 documents `claude`/`cursor-agent`/`codex` auth lanes in detail but says nothing about `pi`. Is it a subscription CLI (OAuth token file, like `claude setup-token`) or API-key-only? This determines whether `pi` even belongs in the "subscription lane" cost model §5.5 describes, or is API-lane-only (routed through LiteLLM later, direct key for now).
-4. **Permission/autonomy bypass flag** — the equivalent of `--dangerously-skip-permissions`, required for unattended operation.
-5. **Turn/iteration limit flag** and **exit code conventions** on success/failure/timeout.
-
-Until these are confirmed, treat everything CLI-specific below as a placeholder shape, not a specification. Once confirmed, this doc should be updated in the same PR as the implementation (AGENTS.md's "docs updated if behavior/design changed" rule), and ARCHITECTURE.md §5.5 should gain a `pi` row alongside the existing three.
+**Discrepancy from working hypothesis:** `pi` does *not* mirror `claude`'s `-p --output-format json --max-turns --dangerously-skip-permissions` shape. `PiBackend` uses `--print --mode json --model <model> --no-session` instead.
 
 ## Goal
 

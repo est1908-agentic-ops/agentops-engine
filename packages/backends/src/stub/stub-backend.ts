@@ -1,4 +1,4 @@
-import type { AgentRunRequest, AgentRunResult, Stage } from '@agentops/contracts';
+import type { BackendRunRequest, AgentRunResult, Stage } from '@agentops/contracts';
 import type { AgentBackend } from '../agent-backend';
 
 export interface ScriptedResponse {
@@ -22,7 +22,7 @@ export class StubBackend implements AgentBackend {
     this.script.set(this.key(stage, attempt, callIndex), response);
   }
 
-  async run(req: AgentRunRequest): Promise<AgentRunResult> {
+  async run(req: BackendRunRequest): Promise<AgentRunResult> {
     const scripted = this.script.get(this.key(req.stage, req.attempt, req.callIndex));
     return { ...DEFAULT_RESPONSE, ...scripted };
   }

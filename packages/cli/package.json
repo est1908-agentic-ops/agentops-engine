@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@agentops/contracts": "workspace:*",
+    "@agentops/ports": "workspace:*",
     "@agentops/workflows": "workspace:*",
     "@temporalio/client": "^1.11.0"
   }

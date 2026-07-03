@@ -3,3 +3,7 @@ export * from './scm-port';
 export * from './memory/memory-tracker';
 export * from './memory/memory-scm';
 export * from './git/git-command-runner';
+export * from './github/parse-ref';
+export * from './github/github-client';
+export * from './github/github-tracker-port';
+export * from './github/github-scm-port';

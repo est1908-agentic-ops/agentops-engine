@@ -7,6 +7,8 @@ export const AgentRunLimitsSchema = z.object({
 });
 export type AgentRunLimits = z.infer<typeof AgentRunLimitsSchema>;
 
+const EffortSchema = z.enum(['low', 'medium', 'high', 'xhigh', 'max']);
+
 export const AgentRunRequestSchema = z.object({
   taskId: z.string().min(1),
   stage: StageSchema,
@@ -14,11 +16,18 @@ export const AgentRunRequestSchema = z.object({
   callIndex: z.number().int().positive().default(1),
   backend: z.string().min(1),
   model: z.string().min(1),
+  effort: EffortSchema.optional(),
   promptRef: z.string().min(1),
+  promptContext: z.record(z.string(), z.unknown()).default({}),
   workspaceRef: z.string().min(1),
   limits: AgentRunLimitsSchema,
 });
 export type AgentRunRequest = z.infer<typeof AgentRunRequestSchema>;
+
+export const BackendRunRequestSchema = AgentRunRequestSchema.omit({ promptRef: true, promptContext: true }).extend({
+  prompt: z.string().min(1),
+});
+export type BackendRunRequest = z.infer<typeof BackendRunRequestSchema>;
 
 export const AgentRunResultSchema = z.object({
   output: z.string(),

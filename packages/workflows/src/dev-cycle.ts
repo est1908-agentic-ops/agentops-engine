@@ -1,11 +1,15 @@
 import { condition, defineQuery, defineSignal, proxyActivities, setHandler, sleep } from '@temporalio/workflow';
-import type { BlockReason, Brakes, Routing, Stage, TaskInput, TaskStatus, VerdictKind } from '@agentops/contracts';
+import type { BlockReason, Brakes, ModelRef, Routing, Stage, TaskInput, TaskStatus, VerdictKind } from '@agentops/contracts';
 import { feedbackHash } from '@agentops/contracts';
 import { babysitDecision, nextRepairAction, parseVerdict, preImplementStages } from '@agentops/policies';
 import type { DevCycleActivities } from './activities-api';
 
 const activities = proxyActivities<DevCycleActivities>({
   startToCloseTimeout: '10 minutes',
+});
+
+const agentActivities = proxyActivities<Pick<DevCycleActivities, 'runAgent'>>({
+  startToCloseTimeout: '30 minutes',
 });
 
 export const stopSignal = defineSignal('stop');
@@ -80,31 +84,40 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
   state.workspaceRef = prepared.workspaceRef;
   state.branch = prepared.branch;
 
+  let issueBody = '';
+  if (input.issueRef) {
+    const issue = await activities.getIssue(input.issueRef);
+    issueBody = issue.body;
+  }
+
   const waitForResumeOrCancel = async (): Promise<boolean> => {
     await condition(() => cancelled || state.status === 'running');
     return cancelled;
   };
 
-type RoutableStage = keyof Routing;
+  type RoutableStage = keyof Routing;
 
   const runStageAgent = async (
     stage: RoutableStage,
     attempt: number,
     callIndex = 1,
-    modelOverride?: { backend: string; model: string },
+    modelOverride?: ModelRef,
+    extraContext: Record<string, unknown> = {},
   ): Promise<string> => {
     const routed = input.config.routing[stage];
     const model = modelOverride ?? routed;
     const backend = model?.backend ?? 'stub';
     const modelName = model?.model ?? 'stub';
-    const result = await activities.runAgent({
+    const result = await agentActivities.runAgent({
       taskId: input.taskId,
       stage,
       attempt,
       callIndex,
       backend,
       model: modelName,
+      effort: model?.effort,
       promptRef: `${stage}.md`,
+      promptContext: { taskId: input.taskId, goal: input.goal, ...extraContext },
       workspaceRef: state.workspaceRef,
       limits: { maxTokens: input.config.brakes.maxTokens, timeoutMs: 600_000 },
     });
@@ -134,26 +147,26 @@ type RoutableStage = keyof Routing;
     stage: 'full_verify' | 'review',
     attempt: number,
     sentinel: string,
-  ): Promise<VerdictKind> => {
+    extraContext: Record<string, unknown> = {},
+  ): Promise<{ kind: VerdictKind; output: string }> => {
     let lastKind: VerdictKind = 'unparseable';
+    let lastOutput = '';
     for (let call = 1; call <= MAX_VERDICT_CALLS; call += 1) {
-      const output = await runStageAgent(stage, attempt, call);
+      const output = await runStageAgent(stage, attempt, call, undefined, extraContext);
+      lastOutput = output;
       const parsed = parseVerdict(output, sentinel);
       lastKind = parsed.kind;
       if (parsed.kind !== 'unparseable') {
-        return parsed.kind;
+        return { kind: parsed.kind, output };
       }
     }
-    return lastKind === 'unparseable' ? 'fail' : lastKind;
+    return { kind: lastKind === 'unparseable' ? 'fail' : lastKind, output: lastOutput };
   };
-
-  if (input.issueRef) {
-    await activities.getIssue(input.issueRef);
-  }
 
   for (const stage of preImplementStages({ config: input.config, hasHumanDesign: false, hasHumanPlan: false })) {
     state.stage = stage;
-    await runStageAgent(stage as RoutableStage, 1);
+    const extraContext = stage === 'context' ? { issueBody } : {};
+    await runStageAgent(stage as RoutableStage, 1, 1, undefined, extraContext);
     if (cancelled) {
       state.stage = 'failed';
       state.status = 'failed';
@@ -172,21 +185,33 @@ type RoutableStage = keyof Routing;
   let exhausted = false;
   let fullVerifyVerdict: VerdictKind = 'unparseable';
   let reviewVerdict: VerdictKind | null = null;
+  let lastFullVerifyOutput = '';
+  let lastReviewOutput = '';
 
   while (true) {
     state.stage = 'implement';
     const implementModel = useEscalation ? input.config.escalation : undefined;
-    const implementOutput = await runStageAgent('implement', implementAttempt, 1, implementModel);
+    const implementOutput = await runStageAgent('implement', implementAttempt, 1, implementModel, {
+      fullVerifyFindings: lastFullVerifyOutput,
+      reviewFindings: lastReviewOutput,
+    });
     state.implementAttempts = implementAttempt;
     state.iterations += 1;
     const diffEmpty = implementOutput.trim().length === 0;
 
     state.stage = 'full_verify';
-    fullVerifyVerdict = await runVerdictStage('full_verify', implementAttempt, 'FULL:');
+    const verifyCommands =
+      [...(input.config.fastVerifyCommands ?? []), ...(input.config.fullVerifyCommands ?? [])].join('\n') ||
+      '(none configured — use your own judgment on the diff)';
+    const fullVerifyResult = await runVerdictStage('full_verify', implementAttempt, 'FULL:', { verifyCommands });
+    fullVerifyVerdict = fullVerifyResult.kind;
+    lastFullVerifyOutput = fullVerifyResult.output;
 
     if (fullVerifyVerdict === 'pass') {
       state.stage = 'review';
-      reviewVerdict = await runVerdictStage('review', reviewAttempt, 'VERDICT:');
+      const reviewResult = await runVerdictStage('review', reviewAttempt, 'VERDICT:');
+      reviewVerdict = reviewResult.kind;
+      lastReviewOutput = reviewResult.output;
       reviewAttempt += 1;
     } else {
       reviewVerdict = null;
@@ -279,7 +304,10 @@ type RoutableStage = keyof Routing;
       state.babysitRounds += 1;
       implementAttempt += 1;
       state.stage = 'implement';
-      await runStageAgent('implement', implementAttempt);
+      await runStageAgent('implement', implementAttempt, 1, undefined, {
+        fullVerifyFindings: lastFullVerifyOutput,
+        reviewFindings: lastReviewOutput,
+      });
       state.implementAttempts = implementAttempt;
       state.iterations += 1;
       await activities.pushBranch(state.workspaceRef, state.branch, `${input.taskId}-${implementAttempt}`);

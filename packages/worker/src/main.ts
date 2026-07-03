@@ -2,6 +2,7 @@ import { NativeConnection } from '@temporalio/worker';
 import { createActivities, InMemoryStageResultStore, InMemoryStatsStore, MemoryWorkspaceManager } from '@agentops/activities';
 import { StubBackend } from '@agentops/backends';
 import { MemoryScmPort, MemoryTrackerPort } from '@agentops/ports';
+import { PromptPack } from '@agentops/prompts';
 import type { DevCycleActivities } from '@agentops/workflows';
 import { createWorker } from './create-worker';
 
@@ -17,6 +18,7 @@ async function main(): Promise<void> {
     stats: new InMemoryStatsStore(),
     stageResults: new InMemoryStageResultStore(),
     workspaces: new MemoryWorkspaceManager(),
+    prompts: new PromptPack(),
   });
 
   const worker = await createWorker({

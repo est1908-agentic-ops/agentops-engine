@@ -19,6 +19,7 @@
     "@agentops/backends": "workspace:*",
     "@agentops/contracts": "workspace:*",
     "@agentops/ports": "workspace:*",
+    "@agentops/prompts": "workspace:*",
     "@agentops/worker": "workspace:*",
     "@agentops/workflows": "workspace:*",
     "@temporalio/testing": "^1.11.0",

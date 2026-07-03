@@ -3,7 +3,7 @@ import path from 'node:path';
 
 export default defineConfig({
   test: {
-    include: ['packages/*/src/**/*.test.ts'],
+    include: ['packages/*/src/**/*.test.ts', 'packages/cli/src/**/*.test.ts'],
   },
   resolve: {
     alias: {
@@ -12,6 +12,7 @@ export default defineConfig({
       '@agentops/ports': path.resolve(__dirname, 'packages/ports/src/index.ts'),
       '@agentops/backends': path.resolve(__dirname, 'packages/backends/src/index.ts'),
       '@agentops/activities': path.resolve(__dirname, 'packages/activities/src/index.ts'),
+      '@agentops/prompts': path.resolve(__dirname, 'packages/prompts/src/index.ts'),
       '@agentops/workflows': path.resolve(__dirname, 'packages/workflows/src/index.ts'),
     },
   },

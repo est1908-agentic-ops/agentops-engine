@@ -9,6 +9,7 @@ import {
 } from '@agentops/activities';
 import { StubBackend } from '@agentops/backends';
 import { MemoryScmPort, MemoryTrackerPort } from '@agentops/ports';
+import { PromptPack } from '@agentops/prompts';
 import type { DevCycleActivities, DevCycleState } from '@agentops/workflows';
 import { createWorker } from '@agentops/worker';
 
@@ -47,6 +48,7 @@ export async function buildTestEnv(): Promise<TestEnv> {
     stats,
     stageResults,
     workspaces,
+    prompts: new PromptPack(),
   });
 
   const taskQueue = nextTaskQueue();

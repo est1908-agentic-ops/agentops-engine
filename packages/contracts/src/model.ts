@@ -3,6 +3,7 @@ import { z } from 'zod';
 export const ModelRefSchema = z.object({
   backend: z.enum(['claude', 'cursor', 'pi', 'codex', 'stub']),
   model: z.string().min(1),
+  effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
 });
 export type ModelRef = z.infer<typeof ModelRefSchema>;
 

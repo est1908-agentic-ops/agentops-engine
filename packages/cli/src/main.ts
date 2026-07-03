@@ -1,17 +1,30 @@
 import { Client, Connection } from '@temporalio/client';
 import type { TaskInput } from '@agentops/contracts';
+import { MemoryScmPort } from '@agentops/ports';
 import { cancelSignal, clarifySignal, devCycle, resumeSignal, stateQuery, stopSignal } from '@agentops/workflows';
+import { loadProductConfig } from './load-product-config';
 
 const TASK_QUEUE = 'agentops-devcycle';
 
-function defaultConfig(): TaskInput['config'] {
-  return {
-    fastVerifyCommands: ['pnpm lint'],
-    fullVerifyCommands: ['pnpm test'],
-    stages: {},
-    routing: {},
-    brakes: { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 },
-  };
+export function seedDemoAgentopsConfig(scm: MemoryScmPort, repo: string): void {
+  const stubRoute = { backend: 'stub', model: 'stub-v1' };
+  scm.seedFile(
+    repo,
+    'agentops.json',
+    JSON.stringify({
+      fastVerifyCommands: ['pnpm lint'],
+      fullVerifyCommands: ['pnpm test'],
+      routing: {
+        context: stubRoute,
+        assess: stubRoute,
+        design: stubRoute,
+        plan: stubRoute,
+        implement: stubRoute,
+        full_verify: stubRoute,
+        review: stubRoute,
+      },
+    }),
+  );
 }
 
 async function getClient(): Promise<Client> {
@@ -21,7 +34,10 @@ async function getClient(): Promise<Client> {
 
 async function cmdStart(taskId: string, goal: string, product: string, repo: string, issueRef?: string): Promise<void> {
   const client = await getClient();
-  const input: TaskInput = { taskId, product, repo, issueRef, goal, config: defaultConfig() };
+  const scm = new MemoryScmPort();
+  seedDemoAgentopsConfig(scm, repo);
+  const config = await loadProductConfig(scm, repo);
+  const input: TaskInput = { taskId, product, repo, issueRef, goal, config };
   const handle = await client.workflow.start(devCycle, { taskQueue: TASK_QUEUE, workflowId: taskId, args: [input] });
   console.log(`started ${handle.workflowId}`);
 }
@@ -76,7 +92,9 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}

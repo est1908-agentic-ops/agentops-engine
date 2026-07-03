@@ -1,5 +1,5 @@
 {
-  "name": "@agentops/ports",
+  "name": "@agentops/prompts",
   "version": "0.0.0",
   "private": true,
   "main": "src/index.ts",
@@ -8,8 +8,5 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "tsc -p tsconfig.json"
   },
-  "dependencies": {
-    "@agentops/contracts": "workspace:*",
-    "octokit": "^4.1.0"
-  }
+  "dependencies": {}
 }

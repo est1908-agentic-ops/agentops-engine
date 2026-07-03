@@ -1,6 +1,7 @@
 import type { AgentBackend } from '@agentops/backends';
 import type { Issue, OpenPrRequest, OpenPrResult, ScmPort, TrackerPort } from '@agentops/ports';
 import type { AgentRunRequest, AgentRunResult, PrFeedback, RunStats } from '@agentops/contracts';
+import type { PromptPack } from '@agentops/prompts';
 import type { StageResultRecord, StageResultStore } from './stage-result-store';
 import type { StatsStore } from './stats-store';
 import type { PreparedWorkspace, Workspaces } from './workspace/workspace-manager';
@@ -12,6 +13,7 @@ export interface ActivityDependencies {
   stats: StatsStore;
   stageResults: StageResultStore;
   workspaces: Workspaces;
+  prompts: PromptPack;
 }
 
 export function createActivities(deps: ActivityDependencies) {
@@ -21,7 +23,19 @@ export function createActivities(deps: ActivityDependencies) {
       if (!backend) {
         throw new Error(`createActivities.runAgent: unknown backend "${req.backend}"`);
       }
-      return backend.run(req);
+      const prompt = deps.prompts.render(req.promptRef, req.promptContext);
+      return backend.run({
+        taskId: req.taskId,
+        stage: req.stage,
+        attempt: req.attempt,
+        callIndex: req.callIndex,
+        backend: req.backend,
+        model: req.model,
+        effort: req.effort,
+        workspaceRef: req.workspaceRef,
+        limits: req.limits,
+        prompt,
+      });
     },
     async getIssue(ref: string): Promise<Issue> {
       return deps.tracker.getIssue(ref);

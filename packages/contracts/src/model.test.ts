@@ -12,6 +12,18 @@ describe('ModelRefSchema', () => {
   it('rejects a blank model name', () => {
     expect(() => ModelRefSchema.parse({ backend: 'stub', model: '' })).toThrow();
   });
+
+  it('accepts an optional effort level', () => {
+    expect(() => ModelRefSchema.parse({ backend: 'claude', model: 'claude-sonnet-5', effort: 'high' })).not.toThrow();
+  });
+
+  it('accepts a ModelRef with no effort at all', () => {
+    expect(() => ModelRefSchema.parse({ backend: 'claude', model: 'claude-sonnet-5' })).not.toThrow();
+  });
+
+  it('rejects an invalid effort level', () => {
+    expect(() => ModelRefSchema.parse({ backend: 'claude', model: 'claude-sonnet-5', effort: 'extreme' })).toThrow();
+  });
 });
 
 describe('BrakesSchema', () => {

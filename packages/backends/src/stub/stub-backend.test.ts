@@ -5,7 +5,7 @@ const baseRequest = {
   taskId: 'task-1',
   backend: 'stub',
   model: 'stub-v1',
-  promptRef: 'implement.md',
+  prompt: 'rendered prompt text',
   workspaceRef: 'demo/repo',
   limits: { maxTokens: 1000, timeoutMs: 60_000 },
 } as const;
