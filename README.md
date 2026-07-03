@@ -15,7 +15,40 @@ Its sibling repo **`agentops-platform`** holds the GitOps state (ArgoCD apps, He
 
 ## Status
 
-Pre-M0. Nothing is implemented yet — the next commit after this scaffold should start the M0 walking skeleton per [docs/M0-SPEC.md](docs/M0-SPEC.md).
+M0 walking skeleton implemented: the full DevCycle pipeline runs end-to-end against in-memory
+stubs (`pnpm e2e`), zero token spend, no cluster, no real forge. See
+[docs/M0-SPEC.md](docs/M0-SPEC.md) for what "M0" covers and [docs/MILESTONES.md](docs/MILESTONES.md)
+for what comes next (M1: a real `claude` backend + GitHub ports).
+
+## Quick start
+
+```bash
+pnpm install
+pnpm lint && pnpm typecheck && pnpm test && pnpm test:policies-coverage
+pnpm e2e
+```
+
+`pnpm e2e` runs the four required M0 scenarios against `TestWorkflowEnvironment` (time-skipping) —
+no running Temporal server needed.
+
+To run the pipeline manually against a local Temporal dev server:
+
+```bash
+# terminal 1
+temporal server start-dev
+
+# terminal 2
+pnpm --filter @agentops/worker run start
+
+# terminal 3
+pnpm --filter @agentops/cli run cli start demo-task-1 "Add a widget"
+pnpm --filter @agentops/cli run cli state demo-task-1
+pnpm --filter @agentops/cli run cli signal demo-task-1 resume
+```
+
+The manual run uses the `stub` backend and in-memory tracker/scm ports (same as `pnpm e2e`) — it
+exercises the real Temporal server and worker process, but still spends zero tokens and touches no
+real repo.
 
 ## Target package layout (from ARCHITECTURE.md §5.9)
 

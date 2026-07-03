@@ -1,0 +1,12 @@
+export interface Issue {
+  ref: string;
+  title: string;
+  body: string;
+  labels: string[];
+}
+
+export interface TrackerPort {
+  getIssue(ref: string): Promise<Issue>;
+  comment(ref: string, body: string): Promise<void>;
+  label(ref: string, label: string): Promise<void>;
+}

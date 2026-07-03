@@ -1,0 +1,36 @@
+import type { AgentRunRequest, AgentRunResult, PrFeedback, RunStats, StageResult } from '@agentops/contracts';
+
+export interface Issue {
+  ref: string;
+  title: string;
+  body: string;
+  labels: string[];
+}
+
+export interface OpenPrRequest {
+  repo: string;
+  branch: string;
+  title: string;
+  body: string;
+}
+
+export interface OpenPrResult {
+  prRef: string;
+  url: string;
+}
+
+export interface StageResultRecord extends StageResult {
+  taskId: string;
+}
+
+export interface DevCycleActivities {
+  runAgent(req: AgentRunRequest): Promise<AgentRunResult>;
+  getIssue(ref: string): Promise<Issue>;
+  commentOnIssue(ref: string, body: string): Promise<void>;
+  labelIssue(ref: string, label: string): Promise<void>;
+  openPr(req: OpenPrRequest): Promise<OpenPrResult>;
+  getPrFeedback(prRef: string): Promise<PrFeedback>;
+  pushBranch(branch: string, contentHash: string): Promise<void>;
+  recordStageResult(result: StageResultRecord): Promise<void>;
+  recordRunStats(stats: RunStats): Promise<void>;
+}

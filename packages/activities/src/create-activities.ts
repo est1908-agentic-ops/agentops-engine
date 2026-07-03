@@ -1,0 +1,51 @@
+import type { AgentBackend } from '@agentops/backends';
+import type { Issue, OpenPrRequest, OpenPrResult, ScmPort, TrackerPort } from '@agentops/ports';
+import type { AgentRunRequest, AgentRunResult, PrFeedback, RunStats } from '@agentops/contracts';
+import type { StageResultRecord, StageResultStore } from './stage-result-store';
+import type { StatsStore } from './stats-store';
+
+export interface ActivityDependencies {
+  backends: Record<string, AgentBackend>;
+  tracker: TrackerPort;
+  scm: ScmPort;
+  stats: StatsStore;
+  stageResults: StageResultStore;
+}
+
+export function createActivities(deps: ActivityDependencies) {
+  return {
+    async runAgent(req: AgentRunRequest): Promise<AgentRunResult> {
+      const backend = deps.backends[req.backend];
+      if (!backend) {
+        throw new Error(`createActivities.runAgent: unknown backend "${req.backend}"`);
+      }
+      return backend.run(req);
+    },
+    async getIssue(ref: string): Promise<Issue> {
+      return deps.tracker.getIssue(ref);
+    },
+    async commentOnIssue(ref: string, body: string): Promise<void> {
+      await deps.tracker.comment(ref, body);
+    },
+    async labelIssue(ref: string, label: string): Promise<void> {
+      await deps.tracker.label(ref, label);
+    },
+    async openPr(req: OpenPrRequest): Promise<OpenPrResult> {
+      return deps.scm.openPr(req);
+    },
+    async getPrFeedback(prRef: string): Promise<PrFeedback> {
+      return deps.scm.getPrFeedback(prRef);
+    },
+    async pushBranch(branch: string, contentHash: string): Promise<void> {
+      await deps.scm.push(branch, contentHash);
+    },
+    async recordStageResult(result: StageResultRecord): Promise<void> {
+      deps.stageResults.record(result);
+    },
+    async recordRunStats(stats: RunStats): Promise<void> {
+      deps.stats.record(stats);
+    },
+  };
+}
+
+export type Activities = ReturnType<typeof createActivities>;
