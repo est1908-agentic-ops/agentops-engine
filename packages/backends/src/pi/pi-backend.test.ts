@@ -2,8 +2,8 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { BackendRunRequest } from '@agentops/contracts';
-import { PiBackend } from './pi-backend';
-import { ProcessCliAuthError, ProcessCliProcessError, ProcessCliTimeoutError } from '../process-cli-backend';
+import { createPiCliSpec } from './pi-backend';
+import { ProcessCliAuthError, ProcessCliProcessError, ProcessCliTimeoutError, ProcessCliRunner } from '../process-cli-runner';
 
 const baseRequest: BackendRunRequest = {
   taskId: 't1',
@@ -51,7 +51,7 @@ describe('PiBackend', () => {
       });
       return child;
     });
-    const backend = new PiBackend({ spawn: spawnFn as never });
+    const backend = new ProcessCliRunner(createPiCliSpec(), { spawn: spawnFn as never });
 
     const result = await backend.run(baseRequest);
 
@@ -71,7 +71,7 @@ describe('PiBackend', () => {
       });
       return child;
     });
-    const backend = new PiBackend({ spawn: spawnFn as never });
+    const backend = new ProcessCliRunner(createPiCliSpec(), { spawn: spawnFn as never });
 
     const result = await backend.run(baseRequest);
 
@@ -89,7 +89,7 @@ describe('PiBackend', () => {
       });
       return child;
     });
-    const backend = new PiBackend({ spawn: spawnFn as never });
+    const backend = new ProcessCliRunner(createPiCliSpec(), { spawn: spawnFn as never });
 
     await expect(backend.run(baseRequest)).rejects.toThrow(ProcessCliAuthError);
   });
@@ -104,7 +104,7 @@ describe('PiBackend', () => {
       });
       return child;
     });
-    const backend = new PiBackend({ spawn: spawnFn as never });
+    const backend = new ProcessCliRunner(createPiCliSpec(), { spawn: spawnFn as never });
 
     await expect(backend.run(baseRequest)).rejects.toThrow(ProcessCliProcessError);
   });
@@ -112,7 +112,7 @@ describe('PiBackend', () => {
   it('throws ProcessCliTimeoutError when the process hangs', async () => {
     const { child, killedSignals } = fakeChildProcess();
     const spawnFn = vi.fn(() => child);
-    const backend = new PiBackend({ spawn: spawnFn as never, killGraceMs: 10 });
+    const backend = new ProcessCliRunner(createPiCliSpec(), { spawn: spawnFn as never, killGraceMs: 10 });
 
     await expect(
       backend.run({ ...baseRequest, limits: { maxTokens: 1000, timeoutMs: 20 } }),

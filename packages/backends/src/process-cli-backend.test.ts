@@ -2,12 +2,13 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentRunResult, BackendRunRequest } from '@agentops/contracts';
+import type { CliSpec } from './cli-spec';
 import {
-  ProcessCliBackend,
   ProcessCliAuthError,
   ProcessCliProcessError,
+  ProcessCliRunner,
   ProcessCliTimeoutError,
-} from './process-cli-backend';
+} from './process-cli-runner';
 
 const baseRequest: BackendRunRequest = {
   taskId: 't1',
@@ -21,11 +22,13 @@ const baseRequest: BackendRunRequest = {
   prompt: 'do the thing',
 };
 
-class TestCliBackend extends ProcessCliBackend {
-  protected buildArgs(req: BackendRunRequest): string[] {
+const testCliSpec: CliSpec = {
+  image: 'example/test-cli:latest',
+  binary: 'test-cli',
+  buildArgs(req: BackendRunRequest): string[] {
     return ['--run', req.model];
-  }
-  protected parseOutput(stdout: string, stderr: string, elapsedMs: number): AgentRunResult {
+  },
+  parseOutput(stdout: string, stderr: string, elapsedMs: number): AgentRunResult {
     try {
       const parsed = JSON.parse(stdout) as { text?: string; tokens?: number };
       if (typeof parsed.text !== 'string') throw new Error('no text');
@@ -33,11 +36,11 @@ class TestCliBackend extends ProcessCliBackend {
     } catch {
       return { output: stdout || stderr, tokensIn: 0, tokensOut: 0, wallMs: elapsedMs };
     }
-  }
-  protected isAuthError(stderr: string): boolean {
+  },
+  isAuthError(stderr: string): boolean {
     return /unauthorized/i.test(stderr);
-  }
-}
+  },
+};
 
 function fakeChildProcess() {
   const child = new EventEmitter() as EventEmitter & {
@@ -58,7 +61,7 @@ function fakeChildProcess() {
   return { child, killedSignals, stdinWrites };
 }
 
-describe('ProcessCliBackend', () => {
+describe('ProcessCliRunner', () => {
   it('spawns with buildArgs output and pipes the prompt via stdin', async () => {
     const { child, stdinWrites } = fakeChildProcess();
     const calls: { command: string; args: string[] }[] = [];
@@ -71,7 +74,7 @@ describe('ProcessCliBackend', () => {
       });
       return child;
     });
-    const backend = new TestCliBackend({ executablePath: 'test-cli', spawn: spawnFn as never });
+    const backend = new ProcessCliRunner(testCliSpec, { spawn: spawnFn as never });
 
     const result = await backend.run(baseRequest);
 
@@ -90,7 +93,7 @@ describe('ProcessCliBackend', () => {
       });
       return child;
     });
-    const backend = new TestCliBackend({ executablePath: 'test-cli', spawn: spawnFn as never });
+    const backend = new ProcessCliRunner(testCliSpec, { spawn: spawnFn as never });
 
     const result = await backend.run(baseRequest);
 
@@ -107,7 +110,7 @@ describe('ProcessCliBackend', () => {
       });
       return child;
     });
-    const backend = new TestCliBackend({ executablePath: 'test-cli', spawn: spawnFn as never });
+    const backend = new ProcessCliRunner(testCliSpec, { spawn: spawnFn as never });
 
     await expect(backend.run(baseRequest)).rejects.toThrow(ProcessCliAuthError);
   });
@@ -122,7 +125,7 @@ describe('ProcessCliBackend', () => {
       });
       return child;
     });
-    const backend = new TestCliBackend({ executablePath: 'test-cli', spawn: spawnFn as never });
+    const backend = new ProcessCliRunner(testCliSpec, { spawn: spawnFn as never });
 
     await expect(backend.run(baseRequest)).rejects.toThrow(ProcessCliProcessError);
   });
@@ -130,7 +133,7 @@ describe('ProcessCliBackend', () => {
   it('throws ProcessCliTimeoutError and sends SIGTERM when the process hangs', async () => {
     const { child, killedSignals } = fakeChildProcess();
     const spawnFn = vi.fn(() => child);
-    const backend = new TestCliBackend({ executablePath: 'test-cli', spawn: spawnFn as never, killGraceMs: 10 });
+    const backend = new ProcessCliRunner(testCliSpec, { spawn: spawnFn as never, killGraceMs: 10 });
 
     await expect(
       backend.run({ ...baseRequest, limits: { maxTokens: 1000, timeoutMs: 20 } }),

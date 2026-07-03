@@ -66,6 +66,33 @@ override. Render it locally with:
 helm template engine charts/engine --namespace dev-agents
 ```
 
+## In-cluster runbook (M2 gate)
+
+After `agentops-platform` bootstrap and ArgoCD sync (see that repo's `docs/BOOTSTRAP.md`):
+
+1. Confirm ArgoCD Applications are `Healthy` / `Synced`.
+2. Port-forward Temporal from your laptop (no external gRPC ingress in M2):
+
+```bash
+kubectl port-forward svc/temporal-frontend 7233:7233 -n temporal &
+TEMPORAL_ADDRESS=localhost:7233 pnpm --filter @agentops/cli engine start \
+  --issue owner/repo#42 --repo owner/repo --product my-product --goal "..."
+```
+
+3. Watch agent invocations run as Jobs, not local processes:
+
+```bash
+kubectl get jobs -n dev-agents -w
+```
+
+4. Verify the PR reaches merge-ready with green CI (same M1 test repo).
+
+5. Re-run M1's brake/escalation test (`maxTokens` deliberately low) in-cluster.
+
+6. Wipe the host (or reprovision the disposable VM) and repeat from step 1 — this is the literal M2 gate.
+
+External Temporal access for automation (Gateway webhooks) is M3, not deferred by accident.
+
 ## Layout
 
 `packages/{contracts,ports,backends,policies,workflows,activities,worker,cli}` — workflows are deterministic policy; activities are all I/O. See [ARCHITECTURE.md §5.9](docs/ARCHITECTURE.md) for the full tree.

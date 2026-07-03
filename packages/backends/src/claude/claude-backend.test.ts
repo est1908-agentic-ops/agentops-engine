@@ -2,7 +2,8 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { BackendRunRequest } from '@agentops/contracts';
-import { ClaudeBackend, ClaudeBackendAuthError, ClaudeBackendProcessError, ClaudeBackendTimeoutError } from './claude-backend';
+import { ClaudeBackendAuthError, ClaudeBackendProcessError, ClaudeBackendTimeoutError, createClaudeCliSpec } from './claude-backend';
+import { ProcessCliRunner } from '../process-cli-runner';
 
 const baseRequest: BackendRunRequest = {
   taskId: 't1',
@@ -52,7 +53,7 @@ describe('ClaudeBackend', () => {
       });
       return child;
     });
-    const backend = new ClaudeBackend({ spawn: spawnFn as never });
+    const backend = new ProcessCliRunner(createClaudeCliSpec(), { spawn: spawnFn as never });
 
     await backend.run(baseRequest);
 
@@ -82,7 +83,7 @@ describe('ClaudeBackend', () => {
       });
       return child;
     });
-    const backend = new ClaudeBackend({ spawn: spawnFn as never });
+    const backend = new ProcessCliRunner(createClaudeCliSpec(), { spawn: spawnFn as never });
 
     await backend.run({ ...baseRequest, effort: 'high' });
 
@@ -102,7 +103,7 @@ describe('ClaudeBackend', () => {
       });
       return child;
     });
-    const backend = new ClaudeBackend({ spawn: spawnFn as never });
+    const backend = new ProcessCliRunner(createClaudeCliSpec(), { spawn: spawnFn as never });
 
     const result = await backend.run(baseRequest);
 
@@ -119,7 +120,7 @@ describe('ClaudeBackend', () => {
       });
       return child;
     });
-    const backend = new ClaudeBackend({ spawn: spawnFn as never });
+    const backend = new ProcessCliRunner(createClaudeCliSpec(), { spawn: spawnFn as never });
 
     const result = await backend.run(baseRequest);
 
@@ -140,7 +141,7 @@ describe('ClaudeBackend', () => {
       });
       return child;
     });
-    const backend = new ClaudeBackend({ spawn: spawnFn as never });
+    const backend = new ProcessCliRunner(createClaudeCliSpec(), { spawn: spawnFn as never });
 
     const result = await backend.run(baseRequest);
 
@@ -157,7 +158,7 @@ describe('ClaudeBackend', () => {
       });
       return child;
     });
-    const backend = new ClaudeBackend({ spawn: spawnFn as never });
+    const backend = new ProcessCliRunner(createClaudeCliSpec(), { spawn: spawnFn as never });
 
     await expect(backend.run(baseRequest)).rejects.toThrow(ClaudeBackendProcessError);
   });
@@ -172,7 +173,7 @@ describe('ClaudeBackend', () => {
       });
       return child;
     });
-    const backend = new ClaudeBackend({ spawn: spawnFn as never });
+    const backend = new ProcessCliRunner(createClaudeCliSpec(), { spawn: spawnFn as never });
 
     await expect(backend.run(baseRequest)).rejects.toThrow(ClaudeBackendAuthError);
   });
@@ -180,7 +181,7 @@ describe('ClaudeBackend', () => {
   it('throws ClaudeBackendTimeoutError and sends SIGTERM when the process outlives the timeout', async () => {
     const { child, killedSignals } = fakeChildProcess();
     const spawnFn = vi.fn(() => child);
-    const backend = new ClaudeBackend({ spawn: spawnFn as never, killGraceMs: 10 });
+    const backend = new ProcessCliRunner(createClaudeCliSpec(), { spawn: spawnFn as never, killGraceMs: 10 });
 
     await expect(backend.run({ ...baseRequest, limits: { maxTokens: 1000, timeoutMs: 20 } })).rejects.toThrow(
       ClaudeBackendTimeoutError,

@@ -1,39 +1,36 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import type { AgentRunResult, BackendRunRequest } from '@agentops/contracts';
 import type { AgentBackend } from './agent-backend';
+import type { CliSpec } from './cli-spec';
 
 export class ProcessCliProcessError extends Error {}
 export class ProcessCliTimeoutError extends Error {}
 export class ProcessCliAuthError extends Error {}
 
-export interface ProcessCliBackendOptions {
-  executablePath: string;
+export interface ProcessCliRunnerOptions {
   spawn?: typeof nodeSpawn;
   env?: NodeJS.ProcessEnv;
   killGraceMs?: number;
 }
 
-export abstract class ProcessCliBackend implements AgentBackend {
-  protected readonly executablePath: string;
+export class ProcessCliRunner implements AgentBackend {
   private readonly spawnFn: typeof nodeSpawn;
   private readonly env?: NodeJS.ProcessEnv;
   private readonly killGraceMs: number;
 
-  constructor(opts: ProcessCliBackendOptions) {
-    this.executablePath = opts.executablePath;
+  constructor(
+    private readonly spec: CliSpec,
+    opts: ProcessCliRunnerOptions = {},
+  ) {
     this.spawnFn = opts.spawn ?? nodeSpawn;
     this.env = opts.env;
     this.killGraceMs = opts.killGraceMs ?? 5000;
   }
 
-  protected abstract buildArgs(req: BackendRunRequest): string[];
-  protected abstract parseOutput(stdout: string, stderr: string, elapsedMs: number): AgentRunResult;
-  protected abstract isAuthError(stderr: string): boolean;
-
   async run(req: BackendRunRequest): Promise<AgentRunResult> {
-    const args = this.buildArgs(req);
+    const args = this.spec.buildArgs(req);
     const start = Date.now();
-    const child = this.spawnFn(this.executablePath, args, {
+    const child = this.spawnFn(this.spec.binary, args, {
       cwd: req.workspaceRef,
       env: this.env ?? process.env,
     });
@@ -55,7 +52,7 @@ export abstract class ProcessCliBackend implements AgentBackend {
         child.kill('SIGTERM');
         setTimeout(() => child.kill('SIGKILL'), this.killGraceMs);
         settle(() =>
-          reject(new ProcessCliTimeoutError(`${this.executablePath} timed out after ${req.limits.timeoutMs}ms`)),
+          reject(new ProcessCliTimeoutError(`${this.spec.binary} timed out after ${req.limits.timeoutMs}ms`)),
         );
       }, req.limits.timeoutMs);
 
@@ -67,26 +64,26 @@ export abstract class ProcessCliBackend implements AgentBackend {
       });
 
       child.on('error', (err: Error) => {
-        settle(() => reject(new ProcessCliProcessError(`failed to spawn ${this.executablePath}: ${err.message}`)));
+        settle(() => reject(new ProcessCliProcessError(`failed to spawn ${this.spec.binary}: ${err.message}`)));
       });
 
       child.on('close', (exitCode: number | null) => {
         settle(() => {
           const wallMs = Date.now() - start;
 
-          if (this.isAuthError(stderr)) {
+          if (this.spec.isAuthError(stderr)) {
             reject(new ProcessCliAuthError(stderr.trim()));
             return;
           }
           if (stdout.trim().length === 0 && (exitCode ?? 1) !== 0) {
             reject(
               new ProcessCliProcessError(
-                `${this.executablePath} exited ${exitCode} with no output: ${stderr.trim()}`,
+                `${this.spec.binary} exited ${exitCode} with no output: ${stderr.trim()}`,
               ),
             );
             return;
           }
-          resolve(this.parseOutput(stdout, stderr, wallMs));
+          resolve(this.spec.parseOutput(stdout, stderr, wallMs));
         });
       });
     });
