@@ -60,5 +60,7 @@ describe('DevCycle e2e: happy path with one repair round', () => {
     expect(stats.all().filter((s) => s.stage === 'implement')).toHaveLength(3);
     expect(stats.all().filter((s) => s.stage === 'full_verify')).toHaveLength(2);
     expect(stats.all().filter((s) => s.stage === 'review')).toHaveLength(1);
+    expect(testEnv.workspaces.isPrepared(finalState.workspaceRef)).toBe(true);
+    expect(testEnv.workspaces.isCleanedUp(finalState.workspaceRef)).toBe(true);
   });
 });
