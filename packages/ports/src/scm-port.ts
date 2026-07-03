@@ -15,6 +15,6 @@ export interface OpenPrResult {
 export interface ScmPort {
   openPr(req: OpenPrRequest): Promise<OpenPrResult>;
   getPrFeedback(prRef: string): Promise<PrFeedback>;
-  push(branch: string, contentHash: string): Promise<void>;
+  push(workspaceRef: string, branch: string, contentHash: string): Promise<void>;
   readFile(repo: string, path: string): Promise<string | null>;
 }
