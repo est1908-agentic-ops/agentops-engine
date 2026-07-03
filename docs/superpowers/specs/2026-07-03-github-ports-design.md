@@ -7,7 +7,7 @@ Milestone: M1, sub-project 3 of 5 (see [claude-backend design](2026-07-03-claude
 
 `TrackerPort` and `ScmPort` (packages/ports) are implemented today only by `MemoryTrackerPort`/`MemoryScmPort` — scriptable fixtures for tests. M1 needs real adapters against GitHub, since AGENTS.md hard rule 4 is explicit: "Nothing outside `ports/` may import a forge/tracker SDK or call their APIs." This doc designs `GithubTrackerPort` and `GithubScmPort`.
 
-Depends on nothing else in M1. [Worktree activities](2026-07-03-worktree-activities-design.md) depends on this doc only insofar as `push`'s real implementation lives here and needs the `workspaceRef` parameter that doc adds to the `ScmPort.push` signature. [Config loading](2026-07-03-agentops-config-loading-design.md) depends on this doc's `readFile`.
+Depends on [worktree activities](2026-07-03-worktree-activities-design.md) for two things it defines: the `ScmPort.push` signature (`workspaceRef` parameter) and the `GitCommandRunner` interface `push`'s real implementation runs against — so this sub-project should be implemented after that one lands. [Config loading](2026-07-03-agentops-config-loading-design.md) in turn depends on this doc's `readFile`.
 
 ## Goal
 
@@ -50,7 +50,11 @@ export class GithubTrackerPort implements TrackerPort {
 
 ```ts
 export class GithubScmPort implements ScmPort {
-  constructor(private octokit: Octokit, private git: GitRunner /* from worktree activities, injected */);
+  // GitCommandRunner is a plain interface defined in packages/ports itself (see the
+  // worktree-activities design) — no dependency on packages/activities. The concrete
+  // SpawnGitCommandRunner instance is constructed once at wiring time and shared with
+  // WorkspaceManager, so both use the exact same auth-injection behavior.
+  constructor(private octokit: Octokit, private git: GitCommandRunner);
   async openPr(req: OpenPrRequest): Promise<OpenPrResult>;
   async getPrFeedback(prRef: string): Promise<PrFeedback>;
   async push(workspaceRef: string, branch: string, contentHash: string): Promise<void>;
@@ -79,11 +83,7 @@ export class GithubScmPort implements ScmPort {
 
   `unresolvedThreads` = count of `!isResolved`; `comments[]` in `PrFeedback` = each thread's first comment mapped to `{id, body, resolved: isResolved}`. This is the detail most likely to be silently gotten wrong (REST-only implementations of "unresolved review threads" are a common bug elsewhere) — flagging it now so it isn't discovered as a mysterious "babysit never reaches merge_ready" bug during M1 integration, since `babysitDecision` depends entirely on this number being accurate.
 
-**`push`:** runs `git push` (via the same injectable `git.ts` runner [worktree activities](2026-07-03-worktree-activities-design.md) defines) inside `workspaceRef`, using the **same per-invocation `-c http.extraHeader` token pattern** that doc specifies for clone/fetch — never embed the token in the remote URL, never persist it to `.git/config`:
-
-```
-git -c http.extraHeader="Authorization: Bearer <token>" push origin <branch>
-```
+**`push`:** `this.git.run(['push', 'origin', branch], { cwd: workspaceRef })` — using the shared `GitCommandRunner` (`packages/ports`' interface, concretely a `SpawnGitCommandRunner` from [worktree activities](2026-07-03-worktree-activities-design.md)). Auth injection (the `-c http.extraHeader` pattern, never the remote URL, never persisted to `.git/config`) happens **inside** `SpawnGitCommandRunner.run` itself — this method doesn't touch tokens at all, which is deliberate: it means there's exactly one place in the whole codebase that can get the auth pattern wrong, not one per call site.
 
 `contentHash` isn't used to construct anything here (no commit message synthesis) — it's already recorded via `recordStageResult`/`recordRunStats` elsewhere for tracking; `push` just ships whatever the agent already committed in the workspace. (Implication carried over from the worktree doc: the `implement` prompt must instruct the agent to `git commit` its own changes — nothing else in this design does it.)
 
@@ -100,7 +100,7 @@ Both classes take their `Octokit` instance via constructor injection — unit te
 - `getIssue`/`comment`/`label`: ref parsing (including the malformed-ref error case), correct Octokit calls.
 - `getPrFeedback`: check-runs → each `ciStatus` value; GraphQL response → correct `unresolvedThreads` count and `comments[]` mapping (this is the test worth writing first, given it's the highest-risk mapping).
 - `readFile`: base64 decode; 404 → `null`; other error status → throws.
-- `push`: git runner invoked with the right args and the token passed via `-c`, never interpolated into the URL string anywhere in the call.
+- `push`: inject a fake `GitCommandRunner` (a two-line stub — this doc doesn't retest `SpawnGitCommandRunner`'s own auth-injection behavior, that's [worktree activities'](2026-07-03-worktree-activities-design.md) test) and assert `run(['push', 'origin', branch], {cwd: workspaceRef})` is called with exactly those args — no token handling to assert here at all, since that's centralized elsewhere.
 
 Real-API verification is a manual, documented script against a disposable throwaway test repo (same posture as the claude backend's `verify:live` script) — never part of `pnpm e2e`.
 
