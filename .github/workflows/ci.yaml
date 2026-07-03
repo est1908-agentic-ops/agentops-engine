@@ -64,11 +64,15 @@ jobs:
           context: .
           file: images/worker/Dockerfile
           push: ${{ github.ref == 'refs/heads/main' }}
-          tags: ghcr.io/${{ github.repository }}/worker:${{ github.sha }}
+          tags: |
+            ghcr.io/${{ github.repository }}/worker:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/worker:main
 
       - uses: docker/build-push-action@v6
         with:
           context: images/agent-claude
           file: images/agent-claude/Dockerfile
           push: ${{ github.ref == 'refs/heads/main' }}
-          tags: ghcr.io/${{ github.repository }}/agent-claude:${{ github.sha }}
+          tags: |
+            ghcr.io/${{ github.repository }}/agent-claude:${{ github.sha }}
+            ghcr.io/${{ github.repository }}/agent-claude:main
