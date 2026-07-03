@@ -1,7 +1,12 @@
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { Worker } from '@temporalio/worker';
 import type { WorkflowHandle } from '@temporalio/client';
-import { createActivities, InMemoryStageResultStore, InMemoryStatsStore } from '@agentops/activities';
+import {
+  createActivities,
+  InMemoryStageResultStore,
+  InMemoryStatsStore,
+  MemoryWorkspaceManager,
+} from '@agentops/activities';
 import { StubBackend } from '@agentops/backends';
 import { MemoryScmPort, MemoryTrackerPort } from '@agentops/ports';
 import type { DevCycleActivities, DevCycleState } from '@agentops/workflows';
@@ -15,6 +20,7 @@ export interface TestEnv {
   scm: MemoryScmPort;
   stats: InMemoryStatsStore;
   stageResults: InMemoryStageResultStore;
+  workspaces: MemoryWorkspaceManager;
   taskQueue: string;
 }
 
@@ -32,6 +38,7 @@ export async function buildTestEnv(): Promise<TestEnv> {
   const scm = new MemoryScmPort();
   const stats = new InMemoryStatsStore();
   const stageResults = new InMemoryStageResultStore();
+  const workspaces = new MemoryWorkspaceManager();
 
   const activities: DevCycleActivities = createActivities({
     backends: { stub },
@@ -39,6 +46,7 @@ export async function buildTestEnv(): Promise<TestEnv> {
     scm,
     stats,
     stageResults,
+    workspaces,
   });
 
   const taskQueue = nextTaskQueue();
@@ -48,7 +56,7 @@ export async function buildTestEnv(): Promise<TestEnv> {
     connection: env.nativeConnection,
   });
 
-  return { env, worker, stub, tracker, scm, stats, stageResults, taskQueue };
+  return { env, worker, stub, tracker, scm, stats, stageResults, workspaces, taskQueue };
 }
 
 export async function waitForStatus(
