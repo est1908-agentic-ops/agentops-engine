@@ -17,8 +17,14 @@ Its sibling repo **`agentops-platform`** holds the GitOps state (ArgoCD apps, He
 
 M0 walking skeleton implemented: the full DevCycle pipeline runs end-to-end against in-memory
 stubs (`pnpm e2e`), zero token spend, no cluster, no real forge. See
-[docs/M0-SPEC.md](docs/M0-SPEC.md) for what "M0" covers and [docs/MILESTONES.md](docs/MILESTONES.md)
-for what comes next (M1: a real `claude` backend + GitHub ports).
+[docs/M0-SPEC.md](docs/M0-SPEC.md) for what "M0" covers.
+
+M1's five sub-projects (`claude`/`pi` backends, GitHub ports, worktree activities, `agentops.json`
+config loading) are implemented and unit-tested. The remaining piece — wiring them together into a
+working `engine start --issue N` path — is designed in
+[docs/superpowers/specs/2026-07-03-m1-wiring-design.md](docs/superpowers/specs/2026-07-03-m1-wiring-design.md)
+and not yet landed; until it does, the commands below still only exercise the in-memory demo path.
+See [docs/MILESTONES.md](docs/MILESTONES.md) for the full build order.
 
 ## Quick start
 
@@ -49,6 +55,31 @@ pnpm --filter @agentops/cli run cli signal demo-task-1 resume
 The manual run uses the `stub` backend and in-memory tracker/scm ports (same as `pnpm e2e`) — it
 exercises the real Temporal server and worker process, but still spends zero tokens and touches no
 real repo.
+
+## Running against a real repo (M1 target — pending the wiring plan)
+
+Once [the M1 wiring design](docs/superpowers/specs/2026-07-03-m1-wiring-design.md) lands, the same
+worker and CLI switch to real GitHub ports, a real `WorkspaceManager`, and the `claude`/`pi`
+backends based on a single signal: whether `GITHUB_TOKEN` is set. No token → the demo path above,
+unchanged. Token set → live mode, with a startup log line confirming which mode is active. Expected
+usage once implemented:
+
+```bash
+# terminal 1
+temporal server start-dev
+
+# terminal 2
+GITHUB_TOKEN=<token> pnpm --filter @agentops/worker run start
+
+# terminal 3
+GITHUB_TOKEN=<token> pnpm --filter @agentops/cli run engine start \
+  --issue owner/repo#42 --repo owner/repo --product my-product --goal "..."
+```
+
+**This spends real tokens and opens a real PR** — only point `--repo` at a disposable test repo, and
+make sure the product's `agentops.json` routing is set the way you intend before running it. Until
+the wiring plan lands, `engine`/`--issue`/`--repo`/`--product`/`--goal` don't exist yet; use the demo
+`cli start <taskId> <goal> [product] [repo] [issueRef]` form above instead.
 
 ## Target package layout (from ARCHITECTURE.md §5.9)
 
