@@ -1,7 +1,7 @@
 # GitHub Ports — Design
 
 Status: draft · 2026-07-03 · Owner: Artem
-Milestone: M1, sub-project 3 of 4 (see [claude-backend design](2026-07-03-claude-backend-design.md) for the full decomposition)
+Milestone: M1, sub-project 3 of 5 (see [claude-backend design](2026-07-03-claude-backend-design.md) for the full decomposition)
 
 ## Context
 

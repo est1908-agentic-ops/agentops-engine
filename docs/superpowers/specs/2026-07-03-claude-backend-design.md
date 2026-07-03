@@ -1,18 +1,19 @@
 # Claude Backend — Design
 
 Status: draft · 2026-07-03 · Owner: Artem
-Milestone: M1, sub-project 1 of 4 (see decomposition below)
+Milestone: M1, sub-project 1 of 5 (see decomposition below)
 
 ## Context
 
-M0 shipped the full DevCycle pipeline (`context → design → plan → implement ⇄ full_verify → review → pr → pr_babysit → done`) running entirely against the `stub` `AgentBackend` and in-memory `TrackerPort`/`ScmPort`. M1's done-criterion (ARCHITECTURE.md §8.1) is a real issue becoming a real merge-ready PR. That milestone bundles four largely independent subsystems:
+M0 shipped the full DevCycle pipeline (`context → design → plan → implement ⇄ full_verify → review → pr → pr_babysit → done`) running entirely against the `stub` `AgentBackend` and in-memory `TrackerPort`/`ScmPort`. M1's done-criterion (ARCHITECTURE.md §8.1) is a real issue becoming a real merge-ready PR. `ModelRefSchema.backend` already enumerates `claude | cursor | pi | codex | stub`, and ARCHITECTURE.md's own Phase 1 gate (§4) names "Agent Runner Jobs for ≥2 backends (claude, pi) + stub" — so shipping `pi` alongside `claude` in M1 rather than deferring it to M5 (as the M1–M9 milestone table originally suggested) actually resolves an inconsistency between those two sections, not just an added scope. That milestone now bundles five largely independent subsystems:
 
 1. **Claude backend** — this doc.
-2. GitHub ports (real `TrackerPort`/`ScmPort`).
-3. Worktree activities (real git clone/checkout per task).
-4. `agentops.json` config loading.
+2. **[Pi backend](2026-07-03-pi-backend-design.md)** — second real `AgentBackend`, sharing this doc's process-lifecycle design.
+3. GitHub ports (real `TrackerPort`/`ScmPort`).
+4. Worktree activities (real git clone/checkout per task).
+5. `agentops.json` config loading.
 
-Each is independently designable and shippable; this doc covers only (1). Interfaces below are written so (2)–(4) plug in later without changing this design.
+Each is independently designable and shippable; this doc covers only (1). Interfaces below are written so (2)–(5) plug in later without changing this design.
 
 ## Goal
 
@@ -55,6 +56,7 @@ packages/prompts/
 ```ts
 export const AgentRunRequestSchema = z.object({
   taskId, stage, attempt, callIndex, backend, model,
+  effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),  // NEW — see below
   promptRef: z.string().min(1),                                  // unchanged
   promptContext: z.record(z.string(), z.unknown()).default({}),  // NEW
   workspaceRef, limits,
@@ -78,7 +80,8 @@ async runAgent(req: AgentRunRequest): Promise<AgentRunResult> {
   const prompt = deps.prompts.render(req.promptRef, req.promptContext);
   return backend.run({
     taskId: req.taskId, stage: req.stage, attempt: req.attempt, callIndex: req.callIndex,
-    backend: req.backend, model: req.model, workspaceRef: req.workspaceRef, limits: req.limits,
+    backend: req.backend, model: req.model, effort: req.effort,
+    workspaceRef: req.workspaceRef, limits: req.limits,
     prompt,
   });
 },
@@ -95,7 +98,7 @@ Each stage's agent invocation runs in the *same real git worktree* as every othe
 | `context` | `issueBody` (only if `issueRef` set) |
 | `design`, `plan`, `implement` (attempt 1) | *(none — goal + workspace state suffice)* |
 | `implement` (attempt > 1, repair round) | `fullVerifyFindings`, `reviewFindings` — the prior verdict stages' raw output, since that's conversation text, not something committed to disk |
-| `full_verify` | `verifyCommands` — `[...fastVerifyCommands, ...fullVerifyCommands]` joined, so the agent knows exactly what to run and self-report against |
+| `full_verify` | `verifyCommands` — `[...fastVerifyCommands, ...fullVerifyCommands]` joined, so the agent knows exactly what to run and self-report against. Per the [config-loading design](2026-07-03-agentops-config-loading-design.md), both arrays are now optional — when neither is configured, `verifyCommands` is an explicit "(none configured — use your own judgment on the diff)" string, not an empty/misleading list, so the prompt never implies commands ran when none did |
 | `review` | *(none — agent runs `git diff` itself)* |
 
 This requires a small, mechanical change to `dev-cycle.ts`'s `runStageAgent`/`runVerdictStage` to build the right `promptContext` per call. It's in scope for this sub-project (same file M0 already owns, not a new subsystem) — everything else in `dev-cycle.ts` is untouched.
@@ -123,7 +126,7 @@ export class ClaudeBackend implements AgentBackend {
 **Invocation:**
 
 ```
-claude -p --output-format json --model <req.model> --max-turns <maxTurns> --dangerously-skip-permissions
+claude -p --output-format json --model <req.model> --max-turns <maxTurns> --dangerously-skip-permissions [--effort <req.effort>]
 ```
 
 spawned with `cwd: req.workspaceRef`, `env` merged from `opts.env`. The prompt is **piped via stdin**, not passed as an argv string — `implement`/`design` prompts can carry large prior-stage context and argv has OS length limits; stdin has none. `child.stdin.write(req.prompt); child.stdin.end()`.
@@ -151,6 +154,10 @@ Mapped to `AgentRunResult`: `output = result`, `tokensIn = usage.input_tokens`, 
 
 The dividing line: **"the CLI ran and said something" is always a normal result (even if garbage); "the CLI failed to run" is always a thrown error.** This mirrors `parseVerdict`'s own fail-safe design one layer down.
 
+## Effort / reasoning level
+
+`req.effort` (new field on `AgentRunRequest`/`BackendRunRequest`, see [config-loading design](2026-07-03-agentops-config-loading-design.md#new-field-effort-next-to-model)) is passed as `--effort <level>` when present, omitted entirely otherwise (letting the CLI use its own default). **This flag name is an assumption, not a verified fact** — this design was written without confirming `claude`'s actual headless-mode flag for reasoning effort against its current `--help` output/docs. Verify the real flag (it may be `--thinking-budget`, an environment variable, or not exposed to `-p` mode at all) before or during implementation; if no equivalent exists in headless mode, `effort` becomes a routing-config field that simply has no effect on this particular backend yet, which should be called out in code rather than silently swallowed.
+
 ## Required side-effect change: per-call activity timeout
 
 `dev-cycle.ts` currently sets one blanket `proxyActivities({ startToCloseTimeout: '10 minutes' })` for all activities. Real `claude` runs can legitimately exceed 10 minutes on `implement`. This design requires `startToCloseTimeout` to track `req.limits.timeoutMs` (with headroom for process teardown) rather than a fixed constant — either a second `proxyActivities` call scoped to `runAgent` with a longer ceiling, or per-call `Context.current().info` timeout override. Flagging this now so it isn't discovered as a mysterious activity-timeout failure during M1 integration.
@@ -165,6 +172,7 @@ AGENTS.md hard rule 5: tests use `stub`, never real credentials. `ClaudeBackend`
 - Nonzero exit with empty stdout → `ClaudeBackendProcessError` thrown.
 - stderr auth pattern → `ClaudeBackendAuthError` thrown.
 - Prompt is written to stdin, not argv (assert on the fake process's captured stdin writes, not spawn args).
+- `req.effort` set → `--effort <level>` present in spawn args; `req.effort` absent → flag omitted entirely (not passed as empty string).
 
 **Real-CLI verification is explicitly out of `pnpm test`/`pnpm e2e`.** A manual, documented script (e.g. `pnpm --filter @agentops/backends run verify:live -- <workspace-dir>`) exercises the real `claude` binary once `CLAUDE_CODE_OAUTH_TOKEN` is set locally — never runs in CI, never asserted in the M1 done-criterion's automated gate. The done-criterion itself ("real issue → real PR") is inherently a manual/one-off verification until M1's other three sub-projects land and get wired together.
 
@@ -175,8 +183,9 @@ Headless operation requires bypassing claude's interactive tool-approval prompts
 ## Package/file summary
 
 - **New:** `packages/prompts/` (templates + `render-prompt.ts` + `load-prompt-pack.ts`, unit-tested pure `render`).
-- **New:** `packages/backends/src/claude/claude-backend.ts` + `.test.ts`.
-- **Changed:** `packages/contracts/src/agent-run.ts` (`promptContext` field, new `BackendRunRequestSchema`).
+- **New:** `packages/backends/src/claude/claude-backend.ts` + `.test.ts`. If [pi-backend](2026-07-03-pi-backend-design.md) lands alongside this (same milestone), extract the shared spawn/timeout/lifecycle skeleton both backends need into `packages/backends/src/process-cli-backend.ts` rather than duplicating it — see that doc for the shared-base design; do this extraction once both concrete backends exist, not speculatively before there's a second implementation to generalize from.
+- **Changed:** `packages/contracts/src/agent-run.ts` (`promptContext` field, `effort` field, new `BackendRunRequestSchema`).
+- **Changed:** `packages/contracts/src/model.ts` (`effort` on `ModelRefSchema` — see [config-loading design](2026-07-03-agentops-config-loading-design.md#new-field-effort-next-to-model)).
 - **Changed:** `packages/backends/src/agent-backend.ts` (interface takes `BackendRunRequest`), `stub-backend.ts` (type only).
 - **Changed:** `packages/activities/src/create-activities.ts` (`prompts` dependency, render-then-call-backend).
 - **Changed:** `packages/workflows/src/dev-cycle.ts` (`promptContext` per stage — small, mechanical).
@@ -184,6 +193,7 @@ Headless operation requires bypassing claude's interactive tool-approval prompts
 
 ## Open questions carried forward (not blocking this sub-project)
 
+- **Blocking before implementation, not before design review:** confirm `claude`'s actual headless-mode reasoning-effort flag (see "Effort / reasoning level" above) — this doc's `--effort` is an assumption.
 - Product-repo prompt-pack overrides (loading `agentops/prompts/` from the target repo instead of the engine's built-in pack) — deferred until a real product repo exists to override from.
 - `RunStats.outcome` currently ignores whether the backend call actually succeeded — should eventually derive from `is_error`/verdict rather than being hardcoded `'pass'` in the workflow. Separate, small fix, not blocking.
 - Rate-limit backoff (subscription 5h/week windows, ARCHITECTURE.md §5.5) is out of scope until M5 budget enforcement.
