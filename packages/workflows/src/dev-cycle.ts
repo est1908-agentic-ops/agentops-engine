@@ -10,6 +10,7 @@ const activities = proxyActivities<DevCycleActivities>({
 
 const agentActivities = proxyActivities<Pick<DevCycleActivities, 'runAgent'>>({
   startToCloseTimeout: '30 minutes',
+  heartbeatTimeout: '15s',
 });
 
 export const stopSignal = defineSignal('stop');

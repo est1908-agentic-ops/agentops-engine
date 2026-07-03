@@ -1,0 +1,32 @@
+namespace: dev-agents
+
+image:
+  repository: ghcr.io/CHANGEME/agentops-engine
+  workerTag: CHANGEME
+  agentClaudeTag: CHANGEME
+  pullPolicy: IfNotPresent
+
+replicas: 1
+
+temporalAddress: "localhost:7233"
+
+taskQueue: agentops-devcycle
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+workspace:
+  pvcName: workspace-tasks
+  mountPath: /workspace/tasks
+  cachePvcName: workspace-cache
+  cacheMountPath: /workspace/cache
+  storageClassName: local-path
+  taskSize: 10Gi
+  cacheSize: 20Gi
+
+githubTokenSecretName: github-token

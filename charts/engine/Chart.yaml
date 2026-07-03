@@ -1,0 +1,5 @@
+apiVersion: v2
+name: engine
+description: agentops-engine worker Deployment, RBAC, and workspace storage
+version: 0.1.0
+appVersion: "0.1.0"

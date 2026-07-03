@@ -1,22 +1,18 @@
 import type { AgentRunResult, BackendRunRequest } from '@agentops/contracts';
+import type { CliSpec } from '../cli-spec';
 import {
-  ProcessCliBackend,
   ProcessCliAuthError,
   ProcessCliProcessError,
   ProcessCliTimeoutError,
-  type ProcessCliBackendOptions,
-} from '../process-cli-backend';
+} from '../process-cli-runner';
 
 export { ProcessCliProcessError as ClaudeBackendProcessError };
 export { ProcessCliTimeoutError as ClaudeBackendTimeoutError };
 export { ProcessCliAuthError as ClaudeBackendAuthError };
 
-export interface ClaudeBackendOptions {
-  executablePath?: string;
-  spawn?: ProcessCliBackendOptions['spawn'];
-  env?: NodeJS.ProcessEnv;
+export interface ClaudeCliSpecOptions {
+  image?: string;
   maxTurns?: number;
-  killGraceMs?: number;
 }
 
 interface ClaudeJsonResult {
@@ -27,58 +23,52 @@ interface ClaudeJsonResult {
 }
 
 const AUTH_ERROR_PATTERN = /(invalid|expired).{0,30}(api key|token)/i;
+const DEFAULT_IMAGE = 'ghcr.io/CHANGEME/agentops-engine/agent-claude:CHANGEME';
 
-export class ClaudeBackend extends ProcessCliBackend {
-  private readonly maxTurns: number;
+export function createClaudeCliSpec(opts: ClaudeCliSpecOptions = {}): CliSpec {
+  const maxTurns = opts.maxTurns ?? 30;
+  const image = opts.image ?? DEFAULT_IMAGE;
 
-  constructor(opts: ClaudeBackendOptions = {}) {
-    super({
-      executablePath: opts.executablePath ?? 'claude',
-      spawn: opts.spawn,
-      env: opts.env,
-      killGraceMs: opts.killGraceMs,
-    });
-    this.maxTurns = opts.maxTurns ?? 30;
-  }
+  return {
+    image,
+    binary: 'claude',
+    buildArgs(req: BackendRunRequest): string[] {
+      const args = [
+        '-p',
+        '--output-format',
+        'json',
+        '--model',
+        req.model,
+        '--max-turns',
+        String(maxTurns),
+        '--dangerously-skip-permissions',
+      ];
+      if (req.effort) {
+        args.push('--effort', req.effort);
+      }
+      return args;
+    },
+    parseOutput(stdout: string, stderr: string, elapsedMs: number): AgentRunResult {
+      let parsed: ClaudeJsonResult | undefined;
+      try {
+        parsed = JSON.parse(stdout) as ClaudeJsonResult;
+      } catch {
+        parsed = undefined;
+      }
 
-  protected buildArgs(req: BackendRunRequest): string[] {
-    const args = [
-      '-p',
-      '--output-format',
-      'json',
-      '--model',
-      req.model,
-      '--max-turns',
-      String(this.maxTurns),
-      '--dangerously-skip-permissions',
-    ];
-    if (req.effort) {
-      args.push('--effort', req.effort);
-    }
-    return args;
-  }
+      if (!parsed || typeof parsed.result !== 'string') {
+        return { output: stdout || stderr, tokensIn: 0, tokensOut: 0, wallMs: elapsedMs };
+      }
 
-  protected parseOutput(stdout: string, stderr: string, elapsedMs: number): AgentRunResult {
-    let parsed: ClaudeJsonResult | undefined;
-    try {
-      parsed = JSON.parse(stdout) as ClaudeJsonResult;
-    } catch {
-      parsed = undefined;
-    }
-
-    if (!parsed || typeof parsed.result !== 'string') {
-      return { output: stdout || stderr, tokensIn: 0, tokensOut: 0, wallMs: elapsedMs };
-    }
-
-    return {
-      output: parsed.result,
-      tokensIn: parsed.usage?.input_tokens ?? 0,
-      tokensOut: parsed.usage?.output_tokens ?? 0,
-      wallMs: parsed.duration_ms ?? elapsedMs,
-    };
-  }
-
-  protected isAuthError(stderr: string): boolean {
-    return AUTH_ERROR_PATTERN.test(stderr);
-  }
+      return {
+        output: parsed.result,
+        tokensIn: parsed.usage?.input_tokens ?? 0,
+        tokensOut: parsed.usage?.output_tokens ?? 0,
+        wallMs: parsed.duration_ms ?? elapsedMs,
+      };
+    },
+    isAuthError(stderr: string): boolean {
+      return AUTH_ERROR_PATTERN.test(stderr);
+    },
+  };
 }

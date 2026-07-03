@@ -1,0 +1,8 @@
+-----BEGIN CERTIFICATE-----
+PLACEHOLDER -- replace with the real step-ca root CA certificate
+once platform components (M2 sub-project 2, agentops-platform repo)
+issues one. See that sub-project's design doc for the export command.
+Building this image with this placeholder is expected to succeed;
+`update-ca-certificates` skips invalid entries with a warning, it
+does not fail the build.
+-----END CERTIFICATE-----

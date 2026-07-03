@@ -1,95 +1,108 @@
 # K8s Job Runner — Design
 
 Status: draft · 2026-07-03 · Owner: Artem
-Milestone: M2 — sub-project position TBD (`2026-07-03-m2-decomposition.md` doesn't exist yet; this doc doesn't assume a slot in that list).
+Milestone: M2, sub-project 4 of 5 (see [decomposition](2026-07-03-m2-decomposition.md))
 
 ## Context
 
-ARCHITECTURE.md §5.4 ("Agent Runner") already decides the shape of this: an activity `runAgent(stage, backend, model, prompt, workspaceRef)` launches a K8s Job from a per-backend image (`agent-claude`, `agent-cursor`, `agent-pi`, `agent-codex`). Jobs run non-root, in a dedicated namespace, with a `NetworkPolicy` restricting egress to forge/LiteLLM/provider endpoints — and, load-bearing for this doc, **no cluster API access**.
+`runAgent` today (`packages/activities/src/create-activities.ts`) calls `AgentBackend.run(req)` in-process; the only implementation that actually executes a CLI is `ProcessCliBackend` (`packages/backends/src/process-cli-backend.ts`), which `child_process.spawn`s the binary on the worker host and pipes `req.prompt` to its stdin. ARCHITECTURE.md §5.9 decision #2 anticipated this exact seam: "Workflows never know *how* agents run; swapping local-spawn for Jobs... touches one activity" — in the code as it exists today, that seam is one level lower than "activity": it's the `AgentBackend` implementation. `runAgent` itself (the activity) doesn't change at all; what changes is which `AgentBackend` gets registered for `claude`/`pi` at composition-root time (M2 wiring's concern), and a new implementation of that interface needs to exist (this sub-project's concern).
 
-`agentops-platform`'s `platform-components-design.md` already references this doc by name (`k8s-job-runner-design.md`) for the `dev-agents` namespace Jobs launch into, but it didn't exist yet — this fills that gap for one specific slice: how a **verify-stage** Job gets the backing services (Postgres, Redis, etc.) a product's own test suite needs.
-
-Verified against a real product repo (`broccoli`): its `test:e2e:backend`/`test:e2e:frontend` targets are already infrastructure-agnostic — they only need `TEST_DATABASE_URL`/`REDIS_URL`-style env vars pointing at *some* reachable Postgres/Redis. `docker-compose.e2e.yml` (local dev) and GitHub Actions' `services:` key (that repo's own CI) are just two different ways of feeding the same env vars to the same test code. A verify-stage Job can't reuse either mechanism directly — it has no Docker daemon and, per §5.4, no cluster API access to provision anything itself. Granting either (a Docker socket/DinD sidecar, or k8s permissions to create resources) would undo the isolation §5.4 exists to provide — the same trade-off already rejected for where the GitHub Actions self-hosted runner lives (see `agentops-platform`'s `docs/BOOTSTRAP.md`, "Decisions already made").
+`ProcessCliBackend` currently couples two things that need to separate: **what the CLI needs** (`buildArgs`, `parseOutput`, `isAuthError` — `ClaudeBackend`/`PiBackend`'s concern) and **how it's executed** (spawn locally vs. launch a K8s Job). This sub-project pulls those apart.
 
 ## Goal
 
-A verify-stage Job launched by `runAgent` for a product whose `agentops.json` declares `verify.services` ends up with those services running as sidecar containers in the same pod, reachable at `localhost`, healthy before the product's own verify command runs — with zero changes to the product's test code and zero cluster-API access granted to the Job itself.
+An `AgentBackend` implementation that runs the same CLI invocation as today, but as a K8s Job in the `dev-agents` namespace instead of a local child process — same `AgentRunResult` contract out, so nothing above `packages/backends` changes.
 
 ## Non-goals
 
-- Migrating any product off `docker-compose` for local developer workflows — untouched; this doc only concerns what happens inside a K8s Job.
-- Ephemeral per-run namespaces or any k8s resource creation initiated by the Job or its container — rejected in favor of static sidecars-in-pod specifically so the Job needs no cluster-mutation RBAC (§5.4's boundary stays intact).
-- Multi-node scheduling or cross-pod service discovery for these sidecars — single-node k3s per ARCHITECTURE.md §5.1; sidecars share the pod's network namespace, so no `Service`/DNS entry is needed.
-- Non-verify-stage Jobs (context/plan/build/review) — they don't run product test suites; `verify.services` is read only when launching a verify-stage Job.
-- Parallel test sharding within one Job — one Job gets one set of sidecars; fan-out, if ever needed, is a separate Job per shard, out of scope here.
+- Wiring which backend gets used when (in-cluster vs local) — [M2 wiring](2026-07-03-m2-wiring-design.md)'s job.
+- The image/chart this launches against — [engine image & chart](2026-07-03-engine-image-and-chart-design.md)'s job; this doc only pins the contract (image name convention, PVC mount path) it depends on.
+- Streaming logs to Loki/Tempo — that's OTel/Alloy, M4.
+- `agent-pi` in-cluster — no second image in M2 (per decomposition doc).
 
 ## Design
 
-### `ProductConfig` schema addition (`packages/contracts`)
+### Refactor: extract `CliSpec` from `ProcessCliBackend`
 
-`agentops.json`'s `verify` section (already holding fast/full verify commands per §5.8) gains a `services` array:
-
-```jsonc
-"verify": {
-  "fast": "pnpm test:scripts",
-  "full": "pnpm test:ci",
-  "services": [
-    {
-      "name": "postgres",
-      "image": "pgvector/pgvector:pg18",
-      "env": { "POSTGRES_USER": "broccoli", "POSTGRES_PASSWORD": "broccoli", "POSTGRES_DB": "broccoli_test" },
-      "readyCheck": { "type": "exec", "command": ["pg_isready", "-U", "broccoli", "-d", "broccoli_test"] },
-      "envTemplate": { "TEST_DATABASE_URL": "postgres://broccoli:broccoli@localhost:5432/broccoli_test" }
-    },
-    {
-      "name": "redis",
-      "image": "redis:7-alpine",
-      "readyCheck": { "type": "exec", "command": ["redis-cli", "ping"] },
-      "envTemplate": { "REDIS_URL": "redis://localhost:6379" }
-    }
-  ]
+```ts
+// packages/backends/src/cli-spec.ts (new)
+export interface CliSpec {
+  image: string;                                                        // e.g. "ghcr.io/<org>/agentops-engine/agent-claude:v1"
+  binary: string;                                                       // e.g. "claude" — the in-container executable
+  buildArgs(req: BackendRunRequest): string[];
+  parseOutput(stdout: string, stderr: string, elapsedMs: number): AgentRunResult;
+  isAuthError(stderr: string): boolean;
 }
 ```
 
-Zod-validated alongside the rest of `ProductConfig`. `readyCheck` supports `exec` (command run inside the sidecar) and `tcp` (bare port-open check) — the two cover every service surveyed so far (`broccoli`'s Postgres and Redis both already define exec-style healthchecks in `docker-compose.e2e.yml`, so this is a restatement of facts the product already knows, not new knowledge it has to learn).
+`ClaudeBackend`/`PiBackend` stop being `AgentBackend` implementations themselves and become `CliSpec` implementations (their existing `buildArgs`/`parseOutput`/`isAuthError` bodies move over unchanged; `image`/`binary` are new fields). `ProcessCliBackend` is renamed `ProcessCliRunner`, takes a `CliSpec` by constructor injection instead of being subclassed, and its `run()` body is otherwise identical to today (still ignores `spec.image` — irrelevant to local execution). This is a mechanical refactor with no behavior change for the local-dev path; existing `ClaudeBackend`/`PiBackend` unit tests move to test the `CliSpec` objects directly (assert `buildArgs`/`parseOutput`/`isAuthError` outputs, no process involved), and `ProcessCliRunner` keeps its own tests (injected `spawn`, unchanged from today's `ProcessCliBackend` tests).
 
-### `runAgent` activity changes (`packages/activities`)
+### New: `K8sJobRunner`
 
-When the requested stage is a verify stage:
+```ts
+// packages/backends/src/k8s/k8s-job-runner.ts
+export interface K8sJobRunnerOptions {
+  namespace: string;                    // "dev-agents"
+  workspacePvcName: string;             // matches charts/engine's "workspace-tasks" PVC
+  workspaceMountPath: string;           // "/workspace/tasks", matches the worker's own mount
+  batchApi: BatchV1ApiLike;             // narrow interface, injectable — see Testing strategy
+  coreApi: CoreV1ApiLike;
+  pollIntervalMs?: number;              // default 3000
+}
 
-1. Load `agentops.json` from the already-checked-out workspace (the activity already reads this file for verify commands; `services` is just more of the same file).
-2. For each declared service, append a container to the Job's pod template with that `image` and `env`. Readiness is **not** enforced via k8s `livenessProbe`/`startupProbe` — it's enforced by the in-image `wait-for-services` step below, so a slow-starting sidecar never gets killed and restarted mid-Job by k8s's own probe machinery.
-3. Submit the Job via the activity's own `ServiceAccount` (already scoped to create Jobs in the product's namespace per §5.7) — the Job's own `ServiceAccount` is unchanged from today's no-permissions default.
-4. If any declared image (or the `agent-<backend>` image itself) is on GHCR, the Job's `imagePullSecrets` references a SOPS-encrypted GHCR credential (new secret, `agentops-platform`'s `secrets/registry/`). Public images — every service surveyed so far (`postgres`, `redis`) — need no secret.
+export interface BatchV1ApiLike {
+  createNamespacedJob(namespace: string, body: V1Job): Promise<{ body: V1Job }>;
+  readNamespacedJobStatus(name: string, namespace: string): Promise<{ body: V1Job }>;
+  deleteNamespacedJob(name: string, namespace: string, opts?: { propagationPolicy?: string }): Promise<void>;
+}
+export interface CoreV1ApiLike {
+  readNamespacedPersistentVolumeClaimStatus?: never; // not needed — reading result via mounted file, not the log API
+}
 
-### `wait-for-services` (baked into every `agent-<backend>` image, `images/`)
+export class K8sJobRunner implements AgentBackend {
+  constructor(private readonly spec: CliSpec, private readonly opts: K8sJobRunnerOptions) {}
+  async run(req: BackendRunRequest): Promise<AgentRunResult>;
+}
+```
 
-A small, generic, product-agnostic entrypoint step: before exec'ing the product's declared verify command, read the same `verify.services` block and poll each `readyCheck` against `localhost` on a short interval, up to a timeout. A product declaring no `verify.services` (or omitting the field) skips this step entirely — no sidecars, no polling, straight to the verify command, unchanged from today's behavior (starting value: 60s — a guess, not yet measured against real sidecar cold-start times on the target VPS; see Named risks). On timeout, the stage fails with a distinct sentinel (`INFRA_TIMEOUT`) rather than a generic test failure, so `Heal` can treat "infra never came up" differently from "the agent's change broke a test."
+**`run(req)`:**
 
-### Env var injection
+1. Resolve the task's workspace subpath under the shared PVC (`req.workspaceRef` is already an absolute path inside the mounted volume, per `WorkspaceManager` — the same path is valid inside the Job pod because it mounts the identical PVC at the identical mount root).
+2. Write `req.prompt` to `<req.workspaceRef>/.agentops/prompt-<stage>-<attempt>-<callIndex>.txt`, and a dedicated `output-....json` / `error-....log` pair as the *expected* output location — plain `fs.writeFile`, this activity code runs in the worker pod which already has the PVC mounted.
+3. Build a `V1Job`: one container, `image: spec.image`, `workingDir: req.workspaceRef`, `command: ["/bin/sh", "-c", 'exec "$0" "$@" < "$PROMPT_FILE" > "$OUT_FILE" 2> "$ERR_FILE"', spec.binary, ...spec.buildArgs(req)]`. Passing `buildArgs`' output as positional `"$@"` parameters (not string-interpolated into the shell command) means no argument — including anything derived from `req.prompt` indirectly — is ever re-parsed by the shell; only the fixed redirection skeleton is shell syntax. `PROMPT_FILE`/`OUT_FILE`/`ERR_FILE` set as container env vars pointing at the paths from step 2, `volumeMounts` on `opts.workspacePvcName` at `opts.workspaceMountPath`. `restartPolicy: Never`, `backoffLimit: 0` (the workflow's own repair loop is the retry policy — a Job-level retry would double-run a paid CLI invocation), `ttlSecondsAfterFinished: 300`, `securityContext: { runAsNonRoot: true, allowPrivilegeEscalation: false }`, auth env (`CLAUDE_CODE_OAUTH_TOKEN` etc.) via `envFrom.secretRef` (secret name is a further constructor option, not shown above — added during implementation once the platform components doc names it).
+4. `createNamespacedJob`, then poll `readNamespacedJobStatus` every `pollIntervalMs`, calling Temporal's `Context.current().heartbeat()` on each poll. This requires the `runAgent` activity's `proxyActivities` options in `packages/workflows` to set a `heartbeatTimeout` (currently absent) — a required, small wiring change called out here since it's this sub-project's need, even though the exact value (proposal: `req.limits.timeoutMs`'s poll-interval multiple, e.g. `3 * pollIntervalMs`) is decided in [M2 wiring](2026-07-03-m2-wiring-design.md).
+5. On `heartbeat()` throwing (activity cancellation — Temporal's mechanism for `stop`/`cancel` signals and timeout): `deleteNamespacedJob(name, namespace, { propagationPolicy: 'Background' })`, then rethrow. This is the "cancel-kills-Job" behavior ARCHITECTURE.md §5.4 names explicitly.
+6. On `status.succeeded === 1` or `status.failed === 1`: read `OUT_FILE`/`ERR_FILE` off the shared PVC (same `fs.readFile` the worker already has access to — **not** the K8s pod-logs API, which has retention/size limits and would require a second client method; reading the files the container itself wrote to the PVC is strictly simpler and matches exactly what `ProcessCliBackend` does with its in-memory `stdout`/`stderr` buffers today). Call `spec.parseOutput(stdout, stderr, elapsedMs)`, same as the local path. If `spec.isAuthError(stderr)` — throw the same `ProcessCliAuthError`-equivalent (kept, renamed if needed, in the shared module).
+7. Job cleanup on success/failure is handled by `ttlSecondsAfterFinished` — no manual delete call needed on the non-cancelled path.
 
-Each service's `envTemplate` is merged into the verify container's environment before the verify command runs — this is how the product's existing test code (which already just reads whatever env var names it chose) gets connected, with zero code changes on the product side. Values are static (`localhost:<fixed-port>`) because, unlike local dev — where `broccoli`'s `scripts/e2e/isolation.mjs` allocates random ports so multiple worktrees can run concurrently — a single-purpose Job pod has no concurrent-instance problem to solve. The in-cluster path is simpler than the local one it's replacing, not just different.
+### Contract this sub-project depends on (owned by [engine image & chart](2026-07-03-engine-image-and-chart-design.md))
+
+- PVC name `workspace-tasks`, mount path matching what the worker Deployment uses for `WorkspaceManager`'s `workspacesDir`.
+- Namespace `dev-agents`.
+- RBAC already granting the worker's ServiceAccount `create/get/list/watch/delete` on `jobs` — this sub-project's code assumes those permissions exist, doesn't grant them itself.
 
 ## Testing strategy
 
-- Unit tests (`packages/contracts`, `packages/activities`) for the schema and the service→sidecar-container mapping function — pure, no cluster needed.
-- Golden-file test: a representative `agentops.json` (modeled on `broccoli`'s real `docker-compose.e2e.yml` services) → expected Job pod spec JSON, matching the golden-file convention used elsewhere in this doc tree (engine image & chart design).
-- Integration: one real verify-stage Job run against the `dev-agents` namespace on the M2 dry-run cluster, confirming sidecars start, `wait-for-services` passes, and the product's actual verify command succeeds — folded into the M2 wiring end-to-end runbook, the same way `platform-components-design.md` folds its own `NetworkPolicy` validation into that runbook.
+- `CliSpec` implementations (`ClaudeBackend`/`PiBackend`, post-refactor): existing unit tests carry over unchanged in spirit, now asserting against plain objects/functions instead of a running process.
+- `ProcessCliRunner`: existing `ProcessCliBackend` tests carry over, injected `spawn`, constructed with a fake `CliSpec`.
+- `K8sJobRunner`: `batchApi`/`coreApi` are injected fakes (in-memory `Map`-backed implementations of the narrow interfaces above, same DI pattern as `spawn`/`GitCommandRunner` elsewhere in this codebase) — no real cluster, no `@kubernetes/client-node` network calls in tests. Coverage: builds the expected `V1Job` shape (command array, volume mounts, security context) from a `BackendRunRequest`; polls until a fake status flips to `succeeded`, reads prompt/output files from a real temp directory (same "real filesystem, fake network" split `WorkspaceManager`'s tests use); on a simulated heartbeat cancellation, asserts `deleteNamespacedJob` was called with `propagationPolicy: 'Background'` and the original error is rethrown; `isAuthError` path throws the auth error instead of returning a result.
+- No test spawns a real K8s API server. A manual `verify:live` script against a real `kind`/`k3d` cluster (same posture as `claude-backend`'s deferred manual verification) is the integration-level check, folded into [M2 wiring](2026-07-03-m2-wiring-design.md)'s runbook.
 
 ## Named risks
 
-- **`agentops.json`'s `verify.services` and the product's own `docker-compose.e2e.yml` are two sources of truth for the same facts.** Accepted as the cost of declaring services explicitly rather than having the engine parse compose YAML (keeps the engine format-agnostic, and the product/engine contract explicit). A CI lint in the product repo diffing the two lists is a reasonable follow-up; not required for this doc's gate.
-- **Sidecars-in-pod is static per Job.** Fine for one-Job-per-verify-run (today's model, one test repo per BOOTSTRAP.md's M2 gate); if parallel test sharding is ever needed, each shard needs its own Job and its own sidecar set — duplicated startup cost per shard, not a shared instance. Revisit only if sharding becomes real.
-- **`wait-for-services`'s 60s timeout is unmeasured.** Needs a real number from the M2 dry-run against actual VPS hardware before being treated as more than a placeholder default.
+- **Stdin-via-file-redirect must behave identically to stdin-via-pipe for `claude`/`pi`.** Both should be indistinguishable to the CLI (it just reads stdin), but this is exactly the kind of assumption worth a manual smoke test before trusting it in the real pipeline — called out in the wiring doc's runbook rather than assumed here.
+- **Output-file-on-shared-PVC instead of pod-logs API is a real dependency on RWO/same-node PVC sharing holding.** If the cluster ever needs multi-node (ARCHITECTURE.md §9's existing risk), this exact mechanism needs revisiting alongside `WorkspaceManager`'s — not a new risk, an existing one this design inherits rather than works around.
+- **`backoffLimit: 0` + `ttlSecondsAfterFinished: 300` means a crashed poll loop (worker restart mid-Job) could leave a Job to clean itself up via TTL, but the activity itself would be retried by Temporal from scratch** — a second Job for the same `(taskId, stage, attempt, callIndex)` could run concurrently with an orphaned one for up to 5 minutes. Acceptable for M2 (low volume, single test repo); worth a `Job` naming scheme that makes duplicates detectable (`name: agentops-<taskId>-<stage>-<attempt>-<callIndex>`, which also makes `createNamespacedJob` idempotently fail-fast on a genuine duplicate) rather than a bigger reconciliation mechanism.
 
 ## Package/file summary
 
-- **Changed (`agentops-engine`):** `packages/contracts` (`ProductConfig.verify.services` schema), `packages/activities` (`runAgent`'s Job pod-spec builder), `images/agent-<backend>/*` (new `wait-for-services` entrypoint step).
-- **Changed (product repos, e.g. `broccoli`):** `agentops.json` gains `verify.services` — data only, no product code changes.
-- **New (`agentops-platform`):** `secrets/registry/` — SOPS-encrypted GHCR pull credential, referenced by engine-namespace Job specs.
+- **New:** `packages/backends/src/cli-spec.ts`, `packages/backends/src/k8s/k8s-job-runner.ts` + `.test.ts`, `packages/backends/src/k8s/fake-batch-api.ts` (test double).
+- **Changed:** `packages/backends/src/process-cli-backend.ts` → renamed `process-cli-runner.ts`, refactored to take an injected `CliSpec`.
+- **Changed:** `packages/backends/src/claude/claude-backend.ts`, `packages/backends/src/pi/pi-backend.ts` — become `CliSpec` objects, not classes implementing `AgentBackend`.
+- **Changed:** `packages/backends/package.json` — new dependency `@kubernetes/client-node`.
+- **Changed:** `packages/workflows/src/activities-api.ts` — `heartbeatTimeout` added to `runAgent`'s `proxyActivities` options.
 
 ## Open questions carried forward
 
-- Real `wait-for-services` timeout value — needs measurement during the M2 dry-run, not decided here.
-- Whether an `INFRA_TIMEOUT` sentinel routes to `Heal` differently than an ordinary test failure — a `policies/` decision, out of this doc's scope.
-- No lint yet enforces `agentops.json`/`docker-compose.e2e.yml` consistency — noted as a reasonable follow-up, not required for M2.
+- Exact `heartbeatTimeout` value — proposed as a multiple of `pollIntervalMs`, finalized in M2 wiring alongside the rest of the in-cluster activity options.
+- Job naming/idempotency as a duplicate-Job safeguard — named above as a risk, not designed in full; revisit if it causes a real incident.

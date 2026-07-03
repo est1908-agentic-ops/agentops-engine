@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-worker
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-worker
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-worker
+    spec:
+      serviceAccountName: {{ .Release.Name }}-worker
+      securityContext:
+        runAsNonRoot: true
+      containers:
+        - name: worker
+          image: "{{ .Values.image.repository }}/worker:{{ .Values.image.workerTag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: TEMPORAL_ADDRESS
+              value: {{ .Values.temporalAddress | quote }}
+            - name: AGENT_NAMESPACE
+              value: {{ .Values.namespace | quote }}
+            - name: WORKSPACE_PVC_NAME
+              value: {{ .Values.workspace.pvcName | quote }}
+            - name: WORKSPACE_MOUNT_PATH
+              value: {{ .Values.workspace.mountPath | quote }}
+            - name: AGENT_RUNNER_IMAGE
+              value: "{{ .Values.image.repository }}/agent-claude:{{ .Values.image.agentClaudeTag }}"
+            - name: GITHUB_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.githubTokenSecretName }}
+                  key: token
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: workspace-tasks
+              mountPath: {{ .Values.workspace.mountPath }}
+            - name: workspace-cache
+              mountPath: {{ .Values.workspace.cacheMountPath }}
+      volumes:
+        - name: workspace-tasks
+          persistentVolumeClaim:
+            claimName: {{ .Values.workspace.pvcName }}
+        - name: workspace-cache
+          persistentVolumeClaim:
+            claimName: {{ .Values.workspace.cachePvcName }}
