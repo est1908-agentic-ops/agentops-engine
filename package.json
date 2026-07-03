@@ -12,7 +12,9 @@
     "test": "vitest run --config vitest.config.ts",
     "test:policies-coverage": "vitest run --config vitest.coverage.config.ts",
     "e2e": "vitest run --config vitest.e2e.config.ts",
-    "build": "pnpm -r run build"
+    "build": "pnpm -r run build",
+    "worker": "pnpm --filter @agentops/worker run start",
+    "engine": "pnpm --filter @agentops/cli run engine"
   },
   "devDependencies": {
     "@agentops/activities": "workspace:*",

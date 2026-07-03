@@ -18,11 +18,18 @@ export class SpawnGitCommandRunner implements GitCommandRunner {
   async run(args: string[], opts: { cwd: string }): Promise<GitCommandResult> {
     const token = this.authToken?.();
     const fullArgs = token
-      ? ['-c', `http.extraHeader=Authorization: Bearer ${token}`, ...args]
+      ? [
+          '-c',
+          `http.extraHeader=Authorization: Basic ${Buffer.from(`x-access-token:${token}`).toString('base64')}`,
+          ...args,
+        ]
       : [...args];
 
     return new Promise((resolve) => {
-      const child = this.spawnFn('git', fullArgs, { cwd: opts.cwd });
+      const child = this.spawnFn('git', fullArgs, {
+        cwd: opts.cwd,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+      });
       let stdout = '';
       let stderr = '';
       let settled = false;

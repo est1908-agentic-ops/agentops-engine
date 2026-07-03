@@ -7,3 +7,5 @@ export * from './github/parse-ref';
 export * from './github/github-client';
 export * from './github/github-tracker-port';
 export * from './github/github-scm-port';
+export * from './github/build-github-ports';
+export * from './github/clone-url';
