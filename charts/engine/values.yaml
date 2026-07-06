@@ -65,11 +65,15 @@ gateway:
   # Secret must contain a GITHUB_WEBHOOK_SECRET key — the shared secret
   # configured on each registered repo's GitHub webhook (Settings > Webhooks).
   webhookSecretName: gateway-webhook-secret
-  # ClusterIP only here — this chart makes no decision about how the gateway
-  # becomes reachable from GitHub's webhook delivery (public internet), which
-  # needs its own DNS + real (Let's Encrypt, not step-ca) TLS cert, unlike the
-  # internal-only *.lab services. That's a deliberate open item, not an
-  # oversight — see docs/superpowers/specs/2026-07-06-gateway-design.md.
+  # Disabled by default: this chart ships no real public hostname.
+  # agentops-platform's values override sets host + enabled: true once a real
+  # domain is pointed at the cluster. clusterIssuer must be a cert-manager
+  # ClusterIssuer using a publicly-trusted CA (Let's Encrypt) — step-ca's
+  # internal-only CA is not trusted by GitHub's webhook delivery.
+  ingress:
+    enabled: false
+    host: ""
+    clusterIssuer: letsencrypt
   resources:
     requests:
       cpu: 100m
