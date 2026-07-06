@@ -24,15 +24,15 @@ root = pathlib.Path("clusters/ops/engine")
 
 values = root / "values.yaml"
 text = values.read_text()
-text = re.sub(r"^(  workerTag:\s*).*$", rf'\1"{sha}"', text, flags=re.M)
-text = re.sub(r"^(  agentClaudeTag:\s*).*$", rf'\1"{sha}"', text, flags=re.M)
+text = re.sub(r"^(  workerTag:\s*).*$", rf'\g<1>"{sha}"', text, flags=re.M)
+text = re.sub(r"^(  agentClaudeTag:\s*).*$", rf'\g<1>"{sha}"', text, flags=re.M)
 values.write_text(text)
 
 app = root / "application.yaml"
 app_text = app.read_text()
 app_text, n = re.subn(
     r"(repoURL: https://github.com/flair-hr/agentops-engine\.git\n\s*targetRevision:\s*).*$",
-    rf"\1{sha}",
+    rf"\g<1>{sha}",
     app_text,
     count=1,
     flags=re.M,
