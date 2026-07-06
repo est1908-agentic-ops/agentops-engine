@@ -69,6 +69,22 @@ jobs:
           push: ${{ github.ref == 'refs/heads/main' }}
           tags: gitactions.est1908.top/agentic-ops/agent-claude:${{ github.sha }}
 
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.2
+
+      - name: Package and push the engine chart (OCI)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          helm registry login gitactions.est1908.top \
+            -u "${{ secrets.REGISTRY_USERNAME }}" -p "${{ secrets.REGISTRY_PASSWORD }}"
+          helm package charts/engine \
+            --version "0.0.0-${{ github.sha }}" \
+            --app-version "${{ github.sha }}" \
+            --destination /tmp/chart
+          helm push "/tmp/chart/engine-0.0.0-${{ github.sha }}.tgz" \
+            oci://gitactions.est1908.top/agentic-ops
+
   bump-platform:
     runs-on: ubuntu-latest
     needs: build-images
