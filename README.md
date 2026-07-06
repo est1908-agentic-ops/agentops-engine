@@ -52,18 +52,19 @@ Two images build from this repo:
   platform-components design doc for the export command) — the placeholder
   lets the image build today but issues no real trust to internal services.
 
-CI builds both on every push/PR and pushes immutable tags to GHCR on merge to
-`main`:
+CI builds both on every push/PR and pushes immutable tags to the self-hosted
+registry on merge to `main`:
 
-`ghcr.io/flair-hr/agentops-engine/{worker,agent-claude}:<git-sha>`
+`gitactions.est1908.top/agentic-ops/{worker,agent-claude}:<git-sha>`
 
 A follow-up CI job commits that same `<git-sha>` into
 `agentops-platform`'s `clusters/ops/engine/values.yaml` (and pins the chart
 `targetRevision` in `application.yaml`). Argo CD auto-sync then rolls the dev
 cluster — no manual platform PR and no `kubectl rollout restart`.
 
-Requires repo secret **`PLATFORM_REPO_TOKEN`**: a fine-grained or classic PAT
-with `contents: write` on `flair-hr/agentops-platform` (store it only in
+Requires repo secret **`PLATFORM_DEPLOY_KEY`**: an SSH private key added as a
+write-enabled deploy key on `flair-hr/agentops-platform` (Settings → Deploy
+keys) — scoped to that one repo, unlike an account-wide PAT (store it only in
 GitHub Actions secrets, never in code).
 
 `charts/engine/` is the Helm chart for the worker Deployment (RBAC to manage

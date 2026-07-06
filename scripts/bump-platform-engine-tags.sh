@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Updates agentops-platform engine deploy pins after a merge to agentops-engine main.
-# Requires: PLATFORM_REPO_TOKEN, ENGINE_SHA, PLATFORM_DIR (checkout path).
+# Requires: ENGINE_SHA, PLATFORM_DIR (checkout path, authenticated via a
+# write-enabled deploy key passed to actions/checkout's ssh-key input).
 set -euo pipefail
 
-: "${PLATFORM_REPO_TOKEN:?PLATFORM_REPO_TOKEN is required}"
 : "${ENGINE_SHA:?ENGINE_SHA is required}"
 : "${PLATFORM_DIR:?PLATFORM_DIR is required}"
 
