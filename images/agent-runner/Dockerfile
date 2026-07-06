@@ -23,5 +23,8 @@ RUN npm install --global --ignore-scripts @earendil-works/pi-coding-agent@0.80.2
 COPY step-ca-root.crt /usr/local/share/ca-certificates/step-ca-root.crt
 RUN update-ca-certificates
 
-USER node
+# Numeric, not the name "node": kubelet can't verify a pod's runAsNonRoot
+# against a named image user without a matching explicit runAsUser in the
+# pod spec (see K8sJobRunner's buildAgentJob, which already sets one).
+USER 1000
 WORKDIR /workspace

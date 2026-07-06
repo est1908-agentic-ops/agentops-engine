@@ -77,7 +77,7 @@ export function buildStartScmPort(registry: ResolvedProjectEntry[], product: str
 
 async function getClient(): Promise<Client> {
   const connection = await Connection.connect({ address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233' });
-  return new Client({ connection });
+  return new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE });
 }
 
 async function cmdStart(taskId: string, goal: string, product: string, repo: string, issueRef?: string): Promise<void> {
