@@ -18,6 +18,7 @@ import {
   createClaudeCliSpec,
   createPiCliSpec,
   K8sJobRunner,
+  LiteLlmBackend,
   ProcessCliRunner,
   StubBackend,
   type AgentBackend,
@@ -77,12 +78,20 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
     process.env.AGENT_RUNNER_IMAGE ?? 'ghcr.io/CHANGEME/agentops-engine/agent-runner:CHANGEME';
   const claudeSpec = createClaudeCliSpec({ image: agentImage });
   const piSpec = createPiCliSpec({ image: agentImage });
+  // Not a CLI spawn, so it doesn't switch between ProcessCliRunner and
+  // K8sJobRunner like claude/pi do -- it's a plain HTTP call to LiteLLM's
+  // in-cluster Service, made directly from the worker/activity either way.
+  const litellm = new LiteLlmBackend({
+    baseUrl: process.env.LITELLM_BASE_URL ?? 'http://litellm.platform.svc.cluster.local:4000',
+    apiKey: process.env.LITELLM_API_KEY ?? '',
+  });
 
   if (!inCluster) {
     return {
       stub: new StubBackend(),
       claude: new ProcessCliRunner(claudeSpec),
       pi: new ProcessCliRunner(piSpec),
+      litellm,
     };
   }
 
@@ -97,6 +106,7 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
     // guaranteed to be the same shape, so they were never safe to share.
     claude: new K8sJobRunner(claudeSpec, buildJobRunnerOptions(batchApi, process.env.CLAUDE_AUTH_SECRET_NAME)),
     pi: new K8sJobRunner(piSpec, buildJobRunnerOptions(batchApi, process.env.PI_AUTH_SECRET_NAME)),
+    litellm,
   };
 }
 
