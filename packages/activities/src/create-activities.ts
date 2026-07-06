@@ -1,4 +1,4 @@
-import { LiteLlmBudgetExceededError, type AgentBackend } from '@agentops/backends';
+import { LiteLlmBudgetExceededError, RateWindowExceededError, type AgentBackend } from '@agentops/backends';
 import type { Issue, OpenPrRequest, OpenPrResult, ScmPort, TrackerPort } from '@agentops/ports';
 import type { AgentRunRequest, AgentRunResult, PrFeedback, RunStats } from '@agentops/contracts';
 import type { PromptPack } from '@agentops/prompts';
@@ -51,6 +51,18 @@ export function createActivities(deps: ActivityDependencies) {
         // here" shape as rethrowWorkspaceError below.
         if (err instanceof LiteLlmBudgetExceededError) {
           throw ApplicationFailure.nonRetryable(err.message, 'LiteLlmBudgetExceededError');
+        }
+        // A subscription rate window is a scheduling fact, not something a
+        // human needs to resolve -- retryable, with nextRetryDelay set to
+        // exactly how long until a slot frees up, so Temporal's own activity
+        // retry waits it out without ever surfacing as a blocked workflow.
+        if (err instanceof RateWindowExceededError) {
+          throw ApplicationFailure.create({
+            message: err.message,
+            type: 'RateWindowExceededError',
+            nonRetryable: false,
+            nextRetryDelay: err.retryAfterMs,
+          });
         }
         throw err;
       }
