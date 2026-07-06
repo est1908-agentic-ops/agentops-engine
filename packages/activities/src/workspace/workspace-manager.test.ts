@@ -133,3 +133,33 @@ describe('WorkspaceManager', () => {
     expect(callsB.map((args) => args[0])).toEqual(['clone', 'symbolic-ref', 'worktree']);
   });
 });
+
+describe('WorkspaceManager — spawn failure classification', () => {
+  it('throws a non-retryable WorkspaceError when the git binary itself fails to spawn', async () => {
+    const fakeGit = {
+      run: async () => ({ stdout: '', stderr: 'spawn git ENOENT', exitCode: -1, spawnFailed: true }),
+    };
+    const manager = new WorkspaceManager({
+      resolveGit: () => fakeGit,
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+    });
+
+    await expect(manager.prepare('task-1', 'owner/repo')).rejects.toMatchObject({ nonRetryable: true });
+  });
+
+  it('throws a retryable WorkspaceError when git runs but exits non-zero for an ordinary reason', async () => {
+    const fakeGit = {
+      run: async () => ({ stdout: '', stderr: 'fatal: could not read Username', exitCode: 128 }),
+    };
+    const manager = new WorkspaceManager({
+      resolveGit: () => fakeGit,
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+    });
+
+    await expect(manager.prepare('task-1', 'owner/repo')).rejects.toMatchObject({ nonRetryable: false });
+  });
+});

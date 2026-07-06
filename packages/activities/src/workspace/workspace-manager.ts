@@ -22,7 +22,15 @@ export interface Workspaces {
   cleanup(workspaceRef: string, repo: string): Promise<void>;
 }
 
-export class WorkspaceError extends Error {}
+export class WorkspaceError extends Error {
+  constructor(
+    message: string,
+    readonly nonRetryable: boolean = false,
+  ) {
+    super(message);
+    this.name = 'WorkspaceError';
+  }
+}
 
 function sanitizeRepoSlug(repo: string): string {
   return repo.replace(/[^a-zA-Z0-9-]/g, '-');
@@ -56,7 +64,7 @@ export class WorkspaceManager implements Workspaces {
       { cwd: cachePath },
     );
     if (addResult.exitCode !== 0) {
-      throw new WorkspaceError(`git worktree add failed for ${repo}: ${addResult.stderr}`);
+      throw new WorkspaceError(`git worktree add failed for ${repo}: ${addResult.stderr}`, addResult.spawnFailed === true);
     }
 
     return { workspaceRef: workspacePath, branch, baseBranch };
@@ -72,7 +80,7 @@ export class WorkspaceManager implements Workspaces {
       cwd: cachePath,
     });
     if (result.exitCode !== 0) {
-      throw new WorkspaceError(`git worktree remove failed for ${workspaceRef}: ${result.stderr}`);
+      throw new WorkspaceError(`git worktree remove failed for ${workspaceRef}: ${result.stderr}`, result.spawnFailed === true);
     }
   }
 
@@ -83,20 +91,20 @@ export class WorkspaceManager implements Workspaces {
     if (existsSync(cachePath)) {
       const fetchResult = await git.run(['fetch', 'origin'], { cwd: cachePath });
       if (fetchResult.exitCode !== 0) {
-        throw new WorkspaceError(`git fetch failed for ${repo}: ${fetchResult.stderr}`);
+        throw new WorkspaceError(`git fetch failed for ${repo}: ${fetchResult.stderr}`, fetchResult.spawnFailed === true);
       }
       return;
     }
     const cloneResult = await git.run(['clone', this.cloneUrl(repo), cachePath], { cwd: this.cacheDir });
     if (cloneResult.exitCode !== 0) {
-      throw new WorkspaceError(`git clone failed for ${repo}: ${cloneResult.stderr}`);
+      throw new WorkspaceError(`git clone failed for ${repo}: ${cloneResult.stderr}`, cloneResult.spawnFailed === true);
     }
   }
 
   private async detectDefaultBranch(git: GitCommandRunner, cachePath: string): Promise<string> {
     const result = await git.run(['symbolic-ref', 'refs/remotes/origin/HEAD'], { cwd: cachePath });
     if (result.exitCode !== 0) {
-      throw new WorkspaceError(`could not detect default branch in ${cachePath}: ${result.stderr}`);
+      throw new WorkspaceError(`could not detect default branch in ${cachePath}: ${result.stderr}`, result.spawnFailed === true);
     }
     const ref = result.stdout.trim();
     const branch = ref.split('/').pop();

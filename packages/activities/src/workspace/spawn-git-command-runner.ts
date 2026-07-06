@@ -44,7 +44,7 @@ export class SpawnGitCommandRunner implements GitCommandRunner {
       child.on('error', (err: Error) => {
         if (settled) return;
         settled = true;
-        resolve({ stdout, stderr: stderr + err.message, exitCode: -1 });
+        resolve({ stdout, stderr: stderr + err.message, exitCode: -1, spawnFailed: true });
       });
       child.on('close', (exitCode: number | null) => {
         if (settled) return;

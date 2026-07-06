@@ -88,5 +88,16 @@ describe('SpawnGitCommandRunner', () => {
 
     expect(result.exitCode).toBe(-1);
     expect(result.stderr).toContain('spawn git ENOENT');
+    expect(result.spawnFailed).toBe(true);
+  });
+
+  it('does not set spawnFailed when git itself runs and merely exits non-zero', async () => {
+    const { spawnFn } = fakeSpawn(128, '', 'fatal: could not read Username for https://github.com');
+    const runner = new SpawnGitCommandRunner({ spawn: spawnFn as never });
+
+    const result = await runner.run(['fetch', 'origin'], { cwd: '/tmp/repo' });
+
+    expect(result.exitCode).toBe(128);
+    expect(result.spawnFailed).toBeUndefined();
   });
 });

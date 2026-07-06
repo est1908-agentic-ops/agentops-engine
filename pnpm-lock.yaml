@@ -80,6 +80,9 @@ importers:
       '@agentops/prompts':
         specifier: workspace:*
         version: link:../prompts
+      '@temporalio/common':
+        specifier: ^1.11.0
+        version: 1.19.0
       dotenv:
         specifier: ^16.6.1
         version: 16.6.1
