@@ -122,6 +122,23 @@ describe('buildAgentJob', () => {
       allowPrivilegeEscalation: false,
     });
   });
+
+  it('wires imagePullSecrets from imagePullSecretName when provided', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      baseRequest,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+        imagePullSecretName: 'registry-credentials',
+      },
+      paths,
+    );
+
+    expect(job.spec?.template?.spec?.imagePullSecrets).toEqual([{ name: 'registry-credentials' }]);
+  });
 });
 
 describe('K8sJobRunner', () => {

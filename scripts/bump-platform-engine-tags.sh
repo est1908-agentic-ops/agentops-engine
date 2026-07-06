@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Updates agentops-platform engine deploy pins after a merge to agentops-engine main.
-# Requires: PLATFORM_REPO_TOKEN, ENGINE_SHA, PLATFORM_DIR (checkout path).
+# Requires: ENGINE_SHA, PLATFORM_DIR (checkout path, authenticated via a
+# write-enabled deploy key passed to actions/checkout's ssh-key input).
 set -euo pipefail
 
-: "${PLATFORM_REPO_TOKEN:?PLATFORM_REPO_TOKEN is required}"
 : "${ENGINE_SHA:?ENGINE_SHA is required}"
 : "${PLATFORM_DIR:?PLATFORM_DIR is required}"
 
@@ -24,21 +24,21 @@ root = pathlib.Path("clusters/ops/engine")
 
 values = root / "values.yaml"
 text = values.read_text()
-text = re.sub(r"^(  workerTag:\s*).*$", rf'\1"{sha}"', text, flags=re.M)
-text = re.sub(r"^(  agentClaudeTag:\s*).*$", rf'\1"{sha}"', text, flags=re.M)
+text = re.sub(r"^(  workerTag:\s*).*$", rf'\g<1>"{sha}"', text, flags=re.M)
+text = re.sub(r"^(  agentClaudeTag:\s*).*$", rf'\g<1>"{sha}"', text, flags=re.M)
 values.write_text(text)
 
 app = root / "application.yaml"
 app_text = app.read_text()
 app_text, n = re.subn(
-    r"(repoURL: https://github.com/flair-hr/agentops-engine\.git\n\s*targetRevision:\s*).*$",
-    rf"\1{sha}",
+    r"(repoURL: oci://gitactions\.est1908\.top/agentic-ops\n\s*chart: engine\n\s*targetRevision:\s*).*$",
+    rf'\g<1>"0.0.0-{sha}"',
     app_text,
     count=1,
     flags=re.M,
 )
 if n != 1:
-    raise SystemExit("expected exactly one agentops-engine targetRevision to update")
+    raise SystemExit("expected exactly one engine chart targetRevision to update")
 app.write_text(app_text)
 PY
 

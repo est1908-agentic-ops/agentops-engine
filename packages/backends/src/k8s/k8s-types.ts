@@ -8,6 +8,7 @@ export interface V1Job {
       spec?: {
         restartPolicy?: string;
         securityContext?: { runAsNonRoot?: boolean; runAsUser?: number };
+        imagePullSecrets?: Array<{ name: string }>;
         volumes?: Array<{ name: string; persistentVolumeClaim?: { claimName: string } }>;
         containers?: Array<{
           name: string;

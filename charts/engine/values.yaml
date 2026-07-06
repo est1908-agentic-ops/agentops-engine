@@ -1,10 +1,12 @@
 namespace: dev-agents
 
 image:
-  repository: ghcr.io/CHANGEME/agentops-engine
+  repository: gitactions.est1908.top/agentic-ops
   workerTag: CHANGEME
   agentClaudeTag: CHANGEME
   pullPolicy: IfNotPresent
+
+imagePullSecretName: registry-credentials
 
 replicas: 1
 
