@@ -1,6 +1,14 @@
 # syntax=docker/dockerfile:1
 FROM node:22-slim AS runtime
 
+# prepareWorkspace and GithubScmPort.push shell out to `git` from inside
+# this container (packages/activities/src/workspace, packages/ports/src/github)
+# — without it, git clone fails with `spawn git ENOENT` and (pre-fix) retries
+# forever. See images/agent-runner/Dockerfile for the same pattern.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
 # Baked-in pnpm, not `corepack enable` alone: corepack lazily downloads
 # pnpm into the *current user's* cache on first invocation. Building as
 # root then running as `node` means two different cache dirs, so a bare
