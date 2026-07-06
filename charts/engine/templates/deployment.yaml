@@ -16,6 +16,8 @@ spec:
       serviceAccountName: {{ .Release.Name }}-worker
       securityContext:
         runAsNonRoot: true
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecretName }}
       containers:
         - name: worker
           image: "{{ .Values.image.repository }}/worker:{{ .Values.image.workerTag }}"
@@ -38,6 +40,8 @@ spec:
                   key: GITHUB_TOKEN
             - name: CLAUDE_AUTH_SECRET_NAME
               value: {{ .Values.claudeAuthSecretName | quote }}
+            - name: IMAGE_PULL_SECRET_NAME
+              value: {{ .Values.imagePullSecretName | quote }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
