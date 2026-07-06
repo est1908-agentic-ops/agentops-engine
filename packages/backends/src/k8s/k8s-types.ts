@@ -7,7 +7,7 @@ export interface V1Job {
     template?: {
       spec?: {
         restartPolicy?: string;
-        securityContext?: { runAsNonRoot?: boolean };
+        securityContext?: { runAsNonRoot?: boolean; runAsUser?: number };
         volumes?: Array<{ name: string; persistentVolumeClaim?: { claimName: string } }>;
         containers?: Array<{
           name: string;
@@ -16,7 +16,7 @@ export interface V1Job {
           command?: string[];
           env?: Array<{ name: string; value: string }>;
           envFrom?: Array<{ secretRef?: { name: string } }>;
-          securityContext?: { runAsNonRoot?: boolean; allowPrivilegeEscalation?: boolean };
+          securityContext?: { runAsNonRoot?: boolean; runAsUser?: number; allowPrivilegeEscalation?: boolean };
           volumeMounts?: Array<{ name: string; mountPath: string; readOnly?: boolean }>;
         }>;
       };
