@@ -66,6 +66,7 @@ export function buildJobRunnerOptions(
     workspacePvcName: process.env.WORKSPACE_PVC_NAME ?? 'workspace-tasks',
     workspaceMountPath: process.env.WORKSPACE_MOUNT_PATH ?? '/workspace/tasks',
     authSecretName,
+    runAsUser: process.env.AGENT_RUNNER_UID ? Number(process.env.AGENT_RUNNER_UID) : undefined,
     imagePullSecretName: process.env.IMAGE_PULL_SECRET_NAME,
     batchApi,
   };
