@@ -31,14 +31,14 @@ values.write_text(text)
 app = root / "application.yaml"
 app_text = app.read_text()
 app_text, n = re.subn(
-    r"(repoURL: https://github.com/flair-hr/agentops-engine\.git\n\s*targetRevision:\s*).*$",
-    rf"\g<1>{sha}",
+    r"(repoURL: oci://gitactions\.est1908\.top/agentic-ops\n\s*chart: engine\n\s*targetRevision:\s*).*$",
+    rf'\g<1>"0.0.0-{sha}"',
     app_text,
     count=1,
     flags=re.M,
 )
 if n != 1:
-    raise SystemExit("expected exactly one agentops-engine targetRevision to update")
+    raise SystemExit("expected exactly one engine chart targetRevision to update")
 app.write_text(app_text)
 PY
 
