@@ -33,17 +33,57 @@ describe('parseFlags', () => {
 });
 
 describe('buildStartScmPort', () => {
-  it('returns a seeded MemoryScmPort when GITHUB_TOKEN is unset', async () => {
-    const scm = buildStartScmPort(undefined, 'demo/repo');
+  it('returns a seeded MemoryScmPort when the registry is empty', async () => {
+    const scm = buildStartScmPort([], 'demo', 'demo/repo');
 
     expect(scm).toBeInstanceOf(MemoryScmPort);
     const config = await loadProductConfig(scm, 'demo/repo');
     expect(config.routing.implement).toEqual({ backend: 'stub', model: 'stub-v1' });
   });
 
-  it('returns a GithubScmPort when GITHUB_TOKEN is set', () => {
-    const scm = buildStartScmPort('fake-token', 'octocat/demo');
+  it('returns a GithubScmPort for a repo registered under the given product', () => {
+    const registry = [
+      {
+        product: 'my-product',
+        repo: 'octocat/demo',
+        trackerType: 'github' as const,
+        tokenEnvVar: 'GITHUB_TOKEN__MY_PRODUCT',
+        token: 'fake-token',
+      },
+    ];
+
+    const scm = buildStartScmPort(registry, 'my-product', 'octocat/demo');
 
     expect(scm).toBeInstanceOf(GithubScmPort);
+  });
+
+  it('throws when the repo is not registered', () => {
+    const registry = [
+      {
+        product: 'my-product',
+        repo: 'octocat/demo',
+        trackerType: 'github' as const,
+        tokenEnvVar: 'GITHUB_TOKEN__MY_PRODUCT',
+        token: 'fake-token',
+      },
+    ];
+
+    expect(() => buildStartScmPort(registry, 'my-product', 'octocat/other')).toThrow(/no project registered/);
+  });
+
+  it('throws when the repo is registered under a different product', () => {
+    const registry = [
+      {
+        product: 'my-product',
+        repo: 'octocat/demo',
+        trackerType: 'github' as const,
+        tokenEnvVar: 'GITHUB_TOKEN__MY_PRODUCT',
+        token: 'fake-token',
+      },
+    ];
+
+    expect(() => buildStartScmPort(registry, 'wrong-product', 'octocat/demo')).toThrow(
+      /registered under product "my-product"/,
+    );
   });
 });

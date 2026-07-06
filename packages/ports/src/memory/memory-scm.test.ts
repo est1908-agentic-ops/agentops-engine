@@ -47,8 +47,8 @@ describe('MemoryScmPort', () => {
     await expect(scm.readFile('demo/repo', 'README.md')).resolves.toBe('# demo');
   });
 
-  it('push accepts and ignores a workspaceRef (real git happens in the real adapter, not here)', async () => {
+  it('push accepts and ignores repo/workspaceRef (real git happens in the real adapter, not here)', async () => {
     const scm = new MemoryScmPort();
-    await expect(scm.push('/some/workspace/path', 'branch-x', 'hash-x')).resolves.toBeUndefined();
+    await expect(scm.push('demo/repo', '/some/workspace/path', 'branch-x', 'hash-x')).resolves.toBeUndefined();
   });
 });

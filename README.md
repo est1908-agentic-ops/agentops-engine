@@ -15,7 +15,14 @@ pnpm lint && pnpm typecheck && pnpm test && pnpm test:policies-coverage && pnpm 
 
 ## Run locally
 
-Requires `GITHUB_TOKEN` (PAT with `repo` scope) in the environment or a repo-root `.env` file, a running Temporal dev server, and `agentops.json` in the target repo.
+Requires a running Temporal dev server and `agentops.json` in the target repo. For a real (non-demo) run, register at least one project via a repo-root `.env` file — see [project-registry-design.md](docs/superpowers/specs/2026-07-06-project-registry-design.md):
+
+```
+PROJECT_REGISTRY_JSON=[{"product":"my-product","repo":"owner/repo","trackerType":"github","tokenEnvVar":"GITHUB_TOKEN__MY_PRODUCT"}]
+GITHUB_TOKEN__MY_PRODUCT=ghp_xxx
+```
+
+No `.env` at all → DEMO mode (in-memory ports + stub backend, no tokens spent). `--product` must match the registered product for the given `--repo` once a registry is configured.
 
 ```bash
 # terminal 1
@@ -38,24 +45,28 @@ pnpm engine signal <task-id> resume
 
 **Opens a real PR and spends real tokens** — use a disposable test repo and check routing in `agentops.json` first.
 
-## Images & chart (M2)
+## Images & chart (M2/M3)
 
-Two images build from this repo:
+Three images build from this repo:
 
 - `images/worker/Dockerfile` — runs the worker via the same `tsx src/main.ts`
   entrypoint used locally (`pnpm worker`); see the engine-image-and-chart
   design doc for why this isn't a compiled `node dist/main.js` image.
-- `images/agent-claude/Dockerfile` — `git` + the `claude` CLI, with a
-  placeholder `step-ca-root.crt` baked in. **Before building this image for
-  a real cluster**, replace `images/agent-claude/step-ca-root.crt` with the
-  real root CA certificate exported from step-ca (see agentops-platform's
+- `images/agent-runner/Dockerfile` — `git` + every agent backend's CLI
+  (`claude`, `pi`) in one shared image (ARCHITECTURE.md §5.4: both are thin
+  `npm install -g` wrappers with no conflicting deps, so one pinned image
+  covers all backends instead of one per backend), with a placeholder
+  `step-ca-root.crt` baked in. **Before building this image for a real
+  cluster**, replace `images/agent-runner/step-ca-root.crt` with the real
+  root CA certificate exported from step-ca (see agentops-platform's
   platform-components design doc for the export command) — the placeholder
   lets the image build today but issues no real trust to internal services.
+- `images/gateway/Dockerfile` — the M3 webhook receiver ([design doc](docs/superpowers/specs/2026-07-06-gateway-design.md)), same plain `node:22-slim` + pnpm shape as the worker image, no CLI installs.
 
-CI builds both on every push/PR and pushes immutable tags to the self-hosted
+CI builds all three on every push/PR and pushes immutable tags to the self-hosted
 registry on merge to `main`:
 
-`gitactions.est1908.top/agentic-ops/{worker,agent-claude}:<git-sha>`
+`gitactions.est1908.top/agentic-ops/{worker,agent-runner,gateway}:<git-sha>`
 
 A follow-up CI job commits that same `<git-sha>` into
 `agentops-platform`'s `clusters/ops/engine/values.yaml` (and pins the chart

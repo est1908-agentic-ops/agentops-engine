@@ -100,7 +100,7 @@ describe('createActivities', () => {
     const { prRef } = await activities.openPr({ repo: 'demo/repo', branch: 'b', title: 't', body: 'b' });
     deps.scm.scriptFeedback(prRef, [{ ciStatus: 'green', unresolvedThreads: 0, comments: [] }]);
     await expect(activities.getPrFeedback(prRef)).resolves.toMatchObject({ ciStatus: 'green' });
-    await expect(activities.pushBranch('/some/workspace', 'branch', 'hash')).resolves.toBeUndefined();
+    await expect(activities.pushBranch('demo/repo', '/some/workspace', 'branch', 'hash')).resolves.toBeUndefined();
   });
 });
 

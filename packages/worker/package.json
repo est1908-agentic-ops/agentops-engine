@@ -12,6 +12,7 @@
   "dependencies": {
     "@agentops/activities": "workspace:*",
     "@agentops/backends": "workspace:*",
+    "@agentops/contracts": "workspace:*",
     "@agentops/ports": "workspace:*",
     "@agentops/prompts": "workspace:*",
     "@agentops/workflows": "workspace:*",

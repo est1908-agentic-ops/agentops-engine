@@ -7,3 +7,4 @@ export * from './verdict';
 export * from './agent-run';
 export * from './run-stats';
 export * from './pr-feedback';
+export * from './project-registry';

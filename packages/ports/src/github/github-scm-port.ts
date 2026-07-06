@@ -75,7 +75,7 @@ export class GithubScmPort implements ScmPort {
     return { ciStatus, unresolvedThreads, comments };
   }
 
-  async push(workspaceRef: string, branch: string, _contentHash: string): Promise<void> {
+  async push(_repo: string, workspaceRef: string, branch: string, _contentHash: string): Promise<void> {
     const result = await this.git.run(['push', 'origin', branch], { cwd: workspaceRef });
     if (result.exitCode !== 0) {
       throw new Error(`GithubScmPort.push: git push failed: ${result.stderr}`);

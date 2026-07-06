@@ -9,3 +9,4 @@ export * from './github/github-tracker-port';
 export * from './github/github-scm-port';
 export * from './github/build-github-ports';
 export * from './github/clone-url';
+export * from './github/project-scoped-ports';
