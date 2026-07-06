@@ -20,6 +20,7 @@ export interface K8sJobRunnerOptions {
   batchApi: BatchV1ApiLike;
   pollIntervalMs?: number;
   authSecretName?: string;
+  runAsUser?: number;
   imagePullSecretName?: string;
   heartbeat?: () => void;
   now?: () => number;
@@ -59,12 +60,18 @@ export function buildAgentJob(
   spec: CliSpec,
   opts: Pick<
     K8sJobRunnerOptions,
-    'namespace' | 'workspacePvcName' | 'workspaceMountPath' | 'authSecretName' | 'imagePullSecretName'
+    | 'namespace'
+    | 'workspacePvcName'
+    | 'workspaceMountPath'
+    | 'authSecretName'
+    | 'runAsUser'
+    | 'imagePullSecretName'
   >,
   paths: ReturnType<typeof agentOpsArtifactPaths>,
 ): V1Job {
   const args = spec.buildArgs(req);
   const envFrom = opts.authSecretName ? [{ secretRef: { name: opts.authSecretName } }] : undefined;
+  const runAsUser = opts.runAsUser ?? 1000;
   const imagePullSecrets = opts.imagePullSecretName ? [{ name: opts.imagePullSecretName }] : undefined;
 
   return {
@@ -79,7 +86,7 @@ export function buildAgentJob(
       template: {
         spec: {
           restartPolicy: 'Never',
-          securityContext: { runAsNonRoot: true },
+          securityContext: { runAsNonRoot: true, runAsUser },
           imagePullSecrets,
           volumes: [
             {
@@ -99,7 +106,7 @@ export function buildAgentJob(
                 { name: 'ERR_FILE', value: paths.errFile },
               ],
               envFrom,
-              securityContext: { runAsNonRoot: true, allowPrivilegeEscalation: false },
+              securityContext: { runAsNonRoot: true, runAsUser, allowPrivilegeEscalation: false },
               volumeMounts: [
                 {
                   name: 'workspace-tasks',

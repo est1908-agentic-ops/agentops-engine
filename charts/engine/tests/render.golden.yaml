@@ -84,12 +84,16 @@ spec:
       serviceAccountName: engine-worker
       securityContext:
         runAsNonRoot: true
+        runAsUser: 1000
       imagePullSecrets:
         - name: registry-credentials
       containers:
         - name: worker
           image: "gitactions.est1908.top/agentic-ops/worker:CHANGEME"
           imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
           env:
             - name: TEMPORAL_ADDRESS
               value: "localhost:7233"
@@ -101,11 +105,14 @@ spec:
               value: "/workspace/tasks"
             - name: AGENT_RUNNER_IMAGE
               value: "gitactions.est1908.top/agentic-ops/agent-claude:CHANGEME"
+            - name: AGENT_RUNNER_UID
+              value: "1000"
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: github-token
                   key: GITHUB_TOKEN
+                  optional: true
             - name: CLAUDE_AUTH_SECRET_NAME
               value: "claude-credentials"
             - name: IMAGE_PULL_SECRET_NAME

@@ -73,7 +73,12 @@ describe('buildAgentJob', () => {
       { name: 'ERR_FILE', value: paths.errFile },
     ]);
     expect(container?.volumeMounts).toEqual([{ name: 'workspace-tasks', mountPath: '/workspace/tasks' }]);
-    expect(container?.securityContext).toEqual({ runAsNonRoot: true, allowPrivilegeEscalation: false });
+    expect(job.spec?.template?.spec?.securityContext).toEqual({ runAsNonRoot: true, runAsUser: 1000 });
+    expect(container?.securityContext).toEqual({
+      runAsNonRoot: true,
+      runAsUser: 1000,
+      allowPrivilegeEscalation: false,
+    });
     expect(container?.envFrom).toBeUndefined();
   });
 
@@ -93,6 +98,29 @@ describe('buildAgentJob', () => {
 
     const container = job.spec?.template?.spec?.containers?.[0];
     expect(container?.envFrom).toEqual([{ secretRef: { name: 'claude-credentials' } }]);
+  });
+
+  it('uses a custom runAsUser when provided', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      baseRequest,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+        runAsUser: 2000,
+      },
+      paths,
+    );
+
+    const container = job.spec?.template?.spec?.containers?.[0];
+    expect(job.spec?.template?.spec?.securityContext).toEqual({ runAsNonRoot: true, runAsUser: 2000 });
+    expect(container?.securityContext).toEqual({
+      runAsNonRoot: true,
+      runAsUser: 2000,
+      allowPrivilegeEscalation: false,
+    });
   });
 
   it('wires imagePullSecrets from imagePullSecretName when provided', () => {

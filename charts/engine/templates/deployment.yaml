@@ -15,13 +15,15 @@ spec:
     spec:
       serviceAccountName: {{ .Release.Name }}-worker
       securityContext:
-        runAsNonRoot: true
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       imagePullSecrets:
         - name: {{ .Values.imagePullSecretName }}
       containers:
         - name: worker
           image: "{{ .Values.image.repository }}/worker:{{ .Values.image.workerTag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           env:
             - name: TEMPORAL_ADDRESS
               value: {{ .Values.temporalAddress | quote }}
@@ -33,11 +35,14 @@ spec:
               value: {{ .Values.workspace.mountPath | quote }}
             - name: AGENT_RUNNER_IMAGE
               value: "{{ .Values.image.repository }}/agent-claude:{{ .Values.image.agentClaudeTag }}"
+            - name: AGENT_RUNNER_UID
+              value: {{ .Values.agentRunnerUid | quote }}
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.githubTokenSecretName }}
                   key: GITHUB_TOKEN
+                  optional: true
             - name: CLAUDE_AUTH_SECRET_NAME
               value: {{ .Values.claudeAuthSecretName | quote }}
             - name: IMAGE_PULL_SECRET_NAME
