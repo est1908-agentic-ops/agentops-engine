@@ -15,11 +15,13 @@ spec:
     spec:
       serviceAccountName: {{ .Release.Name }}-worker
       securityContext:
-        runAsNonRoot: true
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
         - name: worker
           image: "{{ .Values.image.repository }}/worker:{{ .Values.image.workerTag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           env:
             - name: TEMPORAL_ADDRESS
               value: {{ .Values.temporalAddress | quote }}

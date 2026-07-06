@@ -84,10 +84,14 @@ spec:
       serviceAccountName: engine-worker
       securityContext:
         runAsNonRoot: true
+        runAsUser: 1000
       containers:
         - name: worker
           image: "ghcr.io/CHANGEME/agentops-engine/worker:CHANGEME"
           imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
           env:
             - name: TEMPORAL_ADDRESS
               value: "localhost:7233"
