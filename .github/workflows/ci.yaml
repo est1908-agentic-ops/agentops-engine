@@ -79,12 +79,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: flair-hr/agentops-platform
-          token: ${{ secrets.PLATFORM_REPO_TOKEN }}
+          ssh-key: ${{ secrets.PLATFORM_DEPLOY_KEY }}
           path: platform
 
       - name: Bump engine image tags in platform GitOps
         env:
-          PLATFORM_REPO_TOKEN: ${{ secrets.PLATFORM_REPO_TOKEN }}
           ENGINE_SHA: ${{ github.sha }}
           PLATFORM_DIR: platform
         run: bash scripts/bump-platform-engine-tags.sh
