@@ -54,6 +54,10 @@ spec:
               value: {{ .Values.piAuthSecretName | quote }}
             - name: IMAGE_PULL_SECRET_NAME
               value: {{ .Values.imagePullSecretName | quote }}
+            {{- if .Values.otelExporterOtlpEndpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.otelExporterOtlpEndpoint | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:

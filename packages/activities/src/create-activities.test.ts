@@ -1,4 +1,7 @@
 import { describe, expect, it } from 'vitest';
+import { context, trace } from '@opentelemetry/api';
+import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
+import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import type { AgentBackend } from '@agentops/backends';
 import { LiteLlmBudgetExceededError, RateWindowExceededError, StubBackend } from '@agentops/backends';
 import { MemoryTrackerPort, MemoryScmPort } from '@agentops/ports';
@@ -103,6 +106,76 @@ describe('createActivities', () => {
     deps.scm.scriptFeedback(prRef, [{ ciStatus: 'green', unresolvedThreads: 0, comments: [] }]);
     await expect(activities.getPrFeedback(prRef)).resolves.toMatchObject({ ciStatus: 'green' });
     await expect(activities.pushBranch('demo/repo', '/some/workspace', 'branch', 'hash')).resolves.toBeUndefined();
+  });
+});
+
+describe('createActivities — tracing', () => {
+  it('runAgent attaches gen_ai.*/agentops.* attributes to the active span', async () => {
+    // NodeTracerProvider (not the lighter BasicTracerProvider) + .register()
+    // is what actually wires up Node's AsyncLocalStorage-based context
+    // manager -- without it, `context.active()` doesn't survive the `await
+    // backend.run(...)` inside runAgent and the span attribute assertion
+    // below fails as if no span were ever active.
+    const exporter = new InMemorySpanExporter();
+    const provider = new NodeTracerProvider({ spanProcessors: [new SimpleSpanProcessor(exporter)] });
+    provider.register();
+    const tracer = provider.getTracer('test');
+
+    const deps = buildDeps();
+    (deps.backends.stub as StubBackend).scriptResponse('implement', 2, { output: 'diff', tokensIn: 12, tokensOut: 34 });
+    const activities = createActivities(deps);
+
+    const span = tracer.startSpan('RunActivity');
+    await context.with(trace.setSpan(context.active(), span), () =>
+      activities.runAgent({
+        taskId: 't1',
+        stage: 'implement',
+        attempt: 2,
+        callIndex: 1,
+        backend: 'stub',
+        model: 'stub-v1',
+        promptRef: 'implement.md',
+        promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' },
+        workspaceRef: 'demo/repo',
+        limits: { maxTokens: 1000, timeoutMs: 60_000 },
+      }),
+    );
+    span.end();
+
+    // SimpleSpanProcessor exports synchronously on span.end() -- read spans
+    // before shutdown, which (InMemorySpanExporter specifically) clears its
+    // buffer as part of shutting down.
+    const [recorded] = exporter.getFinishedSpans();
+    await provider.shutdown();
+    expect(recorded.attributes).toMatchObject({
+      'gen_ai.system': 'stub',
+      'gen_ai.request.model': 'stub-v1',
+      'gen_ai.usage.input_tokens': 12,
+      'gen_ai.usage.output_tokens': 34,
+      'agentops.stage': 'implement',
+      'agentops.attempt': 2,
+    });
+  });
+
+  it('runAgent does not throw when there is no active span', async () => {
+    const deps = buildDeps();
+    (deps.backends.stub as StubBackend).scriptResponse('implement', 1, { output: 'diff' });
+    const activities = createActivities(deps);
+
+    await expect(
+      activities.runAgent({
+        taskId: 't1',
+        stage: 'implement',
+        attempt: 1,
+        callIndex: 1,
+        backend: 'stub',
+        model: 'stub-v1',
+        promptRef: 'implement.md',
+        promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' },
+        workspaceRef: 'demo/repo',
+        limits: { maxTokens: 1000, timeoutMs: 60_000 },
+      }),
+    ).resolves.toMatchObject({ output: 'diff' });
   });
 });
 

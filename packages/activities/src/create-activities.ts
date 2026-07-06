@@ -1,3 +1,4 @@
+import { trace } from '@opentelemetry/api';
 import { LiteLlmBudgetExceededError, RateWindowExceededError, type AgentBackend } from '@agentops/backends';
 import type { Issue, OpenPrRequest, OpenPrResult, ScmPort, TrackerPort } from '@agentops/ports';
 import type { AgentRunRequest, AgentRunResult, PrFeedback, RunStats } from '@agentops/contracts';
@@ -33,7 +34,7 @@ export function createActivities(deps: ActivityDependencies) {
       }
       const prompt = deps.prompts.render(req.promptRef, req.promptContext);
       try {
-        return await backend.run({
+        const result = await backend.run({
           taskId: req.taskId,
           stage: req.stage,
           attempt: req.attempt,
@@ -45,6 +46,20 @@ export function createActivities(deps: ActivityDependencies) {
           limits: req.limits,
           prompt,
         });
+        // gen_ai.* are the OTel semantic-convention attribute names for LLM
+        // usage. There's no per-call granularity available today (the CLI
+        // returns one aggregate usage total per invocation, see the design
+        // doc), so these land on this activity's own span rather than
+        // separate child spans.
+        trace.getActiveSpan()?.setAttributes({
+          'gen_ai.system': req.backend,
+          'gen_ai.request.model': req.model,
+          'gen_ai.usage.input_tokens': result.tokensIn,
+          'gen_ai.usage.output_tokens': result.tokensOut,
+          'agentops.stage': req.stage,
+          'agentops.attempt': req.attempt,
+        });
+        return result;
       } catch (err) {
         // A LiteLLM virtual-key budget cap is definitive, not transient --
         // same "typed error at the boundary, non-retryable ApplicationFailure
@@ -89,7 +104,7 @@ export function createActivities(deps: ActivityDependencies) {
       deps.stageResults.record(result);
     },
     async recordRunStats(stats: RunStats): Promise<void> {
-      deps.stats.record(stats);
+      await deps.stats.record(stats);
     },
     async prepareWorkspace(req: { taskId: string; repo: string }): Promise<PreparedWorkspace> {
       try {

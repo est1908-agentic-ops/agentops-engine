@@ -30,11 +30,11 @@ Every `devCycle` workflow execution produces one trace, walkable in Tempo/Grafan
 
 ### Dependency pins
 
-OTel JS ships two release lines that don't mix at runtime: the stable 1.x/2.x core (`api`, `core`, `resources`, `sdk-trace-*`) and 0.x "experimental" exporters. `@temporalio/interceptors-opentelemetry`'s pinned version for this repo's Temporal SDK line (`^1.11.0`, matching every other `@temporalio/*` dependency already in this monorepo) depends on `@opentelemetry/{core,resources,sdk-trace-base}@^1.19.0` — the 1.x line. The **latest** `@opentelemetry/exporter-trace-otlp-grpc` (`0.220.0`) has already moved to depend on `@opentelemetry/sdk-trace@2.9.0` (the 2.x line, which changed `Resource` from a class to a factory function — a real breaking change for `makeWorkflowExporter(exporter, resource)`'s signature). Verified against the npm registry directly (not assumed): `@opentelemetry/exporter-trace-otlp-grpc@0.57.2` is the last version still depending on the 1.x line, and its dependency versions are internally consistent:
+OTel JS ships two release lines that don't mix at runtime: the stable 1.x/2.x core (`api`, `core`, `resources`, `sdk-trace-*`) and 0.x "experimental" exporters. Every `@temporalio/*` package in this repo is declared as `^1.11.0` but pnpm has always resolved that range to `1.19.0` (confirmed via `pnpm ls` after installing) — `@temporalio/interceptors-opentelemetry` at `^1.11.0` resolves the same way, landing on `1.19.0` in lockstep with the rest, exactly matching its exact-pinned peer dependencies (`@temporalio/{client,common,worker,activity,workflow}: 1.19.0`). At that resolved version it depends on `@opentelemetry/{core,resources,sdk-trace-base}@^1.25.1` — still the 1.x line. The **latest** `@opentelemetry/exporter-trace-otlp-grpc` (`0.220.0`) has already moved to depend on `@opentelemetry/sdk-trace@2.9.0` (the 2.x line, which changed `Resource` from a class to a factory function — a real breaking change for `makeWorkflowExporter(exporter, resource)`'s signature). Verified against the npm registry directly (not assumed): `@opentelemetry/exporter-trace-otlp-grpc@0.57.2` is the last version still depending on the 1.x line, and its dependency versions are internally consistent with each other and satisfy interceptors-opentelemetry's `^1.25.1` floor:
 
 | Package | Version | Why this exact version |
 |---|---|---|
-| `@temporalio/interceptors-opentelemetry` | `^1.11.0` | Matches this repo's pinned `@temporalio/*` SDK line exactly (confirmed this version exists on npm) |
+| `@temporalio/interceptors-opentelemetry` | `^1.11.0` | Same range every other `@temporalio/*` dependency in this repo uses — resolves to `1.19.0` in lockstep with them (confirmed via `pnpm ls` post-install), not pinned separately |
 | `@opentelemetry/api` | `^1.9.0` | Already the transitive floor every `@temporalio/*` package requires |
 | `@opentelemetry/core` | `1.30.1` | Last coherent 1.x release wave (confirmed via `exporter-trace-otlp-grpc@0.57.2`'s own `dependencies`) |
 | `@opentelemetry/resources` | `1.30.1` | Same wave — this is the `Resource` type `makeWorkflowExporter` expects |
@@ -51,8 +51,9 @@ Only the worker process needs this (not `packages/workflows` — see determinism
 When set:
 1. Build a `Resource` (`service.name: 'agentops-worker'`).
 2. Construct `OTLPTraceExporter` — its default constructor already reads `OTEL_EXPORTER_OTLP_ENDPOINT`/`OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` per the OTel env-var spec, so the worker doesn't need to parse the URL itself.
-3. Register a `NodeTracerProvider` globally (`provider.register()`) with a `BatchSpanProcessor(exporter)` — this is what makes `OpenTelemetryActivityInboundInterceptor`'s internal `otel.trace.getTracer(...)` call (no explicit tracer passed) resolve to a real, exporting tracer instead of the no-op default.
-4. Return `{ workflowExporterSink: makeWorkflowExporter(exporter, resource), tracer, shutdown }` for `create-worker.ts` to wire in, and for `main.ts` to call `shutdown()` on process exit (flushes the `BatchSpanProcessor`'s buffer — otherwise the last batch of spans from a short-lived process can be lost, a real and easy-to-miss failure mode with batch processors).
+3. Build one `BatchSpanProcessor(exporter)` and register a `NodeTracerProvider` globally (`provider.register()`) with it — this is what makes `OpenTelemetryActivityInboundInterceptor`'s internal `otel.trace.getTracer(...)` call (no explicit tracer passed) resolve to a real, exporting tracer instead of the no-op default.
+4. Hand that **same** `BatchSpanProcessor` instance to `makeWorkflowExporter(processor, resource)` for the workflow-side sink, rather than creating a second one — one export pipeline, fed from both activity-native spans and the sandboxed workflow's serialized spans. (`makeWorkflowExporter`'s raw-`SpanExporter` overload still exists in the installed version but is marked `@deprecated` in favor of passing a `SpanProcessor` directly — used here.)
+5. Return `{ workflowExporterSink: makeWorkflowExporter(processor, resource), tracer, shutdown }` for `create-worker.ts` to wire in, and for `main.ts` to call `shutdown()` on process exit (flushes the processor's buffer — otherwise the last batch of spans from a short-lived process can be lost, a real and easy-to-miss failure mode with batch processors).
 
 ### Worker wiring: `packages/worker/src/create-worker.ts`
 
@@ -62,30 +63,27 @@ Worker.create({
   sinks: tracing ? { exporter: tracing.workflowExporterSink } : undefined,
   interceptors: {
     activityInbound: tracing ? [(ctx) => new OpenTelemetryActivityInboundInterceptor(ctx, { tracer: tracing.tracer })] : [],
-    workflowModules: tracing ? [require.resolve('@agentops/workflows/lib/otel-interceptors')] : [],
+    workflowModules: tracing ? [require.resolve('@agentops/workflows/src/otel-interceptors')] : [],
   },
 })
 ```
 
 (Illustrative — exact shape follows `@temporalio/worker`'s `WorkerOptions.interceptors`/`sinks` types.)
 
-### Workflow-side module: `packages/workflows/src/otel-interceptors.ts` (new)
+### Workflow-side module: no new file needed
 
-```ts
-import {
-  OpenTelemetryInboundInterceptor,
-  OpenTelemetryOutboundInterceptor,
-  OpenTelemetryInternalsInterceptor,
-} from '@temporalio/interceptors-opentelemetry/lib/workflow';
+The installed version (`1.19.0` — see dependency pins above) ships a ready-made workflow-interceptor-module entry point at `@temporalio/interceptors-opentelemetry/lib/workflow-interceptors`, exporting exactly the `inbound`/`outbound`/`internals` wiring this sub-project needs:
 
-export const interceptors = () => ({
+```js
+// node_modules/@temporalio/interceptors-opentelemetry/lib/workflow-interceptors.js
+const interceptors = () => ({
   inbound: [new OpenTelemetryInboundInterceptor()],
   outbound: [new OpenTelemetryOutboundInterceptor()],
   internals: [new OpenTelemetryInternalsInterceptor()],
 });
 ```
 
-This is the standard shape Temporal's own docs/samples use for workflow interceptor modules (referenced by path via `workflowModules`, since workflow code runs in an isolated V8 sandbox and can't receive live object references from the worker process).
+`create-worker.ts` references it by path (`require.resolve('@temporalio/interceptors-opentelemetry/lib/workflow-interceptors')`) — Temporal's workflow bundler (webpack, invoked internally by `Worker.create`) resolves and bundles it into the sandboxed workflow environment from there, the same way it already bundles `workflowsPath`. No wrapper file needed in `packages/workflows`, and no new dependency there either — `packages/worker` already depends on `@temporalio/interceptors-opentelemetry` for the worker-side classes, and that's sufficient for `require.resolve` to find this path.
 
 ### Determinism boundary (AGENTS.md hard rule #1)
 
@@ -127,7 +125,7 @@ trace.getActiveSpan()?.setAttributes({
 ## Testing strategy
 
 - **Unit:** `create-activities.test.ts` — with an `InMemorySpanExporter` (`@opentelemetry/sdk-trace-base`) and a real `NodeTracerProvider` registered for the test, assert `runAgent` produces a span with the expected `gen_ai.*`/`agentops.*` attributes. This is a real assertion against real span objects, not a mock.
-- **Integration:** a new test builds a real `Worker` (via `createWorker`) with tracing wired in and a `TestWorkflowEnvironment` (the same harness `dev-cycle.test.ts`-style tests already use), runs a short `devCycle` against the `stub` backend, and asserts the `InMemorySpanExporter` captured a `RunWorkflow` span and at least one `RunActivity` span with the right parent-child relationship. This is what actually proves the workflow-side interceptor module bundles and runs correctly inside the sandboxed workflow environment — `helm template`-style "does it render" isn't available for this problem, so an executable test is the equivalent verification.
+- **Integration (`e2e/otel-tracing.e2e.test.ts`):** builds a real `Worker` (via `createWorker`) with tracing wired to an injected `InMemorySpanExporter`, runs a full `devCycle` against the `stub` backend through the existing `TestWorkflowEnvironment` e2e harness (`buildTestEnv`, extended with an optional `tracing` param), and asserts the exporter actually captured a `RunWorkflow:devCycle` span and `RunActivity:runAgent` spans sharing its trace ID, with the expected `gen_ai.*`/`agentops.*` attributes. Span names are `<SpanName>:<workflow/activity type>` (e.g. `RunActivity:runAgent`, not bare `RunActivity`) — confirmed by running the test and inspecting real captured spans, not assumed from the interceptor package's `SpanName` enum alone. This is what actually proves the workflow-side interceptor module bundles and runs correctly inside the sandboxed workflow environment — `helm template`-style "does it render" isn't available for this problem, so an executable test is the equivalent verification.
 - **Chart:** `charts/engine/tests/render.golden.yaml` updated for the new (empty-by-default, so absent) env entry; `run.sh`'s existing diff check catches regressions.
 - Not verified here (no cluster access from this sandbox): that spans actually arrive in Tempo. That's an operator smoke-test once this is deployed — open the Grafana Explore view against the Tempo datasource sub-project 1 already wired and search for a trace after running a real task.
 
@@ -139,8 +137,8 @@ trace.getActiveSpan()?.setAttributes({
 
 ## Package/file summary
 
-- **New:** `packages/worker/src/tracing.ts`, `packages/workflows/src/otel-interceptors.ts`.
-- **Changed:** `packages/worker/src/create-worker.ts`, `packages/worker/src/main.ts` (shutdown hook), `packages/activities/src/create-activities.ts`, `packages/workflows/src/dev-cycle.ts` (task_id/repo attributes), `charts/engine/values.yaml` + `templates/deployment.yaml` + `tests/render.golden.yaml`, `package.json` for `worker`/`activities`/`workflows` (new deps).
+- **New:** `packages/worker/src/tracing.ts`, `e2e/otel-tracing.e2e.test.ts`.
+- **Changed:** `packages/worker/src/{create-worker,main,index}.ts` (shutdown hook, `tracing` option, re-export), `packages/activities/src/create-activities.ts` (+ test), `packages/workflows/src/dev-cycle.ts` (task_id/repo attributes), `charts/engine/values.yaml` + `templates/deployment.yaml` (golden file needed no change — the new env entry is empty-by-default, so absent from the rendered output), `e2e/helpers.ts` (optional `tracing` param on `buildTestEnv`), `package.json` for `worker`/`activities`/`workflows`/root (new deps — root needed `@opentelemetry/sdk-trace-base` for `e2e/`'s `InMemorySpanExporter`, since `e2e/` isn't its own workspace package and only resolves root devDependencies).
 - **Not in this repo:** `agentops-platform`'s `clusters/ops/engine/values.yaml` real endpoint value — separate follow-up PR there, same division of labor sub-project 1 used for cross-repo wiring.
 
 ## Open questions carried forward

@@ -1,3 +1,4 @@
+import { trace } from '@opentelemetry/api';
 import {
   ActivityFailure,
   ApplicationFailure,
@@ -61,6 +62,15 @@ function isBudgetExceededFailure(err: unknown): boolean {
 }
 
 export async function devCycle(input: TaskInput): Promise<DevCycleState> {
+  // Only reads/mutates the span object the workflow-side OTel interceptor
+  // already made active for this execution -- no wall-clock read, I/O, or
+  // randomness, so this stays within the determinism boundary (AGENTS.md
+  // hard rule #1) the same way the interceptor package itself does.
+  trace.getActiveSpan()?.setAttributes({
+    'agentops.task_id': input.taskId,
+    'agentops.repo': input.repo,
+  });
+
   const state: DevCycleState = {
     taskId: input.taskId,
     stage: 'context',

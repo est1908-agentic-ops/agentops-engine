@@ -40,6 +40,7 @@ import {
 import { PromptPack } from '@agentops/prompts';
 import type { DevCycleActivities } from '@agentops/workflows';
 import { createWorker } from './create-worker';
+import { setupTracing } from './tracing';
 
 export interface ActivityWiring {
   scm: ScmPort;
@@ -167,15 +168,27 @@ async function main(): Promise<void> {
     prompts: new PromptPack(),
   });
 
+  const tracing = setupTracing();
+  console.log(
+    tracing
+      ? 'agentops worker: tracing ENABLED — exporting to OTEL_EXPORTER_OTLP_ENDPOINT'
+      : 'agentops worker: tracing disabled (OTEL_EXPORTER_OTLP_ENDPOINT not set)',
+  );
+
   const worker = await createWorker({
     taskQueue: 'agentops-devcycle',
     activities,
     connection,
     namespace: process.env.TEMPORAL_NAMESPACE,
+    tracing,
   });
 
   console.log('agentops worker started on task queue "agentops-devcycle"');
-  await worker.run();
+  try {
+    await worker.run();
+  } finally {
+    await tracing?.shutdown();
+  }
 }
 
 if (require.main === module) {
