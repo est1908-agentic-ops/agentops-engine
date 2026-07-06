@@ -103,7 +103,9 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: github-token
-                  key: token
+                  key: GITHUB_TOKEN
+            - name: CLAUDE_AUTH_SECRET_NAME
+              value: "claude-credentials"
           resources:
             limits:
               cpu: "1"
