@@ -31,7 +31,7 @@ values.write_text(text)
 app = root / "application.yaml"
 app_text = app.read_text()
 app_text, n = re.subn(
-    r"(repoURL: oci://gitactions\.est1908\.top/agentic-ops\n\s*chart: engine\n\s*targetRevision:\s*).*$",
+    r"(repoURL: oci://gitactions\.est1908\.top/agentic-ops/engine\n\s*chart: engine\n\s*targetRevision:\s*).*$",
     rf'\g<1>"0.0.0-{sha}"',
     app_text,
     count=1,
