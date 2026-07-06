@@ -135,6 +135,7 @@ async function main(): Promise<void> {
     taskQueue: 'agentops-devcycle',
     activities,
     connection,
+    namespace: process.env.TEMPORAL_NAMESPACE,
   });
 
   console.log('agentops worker started on task queue "agentops-devcycle"');

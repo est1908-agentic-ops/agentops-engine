@@ -96,7 +96,7 @@ After `agentops-platform` bootstrap and ArgoCD sync (see that repo's `docs/BOOTS
 
 ```bash
 kubectl port-forward svc/temporal-frontend 7233:7233 -n temporal &
-TEMPORAL_ADDRESS=localhost:7233 pnpm --filter @agentops/cli engine start \
+TEMPORAL_ADDRESS=localhost:7233 TEMPORAL_NAMESPACE=dev-agents pnpm --filter @agentops/cli engine start \
   --issue owner/repo#42 --repo owner/repo --product my-product --goal "..."
 ```
 

@@ -14,13 +14,15 @@ spec:
         app: {{ .Release.Name }}-gateway
     spec:
       securityContext:
-        runAsNonRoot: true
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
       imagePullSecrets:
         - name: {{ .Values.imagePullSecretName }}
       containers:
         - name: gateway
           image: "{{ .Values.image.repository }}/gateway:{{ .Values.image.gatewayTag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.containerSecurityContext | nindent 12 }}
           ports:
             - containerPort: {{ .Values.gateway.port }}
           env:
@@ -28,6 +30,8 @@ spec:
               value: {{ .Values.gateway.port | quote }}
             - name: TEMPORAL_ADDRESS
               value: {{ .Values.temporalAddress | quote }}
+            - name: TEMPORAL_NAMESPACE
+              value: {{ .Values.temporal.namespace | quote }}
             - name: TRIGGER_LABEL
               value: {{ .Values.gateway.triggerLabel | quote }}
             - name: GITHUB_WEBHOOK_SECRET

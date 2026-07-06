@@ -17,13 +17,32 @@ temporalAddress: "localhost:7233"
 
 taskQueue: agentops-devcycle
 
+# Per ARCHITECTURE.md §5.2/§6: dev-agents/prod-agents each get a separate
+# Temporal namespace so testing the platform can't fire real hotfixes.
+# Defaults to the same name as the k8s namespace above for that reason.
+# Auto-provisioned by a pre-install/pre-upgrade Helm hook Job (see
+# templates/temporal-namespace-job.yaml) since Temporal doesn't create
+# custom namespaces on its own.
+temporal:
+  namespace: dev-agents
+  retention: 72h
+  adminToolsImage: temporalio/admin-tools:1.31.1
+
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
 
 containerSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
+  runAsGroup: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault
 
 agentRunnerUid: 1000
 

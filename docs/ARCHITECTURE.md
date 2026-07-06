@@ -100,7 +100,7 @@ flowchart LR
 
 ### 5.2 Temporal
 - Official Helm chart, Postgres persistence (shared Postgres instance, separate DB).
-- Namespaces per environment (`prod-agents`, `dev-agents`).
+- Namespaces per environment (`prod-agents`, `dev-agents`) — Temporal doesn't create these on its own, so the engine chart's `temporal-namespace-job.yaml` pre-install/pre-upgrade hook runs an idempotent `temporal operator namespace create` (describes first, skips if already registered) against `temporalAddress`, keyed off the `temporal.namespace` value. Without it, a fresh Temporal install leaves the worker and gateway crash-looping on "Namespace X is not found".
 - **Workers**: one Deployment running the engine's workflow + activity code. Replicas + task-queue slots = concurrency. One worker fleet serves all repos and products (repo/product are workflow arguments).
 
 ### 5.3 Gateway (trigger layer)

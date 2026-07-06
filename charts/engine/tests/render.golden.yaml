@@ -97,6 +97,8 @@ spec:
     spec:
       serviceAccountName: engine-worker
       securityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
         runAsNonRoot: true
         runAsUser: 1000
       imagePullSecrets:
@@ -106,11 +108,20 @@ spec:
           image: "gitactions.est1908.top/agentic-ops/worker:CHANGEME"
           imagePullPolicy: IfNotPresent
           securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            runAsGroup: 1000
             runAsNonRoot: true
             runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
           env:
             - name: TEMPORAL_ADDRESS
               value: "localhost:7233"
+            - name: TEMPORAL_NAMESPACE
+              value: "dev-agents"
             - name: AGENT_NAMESPACE
               value: "dev-agents"
             - name: WORKSPACE_PVC_NAME
@@ -167,13 +178,26 @@ spec:
         app: engine-gateway
     spec:
       securityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
         runAsNonRoot: true
+        runAsUser: 1000
       imagePullSecrets:
         - name: registry-credentials
       containers:
         - name: gateway
           image: "gitactions.est1908.top/agentic-ops/gateway:CHANGEME"
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            runAsGroup: 1000
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
           ports:
             - containerPort: 3000
           env:
@@ -181,6 +205,8 @@ spec:
               value: "3000"
             - name: TEMPORAL_ADDRESS
               value: "localhost:7233"
+            - name: TEMPORAL_NAMESPACE
+              value: "dev-agents"
             - name: TRIGGER_LABEL
               value: "agentops"
             - name: GITHUB_WEBHOOK_SECRET
@@ -205,3 +231,59 @@ spec:
             httpGet:
               path: /healthz
               port: 3000
+---
+# Source: engine/templates/temporal-namespace-job.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: engine-temporal-namespace
+  namespace: dev-agents
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "0"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      name: engine-temporal-namespace
+    spec:
+      restartPolicy: Never
+      securityContext:
+        fsGroup: 1000
+        runAsGroup: 1000
+        runAsNonRoot: true
+        runAsUser: 1000
+      containers:
+        - name: create-namespace
+          image: temporalio/admin-tools:1.31.1
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+              - ALL
+            runAsGroup: 1000
+            runAsNonRoot: true
+            runAsUser: 1000
+            seccompProfile:
+              type: RuntimeDefault
+          env:
+            - name: TEMPORAL_ADDRESS
+              value: "localhost:7233"
+            - name: TEMPORAL_NAMESPACE
+              value: "dev-agents"
+            - name: TEMPORAL_NAMESPACE_RETENTION
+              value: "72h"
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              if temporal operator namespace describe --address "$TEMPORAL_ADDRESS" --namespace "$TEMPORAL_NAMESPACE" >/dev/null 2>&1; then
+                echo "namespace $TEMPORAL_NAMESPACE already exists"
+              else
+                temporal operator namespace create --address "$TEMPORAL_ADDRESS" --namespace "$TEMPORAL_NAMESPACE" --retention "$TEMPORAL_NAMESPACE_RETENTION"
+                echo "created namespace $TEMPORAL_NAMESPACE"
+              fi
+

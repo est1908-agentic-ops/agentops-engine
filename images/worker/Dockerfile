@@ -15,5 +15,8 @@ RUN pnpm install --frozen-lockfile
 RUN pnpm typecheck
 RUN chown -R node:node /app
 
-USER node
+# Numeric, not the name "node": kubelet can't verify a pod's runAsNonRoot
+# against a named image user without a matching explicit runAsUser in the
+# pod spec (see charts/engine's podSecurityContext/containerSecurityContext).
+USER 1000
 CMD ["pnpm", "--filter", "@agentops/worker", "run", "start"]
