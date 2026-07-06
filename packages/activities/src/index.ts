@@ -1,6 +1,7 @@
 export * from './load-env';
 export * from './load-project-registry';
 export * from './stats-store';
+export * from './postgres-stats-store';
 export * from './stage-result-store';
 export * from './create-activities';
 export * from './workspace/spawn-git-command-runner';

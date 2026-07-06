@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { InMemoryStatsStore } from './stats-store';
 
 describe('InMemoryStatsStore', () => {
-  it('records and returns run stats in insertion order', () => {
+  it('records and returns run stats in insertion order', async () => {
     const store = new InMemoryStatsStore();
-    store.record({
+    await store.record({
       taskId: 't1',
       stage: 'implement',
       backend: 'stub',
@@ -14,7 +14,8 @@ describe('InMemoryStatsStore', () => {
       wallMs: 100,
       outcome: 'pass',
     });
-    expect(store.all()).toHaveLength(1);
-    expect(store.all()[0].stage).toBe('implement');
+    const all = await store.all();
+    expect(all).toHaveLength(1);
+    expect(all[0].stage).toBe('implement');
   });
 });

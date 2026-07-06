@@ -21,6 +21,18 @@ temporalAddress: "localhost:7233"
 # pattern temporalAddress uses for a fixed in-cluster DNS name.
 otelExporterOtlpEndpoint: ""
 
+# Host empty by default -- same "chart ships no cluster assumption" pattern as
+# otelExporterOtlpEndpoint above. agentops-platform's values override sets the
+# real host once the agent_run_stats database exists there (M4 sub-project 3).
+# Password comes from the same postgres-credentials secret Temporal already
+# uses (shared Postgres instance, separate database, per ARCHITECTURE.md §5.2).
+agentStatsDb:
+  host: ""
+  port: "5432"
+  name: agent_run_stats
+  user: temporal
+  passwordSecretName: postgres-credentials
+
 taskQueue: agentops-devcycle
 
 # Per ARCHITECTURE.md §5.2/§6: dev-agents/prod-agents each get a separate

@@ -58,6 +58,21 @@ spec:
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ .Values.otelExporterOtlpEndpoint | quote }}
             {{- end }}
+            {{- if .Values.agentStatsDb.host }}
+            - name: AGENT_STATS_DB_HOST
+              value: {{ .Values.agentStatsDb.host | quote }}
+            - name: AGENT_STATS_DB_PORT
+              value: {{ .Values.agentStatsDb.port | quote }}
+            - name: AGENT_STATS_DB_NAME
+              value: {{ .Values.agentStatsDb.name | quote }}
+            - name: AGENT_STATS_DB_USER
+              value: {{ .Values.agentStatsDb.user | quote }}
+            - name: AGENT_STATS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.agentStatsDb.passwordSecretName }}
+                  key: password
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
