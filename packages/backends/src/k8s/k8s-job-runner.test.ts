@@ -74,6 +74,25 @@ describe('buildAgentJob', () => {
     ]);
     expect(container?.volumeMounts).toEqual([{ name: 'workspace-tasks', mountPath: '/workspace/tasks' }]);
     expect(container?.securityContext).toEqual({ runAsNonRoot: true, allowPrivilegeEscalation: false });
+    expect(container?.envFrom).toBeUndefined();
+  });
+
+  it('wires envFrom from authSecretName when provided', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      baseRequest,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+        authSecretName: 'claude-credentials',
+      },
+      paths,
+    );
+
+    const container = job.spec?.template?.spec?.containers?.[0];
+    expect(container?.envFrom).toEqual([{ secretRef: { name: 'claude-credentials' } }]);
   });
 });
 
