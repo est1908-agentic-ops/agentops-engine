@@ -20,6 +20,8 @@ containerSecurityContext:
   runAsNonRoot: true
   runAsUser: 1000
 
+agentRunnerUid: 1000
+
 resources:
   requests:
     cpu: 250m

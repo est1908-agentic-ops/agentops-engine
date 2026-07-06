@@ -33,6 +33,8 @@ spec:
               value: {{ .Values.workspace.mountPath | quote }}
             - name: AGENT_RUNNER_IMAGE
               value: "{{ .Values.image.repository }}/agent-claude:{{ .Values.image.agentClaudeTag }}"
+            - name: AGENT_RUNNER_UID
+              value: {{ .Values.agentRunnerUid | quote }}
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:

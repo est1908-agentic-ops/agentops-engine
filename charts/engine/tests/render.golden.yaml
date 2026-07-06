@@ -103,6 +103,8 @@ spec:
               value: "/workspace/tasks"
             - name: AGENT_RUNNER_IMAGE
               value: "ghcr.io/CHANGEME/agentops-engine/agent-claude:CHANGEME"
+            - name: AGENT_RUNNER_UID
+              value: "1000"
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
