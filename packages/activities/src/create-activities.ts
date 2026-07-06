@@ -4,7 +4,8 @@ import type { AgentRunRequest, AgentRunResult, PrFeedback, RunStats } from '@age
 import type { PromptPack } from '@agentops/prompts';
 import type { StageResultRecord, StageResultStore } from './stage-result-store';
 import type { StatsStore } from './stats-store';
-import type { PreparedWorkspace, Workspaces } from './workspace/workspace-manager';
+import { WorkspaceError, type PreparedWorkspace, type Workspaces } from './workspace/workspace-manager';
+import { ApplicationFailure } from '@temporalio/common';
 
 export interface ActivityDependencies {
   backends: Record<string, AgentBackend>;
@@ -14,6 +15,13 @@ export interface ActivityDependencies {
   stageResults: StageResultStore;
   workspaces: Workspaces;
   prompts: PromptPack;
+}
+
+function rethrowWorkspaceError(err: unknown): never {
+  if (err instanceof WorkspaceError && err.nonRetryable) {
+    throw ApplicationFailure.nonRetryable(err.message, 'WorkspaceError');
+  }
+  throw err;
 }
 
 export function createActivities(deps: ActivityDependencies) {
@@ -62,10 +70,18 @@ export function createActivities(deps: ActivityDependencies) {
       deps.stats.record(stats);
     },
     async prepareWorkspace(req: { taskId: string; repo: string }): Promise<PreparedWorkspace> {
-      return deps.workspaces.prepare(req.taskId, req.repo);
+      try {
+        return await deps.workspaces.prepare(req.taskId, req.repo);
+      } catch (err) {
+        rethrowWorkspaceError(err);
+      }
     },
     async cleanupWorkspace(workspaceRef: string, repo: string): Promise<void> {
-      await deps.workspaces.cleanup(workspaceRef, repo);
+      try {
+        await deps.workspaces.cleanup(workspaceRef, repo);
+      } catch (err) {
+        rethrowWorkspaceError(err);
+      }
     },
   };
 }

@@ -3,10 +3,12 @@ import type { AgentBackend } from '@agentops/backends';
 import { StubBackend } from '@agentops/backends';
 import { MemoryTrackerPort, MemoryScmPort } from '@agentops/ports';
 import { PromptPack } from '@agentops/prompts';
+import { ApplicationFailure } from '@temporalio/common';
 import { createActivities } from './create-activities';
 import { InMemoryStatsStore } from './stats-store';
 import { InMemoryStageResultStore } from './stage-result-store';
 import { MemoryWorkspaceManager } from './workspace/memory-workspace-manager';
+import { WorkspaceError, type Workspaces } from './workspace/workspace-manager';
 
 function buildDeps() {
   return {
@@ -15,7 +17,7 @@ function buildDeps() {
     scm: new MemoryScmPort(),
     stats: new InMemoryStatsStore(),
     stageResults: new InMemoryStageResultStore(),
-    workspaces: new MemoryWorkspaceManager(),
+    workspaces: new MemoryWorkspaceManager() as Workspaces,
     prompts: new PromptPack(),
   };
 }
@@ -162,5 +164,52 @@ describe('createActivities — prompt rendering', () => {
         limits: { maxTokens: 1000, timeoutMs: 60_000 },
       }),
     ).rejects.toThrow(/fullVerifyFindings/);
+  });
+});
+
+describe('createActivities — workspace error translation', () => {
+  it('converts a non-retryable WorkspaceError into a Temporal ApplicationFailure', async () => {
+    const deps = buildDeps();
+    deps.workspaces = {
+      prepare: async () => {
+        throw new WorkspaceError('git clone failed for owner/repo: spawn git ENOENT', true);
+      },
+      cleanup: async () => {},
+    };
+    const activities = createActivities(deps);
+
+    const err: unknown = await activities.prepareWorkspace({ taskId: 't1', repo: 'owner/repo' }).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ApplicationFailure);
+    expect((err as ApplicationFailure).nonRetryable).toBe(true);
+  });
+
+  it('passes a retryable WorkspaceError through unchanged', async () => {
+    const deps = buildDeps();
+    deps.workspaces = {
+      prepare: async () => {
+        throw new WorkspaceError('git fetch failed for owner/repo: network unreachable', false);
+      },
+      cleanup: async () => {},
+    };
+    const activities = createActivities(deps);
+
+    await expect(activities.prepareWorkspace({ taskId: 't1', repo: 'owner/repo' })).rejects.toThrow(WorkspaceError);
+  });
+
+  it('converts a non-retryable WorkspaceError from cleanupWorkspace too', async () => {
+    const deps = buildDeps();
+    deps.workspaces = {
+      prepare: async () => ({ workspaceRef: 'ref', branch: 'b', baseBranch: 'main' }),
+      cleanup: async () => {
+        throw new WorkspaceError('git worktree remove failed: spawn git ENOENT', true);
+      },
+    };
+    const activities = createActivities(deps);
+
+    const err: unknown = await activities.cleanupWorkspace('ref', 'owner/repo').catch((e) => e);
+
+    expect(err).toBeInstanceOf(ApplicationFailure);
+    expect((err as ApplicationFailure).nonRetryable).toBe(true);
   });
 });
