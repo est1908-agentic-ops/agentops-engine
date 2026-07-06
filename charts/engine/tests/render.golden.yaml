@@ -108,6 +108,7 @@ spec:
                 secretKeyRef:
                   name: github-token
                   key: GITHUB_TOKEN
+                  optional: true
             - name: CLAUDE_AUTH_SECRET_NAME
               value: "claude-credentials"
           resources:

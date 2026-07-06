@@ -38,6 +38,7 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.githubTokenSecretName }}
                   key: GITHUB_TOKEN
+                  optional: true
             - name: CLAUDE_AUTH_SECRET_NAME
               value: {{ .Values.claudeAuthSecretName | quote }}
           resources:
