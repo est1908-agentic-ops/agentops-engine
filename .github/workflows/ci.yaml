@@ -64,10 +64,17 @@ jobs:
 
       - uses: docker/build-push-action@v6
         with:
-          context: images/agent-claude
-          file: images/agent-claude/Dockerfile
+          context: images/agent-runner
+          file: images/agent-runner/Dockerfile
           push: ${{ github.ref == 'refs/heads/main' }}
-          tags: gitactions.est1908.top/agentic-ops/agent-claude:${{ github.sha }}
+          tags: gitactions.est1908.top/agentic-ops/agent-runner:${{ github.sha }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/gateway/Dockerfile
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: gitactions.est1908.top/agentic-ops/gateway:${{ github.sha }}
 
       - uses: azure/setup-helm@v4
         with:

@@ -3,7 +3,10 @@ namespace: dev-agents
 image:
   repository: gitactions.est1908.top/agentic-ops
   workerTag: CHANGEME
-  agentClaudeTag: CHANGEME
+  # One shared image runs every agent-CLI backend (claude, pi, ...) — see
+  # images/agent-runner/Dockerfile and ARCHITECTURE.md §5.4.
+  agentRunnerTag: CHANGEME
+  gatewayTag: CHANGEME
   pullPolicy: IfNotPresent
 
 imagePullSecretName: registry-credentials
@@ -41,6 +44,40 @@ workspace:
   taskSize: 10Gi
   cacheSize: 20Gi
 
-githubTokenSecretName: github-token
+# One entry per product. agentops-platform supplies the real list as a values
+# override (see docs/superpowers/specs/2026-07-06-project-registry-design.md) —
+# this repo ships no real repo names, matching ARCHITECTURE.md §5.8 (the engine
+# is product-agnostic). Each entry renders one GITHUB_TOKEN__<PRODUCT> env var
+# sourced from githubTokenSecretName, plus one row in PROJECT_REGISTRY_JSON.
+#
+# projects:
+#   product-a:
+#     repo: flair-hr/product-a
+#     githubTokenSecretName: github-token-product-a
+projects: {}
 
 claudeAuthSecretName: claude-credentials
+piAuthSecretName: pi-credentials
+
+gateway:
+  port: 3000
+  triggerLabel: agentops
+  # Secret must contain a GITHUB_WEBHOOK_SECRET key — the shared secret
+  # configured on each registered repo's GitHub webhook (Settings > Webhooks).
+  webhookSecretName: gateway-webhook-secret
+  # Disabled by default: this chart ships no real public hostname.
+  # agentops-platform's values override sets host + enabled: true once a real
+  # domain is pointed at the cluster. clusterIssuer must be a cert-manager
+  # ClusterIssuer using a publicly-trusted CA (Let's Encrypt) — step-ca's
+  # internal-only CA is not trusted by GitHub's webhook delivery.
+  ingress:
+    enabled: false
+    host: ""
+    clusterIssuer: letsencrypt
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi

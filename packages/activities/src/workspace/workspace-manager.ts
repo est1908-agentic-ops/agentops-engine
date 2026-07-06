@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { GitCommandRunner } from '@agentops/ports';
 
 export interface WorkspaceManagerOptions {
-  git: GitCommandRunner;
+  resolveGit: (repo: string) => GitCommandRunner;
   cacheDir?: string;
   workspacesDir?: string;
   cloneUrl: (repo: string) => string;
@@ -29,28 +29,29 @@ function sanitizeRepoSlug(repo: string): string {
 }
 
 export class WorkspaceManager implements Workspaces {
-  private readonly git: GitCommandRunner;
+  private readonly resolveGit: (repo: string) => GitCommandRunner;
   private readonly cacheDir: string;
   private readonly workspacesDir: string;
   private readonly cloneUrl: (repo: string) => string;
 
   constructor(opts: WorkspaceManagerOptions) {
-    this.git = opts.git;
+    this.resolveGit = opts.resolveGit;
     this.cacheDir = opts.cacheDir ?? join(homedir(), '.agentops', 'cache');
     this.workspacesDir = opts.workspacesDir ?? join(homedir(), '.agentops', 'workspaces');
     this.cloneUrl = opts.cloneUrl;
   }
 
   async prepare(taskId: string, repo: string): Promise<PreparedWorkspace> {
+    const git = this.resolveGit(repo);
     await mkdir(this.cacheDir, { recursive: true });
     await mkdir(this.workspacesDir, { recursive: true });
     const cachePath = join(this.cacheDir, sanitizeRepoSlug(repo));
-    await this.ensureBaseClone(cachePath, repo);
-    const baseBranch = await this.detectDefaultBranch(cachePath);
+    await this.ensureBaseClone(git, cachePath, repo);
+    const baseBranch = await this.detectDefaultBranch(git, cachePath);
     const branch = `agentops/${taskId}`;
     const workspacePath = join(this.workspacesDir, taskId);
 
-    const addResult = await this.git.run(
+    const addResult = await git.run(
       ['worktree', 'add', workspacePath, '-b', branch, `origin/${baseBranch}`],
       { cwd: cachePath },
     );
@@ -65,8 +66,9 @@ export class WorkspaceManager implements Workspaces {
     // Run the removal from the base clone, not from inside workspaceRef itself — a
     // worktree removing its own cwd out from under the running process is fragile and
     // git-version-dependent. The base clone is the stable, always-present "main" worktree.
+    const git = this.resolveGit(repo);
     const cachePath = join(this.cacheDir, sanitizeRepoSlug(repo));
-    const result = await this.git.run(['worktree', 'remove', workspaceRef, '--force'], {
+    const result = await git.run(['worktree', 'remove', workspaceRef, '--force'], {
       cwd: cachePath,
     });
     if (result.exitCode !== 0) {
@@ -74,25 +76,25 @@ export class WorkspaceManager implements Workspaces {
     }
   }
 
-  private async ensureBaseClone(cachePath: string, repo: string): Promise<void> {
+  private async ensureBaseClone(git: GitCommandRunner, cachePath: string, repo: string): Promise<void> {
     // Check with a plain fs call, not a git invocation with `cwd: cachePath` — spawning
     // git with a cwd that doesn't exist yet (the "not cloned yet" case, which is exactly
     // what we're distinguishing here) fails at the OS level, not as a normal git error.
     if (existsSync(cachePath)) {
-      const fetchResult = await this.git.run(['fetch', 'origin'], { cwd: cachePath });
+      const fetchResult = await git.run(['fetch', 'origin'], { cwd: cachePath });
       if (fetchResult.exitCode !== 0) {
         throw new WorkspaceError(`git fetch failed for ${repo}: ${fetchResult.stderr}`);
       }
       return;
     }
-    const cloneResult = await this.git.run(['clone', this.cloneUrl(repo), cachePath], { cwd: this.cacheDir });
+    const cloneResult = await git.run(['clone', this.cloneUrl(repo), cachePath], { cwd: this.cacheDir });
     if (cloneResult.exitCode !== 0) {
       throw new WorkspaceError(`git clone failed for ${repo}: ${cloneResult.stderr}`);
     }
   }
 
-  private async detectDefaultBranch(cachePath: string): Promise<string> {
-    const result = await this.git.run(['symbolic-ref', 'refs/remotes/origin/HEAD'], { cwd: cachePath });
+  private async detectDefaultBranch(git: GitCommandRunner, cachePath: string): Promise<string> {
+    const result = await git.run(['symbolic-ref', 'refs/remotes/origin/HEAD'], { cwd: cachePath });
     if (result.exitCode !== 0) {
       throw new WorkspaceError(`could not detect default branch in ${cachePath}: ${result.stderr}`);
     }

@@ -120,6 +120,24 @@ importers:
         specifier: ^3.23.8
         version: 3.25.76
 
+  packages/gateway:
+    dependencies:
+      '@agentops/activities':
+        specifier: workspace:*
+        version: link:../activities
+      '@agentops/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+      '@agentops/ports':
+        specifier: workspace:*
+        version: link:../ports
+      '@agentops/workflows':
+        specifier: workspace:*
+        version: link:../workflows
+      '@temporalio/client':
+        specifier: ^1.11.0
+        version: 1.19.0
+
   packages/policies:
     dependencies:
       '@agentops/contracts':
@@ -148,6 +166,9 @@ importers:
       '@agentops/backends':
         specifier: workspace:*
         version: link:../backends
+      '@agentops/contracts':
+        specifier: workspace:*
+        version: link:../contracts
       '@agentops/ports':
         specifier: workspace:*
         version: link:../ports

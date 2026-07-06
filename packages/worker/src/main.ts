@@ -5,6 +5,7 @@ import {
   InMemoryStageResultStore,
   InMemoryStatsStore,
   loadEnv,
+  loadProjectRegistry,
   MemoryWorkspaceManager,
   SpawnGitCommandRunner,
   WorkspaceManager,
@@ -20,9 +21,13 @@ import {
   ProcessCliRunner,
   StubBackend,
   type AgentBackend,
+  type BatchV1ApiLike,
+  type K8sJobRunnerOptions,
 } from '@agentops/backends';
+import type { ResolvedProjectEntry } from '@agentops/contracts';
 import {
   createGithubPorts,
+  createProjectScopedPorts,
   githubCloneUrl,
   MemoryScmPort,
   MemoryTrackerPort,
@@ -39,20 +44,39 @@ export interface ActivityWiring {
   workspaces: Workspaces;
 }
 
-export function buildActivityDependencies(githubToken: string | undefined): ActivityWiring {
-  if (!githubToken) {
+export function buildActivityDependencies(registry: ResolvedProjectEntry[]): ActivityWiring {
+  if (registry.length === 0) {
     return { scm: new MemoryScmPort(), tracker: new MemoryTrackerPort(), workspaces: new MemoryWorkspaceManager() };
   }
-  const git = new SpawnGitCommandRunner({ authToken: () => githubToken });
-  const { scm, tracker } = createGithubPorts(githubToken, git);
-  return { scm, tracker, workspaces: new WorkspaceManager({ git, cloneUrl: githubCloneUrl }) };
+  const entries = registry.map((entry) => {
+    const git = new SpawnGitCommandRunner({ authToken: () => entry.token });
+    const { scm, tracker } = createGithubPorts(entry.token, git);
+    return { repo: entry.repo, scm, tracker, git };
+  });
+  const { scm, tracker, resolveGit } = createProjectScopedPorts(entries);
+  return { scm, tracker, workspaces: new WorkspaceManager({ resolveGit, cloneUrl: githubCloneUrl }) };
+}
+
+export function buildJobRunnerOptions(
+  batchApi: BatchV1ApiLike,
+  authSecretName: string | undefined,
+): K8sJobRunnerOptions {
+  return {
+    namespace: process.env.AGENT_NAMESPACE ?? 'dev-agents',
+    workspacePvcName: process.env.WORKSPACE_PVC_NAME ?? 'workspace-tasks',
+    workspaceMountPath: process.env.WORKSPACE_MOUNT_PATH ?? '/workspace/tasks',
+    authSecretName,
+    runAsUser: process.env.AGENT_RUNNER_UID ? Number(process.env.AGENT_RUNNER_UID) : undefined,
+    imagePullSecretName: process.env.IMAGE_PULL_SECRET_NAME,
+    batchApi,
+  };
 }
 
 export function buildBackends(inCluster: boolean): Record<string, AgentBackend> {
   const agentImage =
-    process.env.AGENT_RUNNER_IMAGE ?? 'ghcr.io/CHANGEME/agentops-engine/agent-claude:CHANGEME';
+    process.env.AGENT_RUNNER_IMAGE ?? 'ghcr.io/CHANGEME/agentops-engine/agent-runner:CHANGEME';
   const claudeSpec = createClaudeCliSpec({ image: agentImage });
-  const piSpec = createPiCliSpec();
+  const piSpec = createPiCliSpec({ image: agentImage });
 
   if (!inCluster) {
     return {
@@ -64,19 +88,15 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
 
   const kc = new KubeConfig();
   kc.loadFromCluster();
+  const batchApi = batchApiFromClient(kc.makeApiClient(BatchV1Api));
 
   return {
     stub: new StubBackend(),
-    claude: new K8sJobRunner(claudeSpec, {
-      namespace: process.env.AGENT_NAMESPACE ?? 'dev-agents',
-      workspacePvcName: process.env.WORKSPACE_PVC_NAME ?? 'workspace-tasks',
-      workspaceMountPath: process.env.WORKSPACE_MOUNT_PATH ?? '/workspace/tasks',
-      authSecretName: process.env.CLAUDE_AUTH_SECRET_NAME,
-      runAsUser: process.env.AGENT_RUNNER_UID ? Number(process.env.AGENT_RUNNER_UID) : undefined,
-      imagePullSecretName: process.env.IMAGE_PULL_SECRET_NAME,
-      batchApi: batchApiFromClient(kc.makeApiClient(BatchV1Api)),
-    }),
-    pi: new ProcessCliRunner(piSpec),
+    // Each backend gets its own auth secret — claude's z.ai/Anthropic env vars
+    // and pi's (provider-dependent, see images/agent-runner/Dockerfile) are not
+    // guaranteed to be the same shape, so they were never safe to share.
+    claude: new K8sJobRunner(claudeSpec, buildJobRunnerOptions(batchApi, process.env.CLAUDE_AUTH_SECRET_NAME)),
+    pi: new K8sJobRunner(piSpec, buildJobRunnerOptions(batchApi, process.env.PI_AUTH_SECRET_NAME)),
   };
 }
 
@@ -85,13 +105,15 @@ async function main(): Promise<void> {
     address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233',
   });
 
-  const githubToken = process.env.GITHUB_TOKEN;
+  const registry = loadProjectRegistry();
   const inCluster = Boolean(process.env.KUBERNETES_SERVICE_HOST);
-  const { scm, tracker, workspaces } = buildActivityDependencies(githubToken);
+  const { scm, tracker, workspaces } = buildActivityDependencies(registry);
   console.log(
-    githubToken
-      ? 'agentops worker: LIVE mode (GITHUB_TOKEN set) — real GitHub + real agent CLIs, will spend tokens and open real PRs'
-      : 'agentops worker: DEMO mode (no GITHUB_TOKEN) — in-memory ports + stub backend only',
+    registry.length > 0
+      ? `agentops worker: LIVE mode — ${registry.length} project(s) registered: ${registry
+          .map((entry) => `${entry.product} (${entry.repo})`)
+          .join(', ')} — real GitHub + real agent CLIs, will spend tokens and open real PRs`
+      : 'agentops worker: DEMO mode (no PROJECT_REGISTRY_JSON) — in-memory ports + stub backend only',
   );
   console.log(
     inCluster

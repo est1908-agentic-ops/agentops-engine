@@ -6,3 +6,4 @@ export * from './claude/claude-backend';
 export * from './pi/pi-backend';
 export * from './k8s/batch-api-from-client';
 export * from './k8s/k8s-job-runner';
+export type { BatchV1ApiLike } from './k8s/fake-batch-api';

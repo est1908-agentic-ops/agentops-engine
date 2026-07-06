@@ -65,6 +65,20 @@ subjects:
     namespace: dev-agents
 
 ---
+# Source: engine/templates/gateway-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: engine-gateway
+  namespace: dev-agents
+spec:
+  selector:
+    app: engine-gateway
+  ports:
+    - port: 3000
+      targetPort: 3000
+
+---
 # Source: engine/templates/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -104,17 +118,15 @@ spec:
             - name: WORKSPACE_MOUNT_PATH
               value: "/workspace/tasks"
             - name: AGENT_RUNNER_IMAGE
-              value: "gitactions.est1908.top/agentic-ops/agent-claude:CHANGEME"
+              value: "gitactions.est1908.top/agentic-ops/agent-runner:CHANGEME"
             - name: AGENT_RUNNER_UID
               value: "1000"
-            - name: GITHUB_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: github-token
-                  key: GITHUB_TOKEN
-                  optional: true
+            - name: PROJECT_REGISTRY_JSON
+              value: "[]"
             - name: CLAUDE_AUTH_SECRET_NAME
               value: "claude-credentials"
+            - name: PI_AUTH_SECRET_NAME
+              value: "pi-credentials"
             - name: IMAGE_PULL_SECRET_NAME
               value: "registry-credentials"
           resources:
@@ -136,3 +148,60 @@ spec:
         - name: workspace-cache
           persistentVolumeClaim:
             claimName: workspace-cache
+
+---
+# Source: engine/templates/gateway-deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: engine-gateway
+  namespace: dev-agents
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: engine-gateway
+  template:
+    metadata:
+      labels:
+        app: engine-gateway
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      imagePullSecrets:
+        - name: registry-credentials
+      containers:
+        - name: gateway
+          image: "gitactions.est1908.top/agentic-ops/gateway:CHANGEME"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: TEMPORAL_ADDRESS
+              value: "localhost:7233"
+            - name: TRIGGER_LABEL
+              value: "agentops"
+            - name: GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: gateway-webhook-secret
+                  key: GITHUB_WEBHOOK_SECRET
+            - name: PROJECT_REGISTRY_JSON
+              value: "[]"
+          resources:
+            limits:
+              cpu: 500m
+              memory: 256Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 3000

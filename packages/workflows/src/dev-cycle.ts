@@ -311,7 +311,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
       });
       state.implementAttempts = implementAttempt;
       state.iterations += 1;
-      await activities.pushBranch(state.workspaceRef, state.branch, `${input.taskId}-${implementAttempt}`);
+      await activities.pushBranch(input.repo, state.workspaceRef, state.branch, `${input.taskId}-${implementAttempt}`);
       state.stage = 'pr_babysit';
       continue;
     }

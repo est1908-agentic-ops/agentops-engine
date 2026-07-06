@@ -1,0 +1,56 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-gateway
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-gateway
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-gateway
+    spec:
+      securityContext:
+        runAsNonRoot: true
+      imagePullSecrets:
+        - name: {{ .Values.imagePullSecretName }}
+      containers:
+        - name: gateway
+          image: "{{ .Values.image.repository }}/gateway:{{ .Values.image.gatewayTag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.gateway.port }}
+          env:
+            - name: PORT
+              value: {{ .Values.gateway.port | quote }}
+            - name: TEMPORAL_ADDRESS
+              value: {{ .Values.temporalAddress | quote }}
+            - name: TRIGGER_LABEL
+              value: {{ .Values.gateway.triggerLabel | quote }}
+            - name: GITHUB_WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.gateway.webhookSecretName }}
+                  key: GITHUB_WEBHOOK_SECRET
+            {{- range $product, $cfg := .Values.projects }}
+            - name: {{ printf "GITHUB_TOKEN__%s" (upper (replace "-" "_" $product)) }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $cfg.githubTokenSecretName }}
+                  key: GITHUB_TOKEN
+            {{- end }}
+            - name: PROJECT_REGISTRY_JSON
+              value: {{ include "engine.projectRegistryJson" . | quote }}
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.gateway.port }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.gateway.port }}

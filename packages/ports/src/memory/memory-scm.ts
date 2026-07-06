@@ -30,7 +30,7 @@ export class MemoryScmPort implements ScmPort {
     return queue.length > 1 ? queue.shift()! : queue[0];
   }
 
-  async push(_workspaceRef: string, _branch: string, _contentHash: string): Promise<void> {}
+  async push(_repo: string, _workspaceRef: string, _branch: string, _contentHash: string): Promise<void> {}
 
   async readFile(repo: string, path: string): Promise<string | null> {
     return this.files.get(`${repo}:${path}`) ?? null;

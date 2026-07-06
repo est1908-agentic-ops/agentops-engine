@@ -111,7 +111,7 @@ Small HTTP service (part of the engine repo):
 ### 5.4 Agent Runner
 The only place agent CLIs execute. An activity `runAgent(stage, backend, model, prompt, workspaceRef)`:
 
-1. Launches a **K8s Job** from a per-backend image (`agent-claude`, `agent-cursor`, `agent-pi`, `agent-codex`) — pinned CLI version + toolchain.
+1. Launches a **K8s Job** from a shared `agent-runner` image carrying every backend's CLI (`claude`, `pi`, ...) — pinned CLI versions, one image to build/push/roll instead of one per backend. Decided 2026-07-06: the CLIs verified so far are thin `npm install -g` wrappers on the same `node:22-slim` base with no conflicting system deps, so per-backend images (the original plan) added build/deploy overhead without a matching benefit. Revisit the split if a future backend (`cursor`, `codex`) needs a meaningfully different or heavier toolchain — nothing here requires all backends to share an image forever, only that they do while the CLIs stay this lightweight.
 2. Workspace = clone of the repo at the task branch. Worktrees on shared PVC (fast, single-node) → later object-storage bundle per task (multi-node ready). Base-clone cache PVC to avoid full reclones.
 3. Streams stdout/stderr and OTel spans → Alloy (→ Loki/Tempo); parses CLI JSON output for token usage & tok/s → Postgres `agent_run_stats`.
 4. Activity **heartbeats** while the Job runs; timeout/cancel kills the Job. Exit sentinel (`VERDICT:`, `FULL:`) returned to the workflow.
@@ -177,7 +177,7 @@ Why this split and not one monorepo:
 - **Code/state separation is the standard ArgoCD pattern** — it avoids the CI loop (image build commit → sync → build …): `agentops-engine` CI pushes an image, a bot/agent PR bumps the tag in `agentops-platform`, ArgoCD syncs. Rollback = git revert in one place.
 - **Blast-radius & access match repo boundaries**: product agents get write access only to their product repo; only platform-role agents (and humans) touch `agentops-platform`; SOPS secrets live where code-churning agents don't work daily.
 - **Deploy manifests live in the product repo** so an agent changes app code and its manifests in *one atomic PR* through one review gate — the gitops repo only registers the product and holds env-specific values/secrets.
-- **Onboarding a new product = one PR** to `agentops-platform` (register Application, namespace, quotas, LiteLLM keys, DNS subzone). An ApplicationSet generator can automate even that from a repo label.
+- **Onboarding a new product = one PR** to `agentops-platform` (register Application, namespace, quotas, LiteLLM keys, DNS subzone). An ApplicationSet generator can automate even that from a repo label. Concretely, for forge access: a **project registry** (`projects` map in the engine chart values, one entry per product — `repo`, `githubTokenSecretName`) replaces the single global `GITHUB_TOKEN` this repo shipped with through M2; the worker builds one scoped GitHub client per registered repo instead of sharing one token across every product. See [project-registry-design.md](superpowers/specs/2026-07-06-project-registry-design.md) for the full design and onboarding runbook.
 
 Not a product monorepo: products have different lifecycles, and access boundaries are the isolation mechanism (§5.7).
 
@@ -243,7 +243,7 @@ packages/
   worker/       # Temporal worker entrypoints
   cli/          # admin CLI: start, resume, clarify, inspect, replay
   ui/           # Mission Control: React SPA + BFF (§5.10)
-images/         # Dockerfiles: worker, gateway, agent-runner-<backend>
+images/         # Dockerfiles: worker, gateway, agent-runner (shared across backends, §5.4)
 charts/         # Helm chart (values live in agentops-platform)
 ```
 

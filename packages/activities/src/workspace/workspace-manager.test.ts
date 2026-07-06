@@ -38,7 +38,7 @@ function buildManager(): { manager: WorkspaceManager; gitCalls: string[][] } {
       return real.run(args, opts);
     },
   };
-  const manager = new WorkspaceManager({ git: recording, cacheDir, workspacesDir, cloneUrl: () => remoteDir });
+  const manager = new WorkspaceManager({ resolveGit: () => recording, cacheDir, workspacesDir, cloneUrl: () => remoteDir });
   return { manager, gitCalls };
 }
 
@@ -86,11 +86,50 @@ describe('WorkspaceManager', () => {
 
   it('never writes the auth token into the cached clone config', async () => {
     const git = new SpawnGitCommandRunner({ authToken: () => 'super-secret' });
-    const manager = new WorkspaceManager({ git, cacheDir, workspacesDir, cloneUrl: () => remoteDir });
+    const manager = new WorkspaceManager({ resolveGit: () => git, cacheDir, workspacesDir, cloneUrl: () => remoteDir });
 
     await manager.prepare('task-1', 'owner/repo');
 
     const config = readFileSync(join(cacheDir, 'owner-repo', '.git', 'config'), 'utf8');
     expect(config).not.toContain('super-secret');
+  });
+
+  it('routes each repo to its own resolved git runner', async () => {
+    const remoteDirB = join(root, 'remote-b');
+    execFileSync('git', ['init', '-b', 'main', remoteDirB]);
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: remoteDirB });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: remoteDirB });
+    writeFileSync(join(remoteDirB, 'README.md'), 'hello-b');
+    execFileSync('git', ['add', 'README.md'], { cwd: remoteDirB });
+    execFileSync('git', ['commit', '-m', 'initial commit'], { cwd: remoteDirB });
+
+    const real = new SpawnGitCommandRunner();
+    const callsA: string[][] = [];
+    const callsB: string[][] = [];
+    const runnerA = {
+      run: (args: string[], opts: { cwd: string }) => {
+        callsA.push(args);
+        return real.run(args, opts);
+      },
+    };
+    const runnerB = {
+      run: (args: string[], opts: { cwd: string }) => {
+        callsB.push(args);
+        return real.run(args, opts);
+      },
+    };
+
+    const manager = new WorkspaceManager({
+      resolveGit: (repo) => (repo === 'owner/repo-a' ? runnerA : runnerB),
+      cacheDir,
+      workspacesDir,
+      cloneUrl: (repo) => (repo === 'owner/repo-a' ? remoteDir : remoteDirB),
+    });
+
+    await manager.prepare('task-a', 'owner/repo-a');
+    await manager.prepare('task-b', 'owner/repo-b');
+
+    expect(callsA.map((args) => args[0])).toEqual(['clone', 'symbolic-ref', 'worktree']);
+    expect(callsB.map((args) => args[0])).toEqual(['clone', 'symbolic-ref', 'worktree']);
   });
 });

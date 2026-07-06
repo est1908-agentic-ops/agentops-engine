@@ -52,8 +52,8 @@ export function createActivities(deps: ActivityDependencies) {
     async getPrFeedback(prRef: string): Promise<PrFeedback> {
       return deps.scm.getPrFeedback(prRef);
     },
-    async pushBranch(workspaceRef: string, branch: string, contentHash: string): Promise<void> {
-      await deps.scm.push(workspaceRef, branch, contentHash);
+    async pushBranch(repo: string, workspaceRef: string, branch: string, contentHash: string): Promise<void> {
+      await deps.scm.push(repo, workspaceRef, branch, contentHash);
     },
     async recordStageResult(result: StageResultRecord): Promise<void> {
       deps.stageResults.record(result);

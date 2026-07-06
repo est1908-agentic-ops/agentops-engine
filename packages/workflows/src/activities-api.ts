@@ -36,7 +36,7 @@ export interface DevCycleActivities {
   labelIssue(ref: string, label: string): Promise<void>;
   openPr(req: OpenPrRequest): Promise<OpenPrResult>;
   getPrFeedback(prRef: string): Promise<PrFeedback>;
-  pushBranch(workspaceRef: string, branch: string, contentHash: string): Promise<void>;
+  pushBranch(repo: string, workspaceRef: string, branch: string, contentHash: string): Promise<void>;
   recordStageResult(result: StageResultRecord): Promise<void>;
   recordRunStats(stats: RunStats): Promise<void>;
   prepareWorkspace(req: { taskId: string; repo: string }): Promise<PreparedWorkspace>;

@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { Client, Connection } from '@temporalio/client';
-import { loadEnv, SpawnGitCommandRunner } from '@agentops/activities';
+import { loadEnv, loadProjectRegistry, SpawnGitCommandRunner } from '@agentops/activities';
 
 loadEnv();
-import type { TaskInput } from '@agentops/contracts';
+import type { ResolvedProjectEntry, TaskInput } from '@agentops/contracts';
 import { createGithubPorts, MemoryScmPort, type ScmPort } from '@agentops/ports';
 import { cancelSignal, clarifySignal, devCycle, resumeSignal, stateQuery, stopSignal } from '@agentops/workflows';
 import { loadProductConfig } from './load-product-config';
@@ -49,14 +49,30 @@ export function seedDemoAgentopsConfig(scm: MemoryScmPort, repo: string): void {
   );
 }
 
-export function buildStartScmPort(githubToken: string | undefined, repo: string): ScmPort {
-  if (!githubToken) {
+export function resolveProjectEntry(
+  registry: ResolvedProjectEntry[],
+  product: string,
+  repo: string,
+): ResolvedProjectEntry {
+  const entry = registry.find((candidate) => candidate.repo === repo);
+  if (!entry) {
+    throw new Error(`no project registered for repo "${repo}" — check the project registry`);
+  }
+  if (entry.product !== product) {
+    throw new Error(`repo "${repo}" is registered under product "${entry.product}", not "${product}" — check --product`);
+  }
+  return entry;
+}
+
+export function buildStartScmPort(registry: ResolvedProjectEntry[], product: string, repo: string): ScmPort {
+  if (registry.length === 0) {
     const scm = new MemoryScmPort();
     seedDemoAgentopsConfig(scm, repo);
     return scm;
   }
-  const git = new SpawnGitCommandRunner({ authToken: () => githubToken });
-  return createGithubPorts(githubToken, git).scm;
+  const entry = resolveProjectEntry(registry, product, repo);
+  const git = new SpawnGitCommandRunner({ authToken: () => entry.token });
+  return createGithubPorts(entry.token, git).scm;
 }
 
 async function getClient(): Promise<Client> {
@@ -66,7 +82,7 @@ async function getClient(): Promise<Client> {
 
 async function cmdStart(taskId: string, goal: string, product: string, repo: string, issueRef?: string): Promise<void> {
   const client = await getClient();
-  const scm = buildStartScmPort(process.env.GITHUB_TOKEN, repo);
+  const scm = buildStartScmPort(loadProjectRegistry(), product, repo);
   const config = await loadProductConfig(scm, repo);
   const input: TaskInput = { taskId, product, repo, issueRef, goal, config };
   const handle = await client.workflow.start(devCycle, { taskQueue: TASK_QUEUE, workflowId: taskId, args: [input] });

@@ -102,5 +102,16 @@ Same DI philosophy as everywhere else in this set of designs — `ProcessCliBack
 ## Open questions carried forward
 
 - All five prerequisite-verification questions above — blocking implementation, not blocking design review.
+
+## Update (2026-07-06): auth mechanism confirmed
+
+Per [`earendil-works/pi`'s provider docs](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/providers.md), the package is `@earendil-works/pi-coding-agent` (install with `--ignore-scripts`, per that package's own README — it needs no install-time lifecycle scripts) and auth is env-var based, one var per provider — no `--api-key`/config-file mounting needed for headless/container use:
+
+| Provider | Env var | Provider id (for `--model provider/id`) |
+|---|---|---|
+| ZAI Coding Plan | `ZAI_API_KEY` | `zai` |
+| OpenRouter | `OPENROUTER_API_KEY` | `openrouter` |
+
+Routing a stage to `pi` against z.ai's GLM models: set that stage's `agentops.json` routing entry to `{ "backend": "pi", "model": "zai/glm-5.2" }` — pi parses the provider from the `provider/id` model-string format itself, so `createPiCliSpec`'s existing `--model <req.model>` arg needs no code change. The `PI_CODING_AGENT_DIR` env var (default `~/.pi/agent`) overrides where pi looks for its own local config, if ever needed — not used by the K8s Job path, which injects `ZAI_API_KEY`/`OPENROUTER_API_KEY` directly via the `pi-credentials` secret's `envFrom` instead.
 - Whether `pi` needs its own prompt-pack variant — deferred until there's evidence one is needed.
 - Per-stage `claude` vs. `pi` routing recommendations — that's `EvalRun`/`BudgetReport` territory (M7/M9), not an M1 decision.

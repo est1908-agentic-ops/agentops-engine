@@ -97,3 +97,7 @@ Both mounted at a fixed path (`/workspace/cache`, `/workspace/tasks`) in the wor
 
 - Real `<org>` GHCR namespace — placeholder until implementation time.
 - Whether `agent-claude`'s CLI version should be pinned via Dockerfile `ARG` (rebuildable) or hard-coded — lean `ARG` with a default, no strong opinion yet; decide during implementation.
+
+## Update (2026-07-06)
+
+`images/agent-claude/` was replaced by a single shared `images/agent-runner/` image covering every backend CLI (`claude`, `pi`, ...) — see ARCHITECTURE.md §5.4 for the rationale and `charts/engine/values.yaml`'s `image.agentRunnerTag`. This doc's `agent-claude`-specific naming above is historical.

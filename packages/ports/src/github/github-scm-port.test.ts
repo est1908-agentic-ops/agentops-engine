@@ -97,7 +97,7 @@ describe('GithubScmPort — push', () => {
     const { git, calls } = fakeGit();
     const scm = new GithubScmPort(client, git);
 
-    await scm.push('/tmp/workspace', 'agentops/t1', 'hash-1');
+    await scm.push('octocat/hello-world', '/tmp/workspace', 'agentops/t1', 'hash-1');
 
     expect(calls).toEqual([{ args: ['push', 'origin', 'agentops/t1'], cwd: '/tmp/workspace' }]);
   });
@@ -107,7 +107,7 @@ describe('GithubScmPort — push', () => {
     const git: GitCommandRunner = { run: vi.fn().mockResolvedValue({ stdout: '', stderr: 'rejected', exitCode: 1 }) };
     const scm = new GithubScmPort(client, git);
 
-    await expect(scm.push('/tmp/workspace', 'agentops/t1', 'hash-1')).rejects.toThrow(/rejected/);
+    await expect(scm.push('octocat/hello-world', '/tmp/workspace', 'agentops/t1', 'hash-1')).rejects.toThrow(/rejected/);
   });
 });
 
