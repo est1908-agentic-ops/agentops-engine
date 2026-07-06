@@ -23,7 +23,13 @@ export async function startDevCycleForIssue(
   // (re-labeling after a task finishes correctly starts a fresh attempt) but
   // rejects starting one while the previous run is still open — which is
   // exactly the dedupe behavior a redelivered webhook needs.
-  const taskId = `issue-${event.repo.replace('/', '-')}-${event.issueNumber}`;
+  //
+  // Keyed by `product`, not `event.repo`: the registry (parseProjectRegistry)
+  // already guarantees product names are unique, whereas naively collapsing
+  // "owner/repo" into "owner-repo" is lossy and can collide across two
+  // distinct registered repos (e.g. "foo-bar/baz" and "foo/bar-baz" both
+  // become "foo-bar-baz"), which would silently swallow one project's events.
+  const taskId = `issue-${product}-${event.issueNumber}`;
   try {
     await client.workflow.start(devCycle, {
       taskQueue,

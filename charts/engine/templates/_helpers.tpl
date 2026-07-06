@@ -1,8 +1,9 @@
 {{/*
-Shared PROJECT_REGISTRY_JSON computation — both the worker Deployment (which
-also needs each project's token env var name to build a matching
-secretKeyRef) and the gateway Deployment (which only needs to resolve
-product/repo from webhook payloads, no tokens) consume this same list.
+Shared PROJECT_REGISTRY_JSON computation — both the worker Deployment and the
+gateway Deployment render one GITHUB_TOKEN__<PRODUCT> secretKeyRef per
+project (the gateway needs a real per-project token to fetch agentops.json
+via the GitHub API before starting a devCycle) plus this same
+PROJECT_REGISTRY_JSON list of product/repo/tokenEnvVar entries.
 */}}
 {{- define "engine.projectRegistryJson" -}}
 {{- $registry := list -}}
