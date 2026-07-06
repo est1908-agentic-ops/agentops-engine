@@ -30,3 +30,5 @@ workspace:
   cacheSize: 20Gi
 
 githubTokenSecretName: github-token
+
+claudeAuthSecretName: claude-credentials

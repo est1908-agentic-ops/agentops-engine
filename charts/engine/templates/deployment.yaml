@@ -35,7 +35,9 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.githubTokenSecretName }}
-                  key: token
+                  key: GITHUB_TOKEN
+            - name: CLAUDE_AUTH_SECRET_NAME
+              value: {{ .Values.claudeAuthSecretName | quote }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
           volumeMounts:
