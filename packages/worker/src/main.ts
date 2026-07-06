@@ -72,6 +72,7 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
       workspacePvcName: process.env.WORKSPACE_PVC_NAME ?? 'workspace-tasks',
       workspaceMountPath: process.env.WORKSPACE_MOUNT_PATH ?? '/workspace/tasks',
       authSecretName: process.env.CLAUDE_AUTH_SECRET_NAME,
+      imagePullSecretName: process.env.IMAGE_PULL_SECRET_NAME,
       batchApi: batchApiFromClient(kc.makeApiClient(BatchV1Api)),
     }),
     pi: new ProcessCliRunner(piSpec),

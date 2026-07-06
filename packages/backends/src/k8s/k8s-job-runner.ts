@@ -20,6 +20,7 @@ export interface K8sJobRunnerOptions {
   batchApi: BatchV1ApiLike;
   pollIntervalMs?: number;
   authSecretName?: string;
+  imagePullSecretName?: string;
   heartbeat?: () => void;
   now?: () => number;
 }
@@ -56,11 +57,15 @@ export function k8sJobName(req: BackendRunRequest): string {
 export function buildAgentJob(
   req: BackendRunRequest,
   spec: CliSpec,
-  opts: Pick<K8sJobRunnerOptions, 'namespace' | 'workspacePvcName' | 'workspaceMountPath' | 'authSecretName'>,
+  opts: Pick<
+    K8sJobRunnerOptions,
+    'namespace' | 'workspacePvcName' | 'workspaceMountPath' | 'authSecretName' | 'imagePullSecretName'
+  >,
   paths: ReturnType<typeof agentOpsArtifactPaths>,
 ): V1Job {
   const args = spec.buildArgs(req);
   const envFrom = opts.authSecretName ? [{ secretRef: { name: opts.authSecretName } }] : undefined;
+  const imagePullSecrets = opts.imagePullSecretName ? [{ name: opts.imagePullSecretName }] : undefined;
 
   return {
     metadata: {
@@ -75,6 +80,7 @@ export function buildAgentJob(
         spec: {
           restartPolicy: 'Never',
           securityContext: { runAsNonRoot: true },
+          imagePullSecrets,
           volumes: [
             {
               name: 'workspace-tasks',

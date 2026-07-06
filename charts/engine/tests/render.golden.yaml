@@ -84,9 +84,11 @@ spec:
       serviceAccountName: engine-worker
       securityContext:
         runAsNonRoot: true
+      imagePullSecrets:
+        - name: registry-credentials
       containers:
         - name: worker
-          image: "ghcr.io/CHANGEME/agentops-engine/worker:CHANGEME"
+          image: "gitactions.est1908.top/agentic-ops/worker:CHANGEME"
           imagePullPolicy: IfNotPresent
           env:
             - name: TEMPORAL_ADDRESS
@@ -98,7 +100,7 @@ spec:
             - name: WORKSPACE_MOUNT_PATH
               value: "/workspace/tasks"
             - name: AGENT_RUNNER_IMAGE
-              value: "ghcr.io/CHANGEME/agentops-engine/agent-claude:CHANGEME"
+              value: "gitactions.est1908.top/agentic-ops/agent-claude:CHANGEME"
             - name: GITHUB_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -106,6 +108,8 @@ spec:
                   key: GITHUB_TOKEN
             - name: CLAUDE_AUTH_SECRET_NAME
               value: "claude-credentials"
+            - name: IMAGE_PULL_SECRET_NAME
+              value: "registry-credentials"
           resources:
             limits:
               cpu: "1"
