@@ -1,4 +1,4 @@
-import type { AgentBackend } from '@agentops/backends';
+import { LiteLlmBudgetExceededError, type AgentBackend } from '@agentops/backends';
 import type { Issue, OpenPrRequest, OpenPrResult, ScmPort, TrackerPort } from '@agentops/ports';
 import type { AgentRunRequest, AgentRunResult, PrFeedback, RunStats } from '@agentops/contracts';
 import type { PromptPack } from '@agentops/prompts';
@@ -32,18 +32,28 @@ export function createActivities(deps: ActivityDependencies) {
         throw new Error(`createActivities.runAgent: unknown backend "${req.backend}"`);
       }
       const prompt = deps.prompts.render(req.promptRef, req.promptContext);
-      return backend.run({
-        taskId: req.taskId,
-        stage: req.stage,
-        attempt: req.attempt,
-        callIndex: req.callIndex,
-        backend: req.backend,
-        model: req.model,
-        effort: req.effort,
-        workspaceRef: req.workspaceRef,
-        limits: req.limits,
-        prompt,
-      });
+      try {
+        return await backend.run({
+          taskId: req.taskId,
+          stage: req.stage,
+          attempt: req.attempt,
+          callIndex: req.callIndex,
+          backend: req.backend,
+          model: req.model,
+          effort: req.effort,
+          workspaceRef: req.workspaceRef,
+          limits: req.limits,
+          prompt,
+        });
+      } catch (err) {
+        // A LiteLLM virtual-key budget cap is definitive, not transient --
+        // same "typed error at the boundary, non-retryable ApplicationFailure
+        // here" shape as rethrowWorkspaceError below.
+        if (err instanceof LiteLlmBudgetExceededError) {
+          throw ApplicationFailure.nonRetryable(err.message, 'LiteLlmBudgetExceededError');
+        }
+        throw err;
+      }
     },
     async getIssue(ref: string): Promise<Issue> {
       return deps.tracker.getIssue(ref);

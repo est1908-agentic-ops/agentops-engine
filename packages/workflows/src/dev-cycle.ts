@@ -1,4 +1,13 @@
-import { condition, defineQuery, defineSignal, proxyActivities, setHandler, sleep } from '@temporalio/workflow';
+import {
+  ActivityFailure,
+  ApplicationFailure,
+  condition,
+  defineQuery,
+  defineSignal,
+  proxyActivities,
+  setHandler,
+  sleep,
+} from '@temporalio/workflow';
 import type { BlockReason, Brakes, ModelRef, Routing, Stage, TaskInput, TaskStatus, VerdictKind } from '@agentops/contracts';
 import { feedbackHash } from '@agentops/contracts';
 import { babysitDecision, nextRepairAction, parseVerdict, preImplementStages } from '@agentops/policies';
@@ -35,6 +44,21 @@ export interface DevCycleState {
 
 const MAX_VERDICT_CALLS = 2;
 const DEFAULT_BABYSIT_POLL_MS = 5000;
+
+// Thrown only by runStageAgent, to unwind out to devCycle's top-level catch
+// when a cancel signal arrives while blocked on a budget-exceeded retry loop
+// -- the other blockReasons' cancel handling lives inline (checked right
+// after their own call sites) because they don't retry-in-place the way a
+// budget block does.
+class DevCycleCancelledError extends Error {}
+
+function isBudgetExceededFailure(err: unknown): boolean {
+  return (
+    err instanceof ActivityFailure &&
+    err.cause instanceof ApplicationFailure &&
+    err.cause.type === 'LiteLlmBudgetExceededError'
+  );
+}
 
 export async function devCycle(input: TaskInput): Promise<DevCycleState> {
   const state: DevCycleState = {
@@ -109,19 +133,40 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     const model = modelOverride ?? routed;
     const backend = model?.backend ?? 'stub';
     const modelName = model?.model ?? 'stub';
-    const result = await agentActivities.runAgent({
-      taskId: input.taskId,
-      stage,
-      attempt,
-      callIndex,
-      backend,
-      model: modelName,
-      effort: model?.effort,
-      promptRef: `${stage}.md`,
-      promptContext: { taskId: input.taskId, goal: input.goal, ...extraContext },
-      workspaceRef: state.workspaceRef,
-      limits: { maxTokens: input.config.brakes.maxTokens, timeoutMs: 600_000 },
-    });
+
+    let result;
+    while (true) {
+      try {
+        result = await agentActivities.runAgent({
+          taskId: input.taskId,
+          stage,
+          attempt,
+          callIndex,
+          backend,
+          model: modelName,
+          effort: model?.effort,
+          promptRef: `${stage}.md`,
+          promptContext: { taskId: input.taskId, goal: input.goal, ...extraContext },
+          workspaceRef: state.workspaceRef,
+          limits: { maxTokens: input.config.brakes.maxTokens, timeoutMs: 600_000 },
+        });
+        break;
+      } catch (err) {
+        if (!isBudgetExceededFailure(err)) {
+          throw err;
+        }
+        // Not a token-count brake -- a LiteLLM virtual key's hard spend cap.
+        // Same resume escape hatch as the other blockReasons (an operator
+        // bumps the budget/rotates the key, then signals resume), but this
+        // one retries the same call in place rather than relaxing a brake
+        // counter and letting the outer loop re-evaluate.
+        state.status = 'blocked';
+        state.blockReason = 'budget-exceeded';
+        if (await waitForResumeOrCancel()) {
+          throw new DevCycleCancelledError();
+        }
+      }
+    }
     state.cumulativeTokens += result.tokensIn + result.tokensOut;
     await activities.recordRunStats({
       taskId: input.taskId,
@@ -164,163 +209,179 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     return { kind: lastKind === 'unparseable' ? 'fail' : lastKind, output: lastOutput };
   };
 
-  for (const stage of preImplementStages({ config: input.config, hasHumanDesign: false, hasHumanPlan: false })) {
-    state.stage = stage;
-    const extraContext = stage === 'context' ? { issueBody } : {};
-    await runStageAgent(stage as RoutableStage, 1, 1, undefined, extraContext);
-    if (cancelled) {
-      state.stage = 'failed';
-      state.status = 'failed';
-      await activities.cleanupWorkspace(state.workspaceRef, input.repo);
-      return state;
-    }
-    if (stopRequested) {
-      state.status = 'pending';
-      return state;
-    }
-  }
-
-  let implementAttempt = 1;
-  let reviewAttempt = 1;
-  let useEscalation = false;
-  let exhausted = false;
-  let fullVerifyVerdict: VerdictKind = 'unparseable';
-  let reviewVerdict: VerdictKind | null = null;
-  let lastFullVerifyOutput = '';
-  let lastReviewOutput = '';
-
-  while (true) {
-    state.stage = 'implement';
-    const implementModel = useEscalation ? input.config.escalation : undefined;
-    const implementOutput = await runStageAgent('implement', implementAttempt, 1, implementModel, {
-      fullVerifyFindings: lastFullVerifyOutput,
-      reviewFindings: lastReviewOutput,
-    });
-    state.implementAttempts = implementAttempt;
-    state.iterations += 1;
-    const diffEmpty = implementOutput.trim().length === 0;
-
-    state.stage = 'full_verify';
-    const verifyCommands =
-      [...(input.config.fastVerifyCommands ?? []), ...(input.config.fullVerifyCommands ?? [])].join('\n') ||
-      '(none configured — use your own judgment on the diff)';
-    const fullVerifyResult = await runVerdictStage('full_verify', implementAttempt, 'FULL:', { verifyCommands });
-    fullVerifyVerdict = fullVerifyResult.kind;
-    lastFullVerifyOutput = fullVerifyResult.output;
-
-    if (fullVerifyVerdict === 'pass') {
-      state.stage = 'review';
-      const reviewResult = await runVerdictStage('review', reviewAttempt, 'VERDICT:');
-      reviewVerdict = reviewResult.kind;
-      lastReviewOutput = reviewResult.output;
-      reviewAttempt += 1;
-    } else {
-      reviewVerdict = null;
-    }
-
-    const evaluate = () =>
-      nextRepairAction({
-        implementAttempts: implementAttempt,
-        iterations: state.iterations,
-        cumulativeTokens: state.cumulativeTokens,
-        fullVerify: fullVerifyVerdict,
-        review: reviewVerdict ?? 'unparseable',
-        diffEmpty,
-        brakes: effectiveBrakes,
-        hasEscalationModel: input.config.escalation != null,
-      });
-
-    let action = evaluate();
-    while (action.kind === 'block') {
-      state.status = 'blocked';
-      state.blockReason = action.reason;
-      if (await waitForResumeOrCancel()) {
+  // Wrapped so a cancel signal received while runStageAgent is blocked
+  // in-place on a budget-exceeded retry (which can happen at any stage, deep
+  // inside this function) unwinds to one place rather than needing every
+  // call site below to check for it — the pre-existing `cancelled` checks
+  // right after each call site are untouched; this only catches the new
+  // DevCycleCancelledError path.
+  try {
+    for (const stage of preImplementStages({ config: input.config, hasHumanDesign: false, hasHumanPlan: false })) {
+      state.stage = stage;
+      const extraContext = stage === 'context' ? { issueBody } : {};
+      await runStageAgent(stage as RoutableStage, 1, 1, undefined, extraContext);
+      if (cancelled) {
         state.stage = 'failed';
         state.status = 'failed';
         await activities.cleanupWorkspace(state.workspaceRef, input.repo);
         return state;
       }
-      action = evaluate();
-    }
-
-    if (action.kind === 'continue') {
-      break;
-    }
-    if (action.kind === 'open-pr-exhausted') {
-      exhausted = true;
-      break;
-    }
-    useEscalation = action.useEscalationModel;
-    implementAttempt += 1;
-  }
-
-  state.stage = 'pr';
-  const findingsSummary = `full_verify: ${fullVerifyVerdict}; review: ${reviewVerdict ?? 'not-run'}`;
-  const prBody = exhausted
-    ? `Repair attempts exhausted after ${state.implementAttempts} implement attempt(s). Opening PR with outstanding findings.\n${findingsSummary}`
-    : `Automated PR for task ${input.taskId}.`;
-  const { prRef } = await activities.openPr({
-    repo: input.repo,
-    branch: state.branch,
-    title: input.goal,
-    body: prBody,
-  });
-  state.prRef = prRef;
-  if (exhausted) {
-    await activities.commentOnIssue(input.issueRef ?? input.taskId, prBody);
-  }
-
-  state.stage = 'pr_babysit';
-  const seenFeedbackHashes = new Set<string>();
-
-  while (true) {
-    await sleep(DEFAULT_BABYSIT_POLL_MS);
-    const feedback = await activities.getPrFeedback(prRef);
-    const decision = babysitDecision(
-      feedback,
-      seenFeedbackHashes,
-      state.babysitRounds,
-      effectiveBrakes.maxBabysitRounds,
-    );
-
-    if (decision === 'merge_ready') {
-      break;
-    }
-
-    if (decision === 'braked') {
-      state.status = 'blocked';
-      state.blockReason = 'babysit-brake';
-      if (await waitForResumeOrCancel()) {
-        state.stage = 'failed';
-        state.status = 'failed';
-        await activities.cleanupWorkspace(state.workspaceRef, input.repo);
+      if (stopRequested) {
+        state.status = 'pending';
         return state;
       }
-      state.stage = 'pr_babysit';
-      continue;
     }
 
-    if (decision === 'actionable') {
-      seenFeedbackHashes.add(feedbackHash(feedback));
-      state.babysitRounds += 1;
-      implementAttempt += 1;
+    let implementAttempt = 1;
+    let reviewAttempt = 1;
+    let useEscalation = false;
+    let exhausted = false;
+    let fullVerifyVerdict: VerdictKind = 'unparseable';
+    let reviewVerdict: VerdictKind | null = null;
+    let lastFullVerifyOutput = '';
+    let lastReviewOutput = '';
+
+    while (true) {
       state.stage = 'implement';
-      await runStageAgent('implement', implementAttempt, 1, undefined, {
+      const implementModel = useEscalation ? input.config.escalation : undefined;
+      const implementOutput = await runStageAgent('implement', implementAttempt, 1, implementModel, {
         fullVerifyFindings: lastFullVerifyOutput,
         reviewFindings: lastReviewOutput,
       });
       state.implementAttempts = implementAttempt;
       state.iterations += 1;
-      await activities.pushBranch(input.repo, state.workspaceRef, state.branch, `${input.taskId}-${implementAttempt}`);
-      state.stage = 'pr_babysit';
-      continue;
+      const diffEmpty = implementOutput.trim().length === 0;
+
+      state.stage = 'full_verify';
+      const verifyCommands =
+        [...(input.config.fastVerifyCommands ?? []), ...(input.config.fullVerifyCommands ?? [])].join('\n') ||
+        '(none configured — use your own judgment on the diff)';
+      const fullVerifyResult = await runVerdictStage('full_verify', implementAttempt, 'FULL:', { verifyCommands });
+      fullVerifyVerdict = fullVerifyResult.kind;
+      lastFullVerifyOutput = fullVerifyResult.output;
+
+      if (fullVerifyVerdict === 'pass') {
+        state.stage = 'review';
+        const reviewResult = await runVerdictStage('review', reviewAttempt, 'VERDICT:');
+        reviewVerdict = reviewResult.kind;
+        lastReviewOutput = reviewResult.output;
+        reviewAttempt += 1;
+      } else {
+        reviewVerdict = null;
+      }
+
+      const evaluate = () =>
+        nextRepairAction({
+          implementAttempts: implementAttempt,
+          iterations: state.iterations,
+          cumulativeTokens: state.cumulativeTokens,
+          fullVerify: fullVerifyVerdict,
+          review: reviewVerdict ?? 'unparseable',
+          diffEmpty,
+          brakes: effectiveBrakes,
+          hasEscalationModel: input.config.escalation != null,
+        });
+
+      let action = evaluate();
+      while (action.kind === 'block') {
+        state.status = 'blocked';
+        state.blockReason = action.reason;
+        if (await waitForResumeOrCancel()) {
+          state.stage = 'failed';
+          state.status = 'failed';
+          await activities.cleanupWorkspace(state.workspaceRef, input.repo);
+          return state;
+        }
+        action = evaluate();
+      }
+
+      if (action.kind === 'continue') {
+        break;
+      }
+      if (action.kind === 'open-pr-exhausted') {
+        exhausted = true;
+        break;
+      }
+      useEscalation = action.useEscalationModel;
+      implementAttempt += 1;
     }
 
-    // decision === 'waiting': loop again after the next poll interval.
-  }
+    state.stage = 'pr';
+    const findingsSummary = `full_verify: ${fullVerifyVerdict}; review: ${reviewVerdict ?? 'not-run'}`;
+    const prBody = exhausted
+      ? `Repair attempts exhausted after ${state.implementAttempts} implement attempt(s). Opening PR with outstanding findings.\n${findingsSummary}`
+      : `Automated PR for task ${input.taskId}.`;
+    const { prRef } = await activities.openPr({
+      repo: input.repo,
+      branch: state.branch,
+      title: input.goal,
+      body: prBody,
+    });
+    state.prRef = prRef;
+    if (exhausted) {
+      await activities.commentOnIssue(input.issueRef ?? input.taskId, prBody);
+    }
 
-  state.stage = 'done';
-  state.status = 'done';
-  await activities.cleanupWorkspace(state.workspaceRef, input.repo);
-  return state;
+    state.stage = 'pr_babysit';
+    const seenFeedbackHashes = new Set<string>();
+
+    while (true) {
+      await sleep(DEFAULT_BABYSIT_POLL_MS);
+      const feedback = await activities.getPrFeedback(prRef);
+      const decision = babysitDecision(
+        feedback,
+        seenFeedbackHashes,
+        state.babysitRounds,
+        effectiveBrakes.maxBabysitRounds,
+      );
+
+      if (decision === 'merge_ready') {
+        break;
+      }
+
+      if (decision === 'braked') {
+        state.status = 'blocked';
+        state.blockReason = 'babysit-brake';
+        if (await waitForResumeOrCancel()) {
+          state.stage = 'failed';
+          state.status = 'failed';
+          await activities.cleanupWorkspace(state.workspaceRef, input.repo);
+          return state;
+        }
+        state.stage = 'pr_babysit';
+        continue;
+      }
+
+      if (decision === 'actionable') {
+        seenFeedbackHashes.add(feedbackHash(feedback));
+        state.babysitRounds += 1;
+        implementAttempt += 1;
+        state.stage = 'implement';
+        await runStageAgent('implement', implementAttempt, 1, undefined, {
+          fullVerifyFindings: lastFullVerifyOutput,
+          reviewFindings: lastReviewOutput,
+        });
+        state.implementAttempts = implementAttempt;
+        state.iterations += 1;
+        await activities.pushBranch(input.repo, state.workspaceRef, state.branch, `${input.taskId}-${implementAttempt}`);
+        state.stage = 'pr_babysit';
+        continue;
+      }
+
+      // decision === 'waiting': loop again after the next poll interval.
+    }
+
+    state.stage = 'done';
+    state.status = 'done';
+    await activities.cleanupWorkspace(state.workspaceRef, input.repo);
+    return state;
+  } catch (err) {
+    if (!(err instanceof DevCycleCancelledError)) {
+      throw err;
+    }
+    state.stage = 'failed';
+    state.status = 'failed';
+    await activities.cleanupWorkspace(state.workspaceRef, input.repo);
+    return state;
+  }
 }
