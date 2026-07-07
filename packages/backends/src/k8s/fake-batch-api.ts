@@ -1,3 +1,4 @@
+import { ApiException } from '@kubernetes/client-node';
 import type { V1Job } from './k8s-types';
 
 export interface BatchV1ApiLike {
@@ -18,6 +19,9 @@ export class FakeBatchApi implements BatchV1ApiLike {
   async createNamespacedJob(namespace: string, body: V1Job): Promise<{ body: V1Job }> {
     const name = body.metadata?.name;
     if (!name) throw new Error('job metadata.name is required');
+    if (this.jobs.has(name)) {
+      throw new ApiException(409, 'Conflict', { message: `jobs.batch "${name}" already exists` }, {});
+    }
     this.creates.push(body);
     const stored: V1Job = {
       ...body,

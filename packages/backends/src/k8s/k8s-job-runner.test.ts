@@ -280,6 +280,47 @@ describe('K8sJobRunner', () => {
     ]);
   });
 
+  it('reuses an already-existing Job instead of failing when create is retried after a prior attempt succeeded', async () => {
+    const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-conflict-'));
+    const req = { ...baseRequest, workspaceRef };
+    const paths = agentOpsArtifactPaths(req);
+    await mkdir(paths.dir, { recursive: true });
+
+    const batchApi = new FakeBatchApi();
+    const opts = { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' };
+    // Simulates a previous Temporal retry of this same activity call: its createNamespacedJob
+    // already succeeded, but the runner never reached this point (e.g. the status read that follows
+    // failed for an unrelated reason). The Job is still sitting in the cluster under this same name.
+    await batchApi.createNamespacedJob('dev-agents', buildAgentJob(req, createClaudeCliSpec(), opts, paths));
+
+    const runner = new K8sJobRunner(createClaudeCliSpec(), {
+      ...opts,
+      batchApi,
+      pollIntervalMs: 1,
+      heartbeat: () => {},
+    });
+
+    const runPromise = runner.run(req);
+    await writeFile(
+      paths.outFile,
+      JSON.stringify({
+        is_error: false,
+        result: 'done',
+        usage: { input_tokens: 3, output_tokens: 4 },
+        duration_ms: 50,
+      }),
+      'utf8',
+    );
+    batchApi.setJobStatus(k8sJobName(req), { succeeded: 1 });
+
+    await expect(runPromise).resolves.toEqual({
+      output: 'done',
+      tokensIn: 3,
+      tokensOut: 4,
+      wallMs: 50,
+    });
+  });
+
   it('throws ProcessCliAuthError when stderr matches the auth pattern', async () => {
     const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-auth-'));
     const req = { ...baseRequest, workspaceRef };
