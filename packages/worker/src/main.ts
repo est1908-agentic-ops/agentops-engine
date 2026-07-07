@@ -75,6 +75,14 @@ export function workspaceMountPath(): string {
   return process.env.WORKSPACE_MOUNT_PATH ?? '/workspace/tasks';
 }
 
+// Only in-cluster runAgent calls go through K8sJobRunner (see buildBackends
+// below) -- local/dev mode spawns the CLI in-process via ProcessCliRunner, so
+// there's no separate Job pod to line up with and the WorkspaceManager
+// default (home dir) is fine.
+export function resolveWorkspacesDir(inCluster: boolean): string | undefined {
+  return inCluster ? workspaceMountPath() : undefined;
+}
+
 export function buildJobRunnerOptions(
   batchApi: BatchV1ApiLike,
   opts: { authSecretName?: string; serviceAccountName?: string; additionalSecretNames?: string[]; podLabels?: Record<string, string> } = {},
@@ -192,7 +200,7 @@ async function main(): Promise<void> {
 
   const registry = loadProjectRegistry();
   const inCluster = Boolean(process.env.KUBERNETES_SERVICE_HOST);
-  const { scm, tracker, workspaces } = buildActivityDependencies(registry, inCluster ? workspaceMountPath() : undefined);
+  const { scm, tracker, workspaces } = buildActivityDependencies(registry, resolveWorkspacesDir(inCluster));
   console.log(
     registry.length > 0
       ? `agentops worker: LIVE mode — ${registry.length} project(s) registered: ${registry
