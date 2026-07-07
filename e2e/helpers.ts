@@ -10,7 +10,8 @@ import {
 import { StubBackend, type AgentBackend } from '@agentops/backends';
 import { MemoryScmPort, MemoryTrackerPort } from '@agentops/ports';
 import { PromptPack } from '@agentops/prompts';
-import type { DevCycleActivities, DevCycleState } from '@agentops/workflows';
+import type { ResolvedProjectEntry } from '@agentops/contracts';
+import type { DevCycleActivities, DevCycleState, PlatformActivities } from '@agentops/workflows';
 import { createWorker, type TracingSetup } from '@agentops/worker';
 
 export interface TestEnv {
@@ -35,6 +36,7 @@ export function nextTaskQueue(): string {
 export interface BuildTestEnvOptions {
   extraBackends?: Record<string, AgentBackend>;
   tracing?: TracingSetup;
+  registry?: ResolvedProjectEntry[];
 }
 
 export async function buildTestEnv(opts: BuildTestEnvOptions = {}): Promise<TestEnv> {
@@ -46,14 +48,15 @@ export async function buildTestEnv(opts: BuildTestEnvOptions = {}): Promise<Test
   const stageResults = new InMemoryStageResultStore();
   const workspaces = new MemoryWorkspaceManager();
 
-  const activities: DevCycleActivities = createActivities({
-    backends: { stub, ...opts.extraBackends },
+  const activities: DevCycleActivities & PlatformActivities = createActivities({
+    backends: { stub, platform: stub, ...opts.extraBackends },
     tracker,
     scm,
     stats,
     stageResults,
     workspaces,
     prompts: new PromptPack(),
+    registry: opts.registry ?? [],
   });
 
   const taskQueue = nextTaskQueue();

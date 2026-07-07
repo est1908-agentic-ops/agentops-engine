@@ -3,7 +3,7 @@ import { context, trace } from '@opentelemetry/api';
 import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import type { AgentBackend } from '@agentops/backends';
-import type { BackendRunRequest } from '@agentops/contracts';
+import type { BackendRunRequest, ResolvedProjectEntry } from '@agentops/contracts';
 import { LiteLlmBudgetExceededError, RateWindowExceededError, StubBackend } from '@agentops/backends';
 import { MemoryTrackerPort, MemoryScmPort } from '@agentops/ports';
 import { PromptPack } from '@agentops/prompts';
@@ -23,6 +23,7 @@ function buildDeps() {
     stageResults: new InMemoryStageResultStore(),
     workspaces: new MemoryWorkspaceManager() as Workspaces,
     prompts: new PromptPack(),
+    registry: [] as ResolvedProjectEntry[],
   };
 }
 
@@ -253,6 +254,8 @@ describe('createActivities — workspace lifecycle', () => {
           return { workspaceRef: 'ref', branch: 'b', baseBranch: 'main' };
         },
         cleanup: async () => {},
+        prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
+        cleanupScratch: async () => {},
       } as Workspaces,
     };
     const activities = createActivities(deps);
@@ -324,6 +327,8 @@ describe('createActivities — workspace error translation', () => {
         throw new WorkspaceError('git clone failed for owner/repo: spawn git ENOENT', true);
       },
       cleanup: async () => {},
+      prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
+      cleanupScratch: async () => {},
     };
     const activities = createActivities(deps);
 
@@ -340,6 +345,8 @@ describe('createActivities — workspace error translation', () => {
         throw new WorkspaceError('git fetch failed for owner/repo: network unreachable', false);
       },
       cleanup: async () => {},
+      prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
+      cleanupScratch: async () => {},
     };
     const activities = createActivities(deps);
 
@@ -353,6 +360,8 @@ describe('createActivities — workspace error translation', () => {
       cleanup: async () => {
         throw new WorkspaceError('git worktree remove failed: spawn git ENOENT', true);
       },
+      prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
+      cleanupScratch: async () => {},
     };
     const activities = createActivities(deps);
 
@@ -410,5 +419,41 @@ describe('createActivities — backend error translation', () => {
     expect((err as ApplicationFailure).type).toBe('RateWindowExceededError');
     expect((err as ApplicationFailure).nonRetryable).toBe(false);
     expect((err as ApplicationFailure).nextRetryDelay).toBe(4200);
+  });
+});
+
+describe('createActivities — resolveRepoConfig', () => {
+  it("resolves product from the registry and loads that repo's ProductConfig", async () => {
+    const deps = buildDeps();
+    deps.scm.seedFile('flair-hr/agentops-engine', 'agentops.json', JSON.stringify({ fastVerifyCommands: ['pnpm lint'] }));
+    deps.registry = [{ product: 'engine', repo: 'flair-hr/agentops-engine', trackerType: 'github', tokenEnvVar: 'X', token: 'fake' }];
+    const activities = createActivities(deps);
+
+    const { product, config } = await activities.resolveRepoConfig('flair-hr/agentops-engine');
+
+    expect(product).toBe('engine');
+    expect(config.fastVerifyCommands).toEqual(['pnpm lint']);
+  });
+
+  it('falls back to product "default" when the repo is not in the registry', async () => {
+    const deps = buildDeps();
+    const activities = createActivities(deps);
+
+    const { product } = await activities.resolveRepoConfig('flair-hr/some-other-repo');
+
+    expect(product).toBe('default');
+  });
+});
+
+describe('createActivities — scratch workspace lifecycle', () => {
+  it('prepareScratchWorkspace and cleanupScratchWorkspace delegate to the workspaces dependency', async () => {
+    const deps = buildDeps();
+    const activities = createActivities(deps);
+
+    const { workspaceRef } = await activities.prepareScratchWorkspace('platform-task-1');
+    expect((deps.workspaces as MemoryWorkspaceManager).isScratchPrepared(workspaceRef)).toBe(true);
+
+    await activities.cleanupScratchWorkspace(workspaceRef);
+    expect((deps.workspaces as MemoryWorkspaceManager).isScratchCleanedUp(workspaceRef)).toBe(true);
   });
 });

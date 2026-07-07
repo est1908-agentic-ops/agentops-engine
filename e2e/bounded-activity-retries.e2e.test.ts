@@ -34,6 +34,8 @@ describe('DevCycle e2e: bounded activity retries', () => {
         throw new WorkspaceError("git worktree add failed: fatal: a branch named 'agentops/x' already exists", false);
       },
       cleanup: async () => {},
+      prepareScratch: async () => ({ workspaceRef: 'memory://scratch/x' }),
+      cleanupScratch: async () => {},
     };
     const activities = createActivities({
       backends: { stub: new StubBackend() },
@@ -43,6 +45,7 @@ describe('DevCycle e2e: bounded activity retries', () => {
       stageResults: new InMemoryStageResultStore(),
       workspaces: alwaysFailingWorkspaces,
       prompts: new PromptPack(),
+      registry: [],
     });
     const taskQueue = nextTaskQueue();
     const worker = await createWorker({ taskQueue, activities, connection: env.nativeConnection });

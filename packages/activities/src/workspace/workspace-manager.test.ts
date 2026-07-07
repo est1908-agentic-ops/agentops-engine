@@ -289,3 +289,23 @@ describe('WorkspaceManager — spawn failure classification', () => {
     await expect(manager.prepare('task-1', 'owner/repo')).rejects.toMatchObject({ nonRetryable: false });
   });
 });
+
+describe('WorkspaceManager — scratch workspaces', () => {
+  it('prepareScratch creates an empty directory under workspacesDir', async () => {
+    const { manager } = buildManager();
+
+    const { workspaceRef } = await manager.prepareScratch('platform-task-1');
+
+    expect(existsSync(workspaceRef)).toBe(true);
+    expect(workspaceRef.startsWith(workspacesDir)).toBe(true);
+  });
+
+  it('cleanupScratch removes the directory', async () => {
+    const { manager } = buildManager();
+    const { workspaceRef } = await manager.prepareScratch('platform-task-2');
+
+    await manager.cleanupScratch(workspaceRef);
+
+    expect(existsSync(workspaceRef)).toBe(false);
+  });
+});
