@@ -22,7 +22,7 @@ describe('DevCycle e2e: product image and services reach every stage agent call'
       },
     };
 
-    testEnv = await buildTestEnv({ recording });
+    testEnv = await buildTestEnv({ extraBackends: { recording } });
     const { env, worker, tracker, scm, taskQueue } = testEnv;
 
     tracker.seedIssue({ ref: 'issue-1', title: 'Add widget', body: 'Please add a widget', labels: [] });
