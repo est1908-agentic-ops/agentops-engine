@@ -51,7 +51,7 @@ export interface ActivityWiring {
   workspaces: Workspaces;
 }
 
-export function buildActivityDependencies(registry: ResolvedProjectEntry[]): ActivityWiring {
+export function buildActivityDependencies(registry: ResolvedProjectEntry[], workspacesDir?: string): ActivityWiring {
   if (registry.length === 0) {
     return { scm: new MemoryScmPort(), tracker: new MemoryTrackerPort(), workspaces: new MemoryWorkspaceManager() };
   }
@@ -61,7 +61,26 @@ export function buildActivityDependencies(registry: ResolvedProjectEntry[]): Act
     return { repo: entry.repo, scm, tracker, git };
   });
   const { scm, tracker, resolveGit } = createProjectScopedPorts(entries);
-  return { scm, tracker, workspaces: new WorkspaceManager({ resolveGit, cloneUrl: githubCloneUrl }) };
+  return { scm, tracker, workspaces: new WorkspaceManager({ resolveGit, cloneUrl: githubCloneUrl, workspacesDir }) };
+}
+
+// The workspace-tasks PVC is mounted at this path in both the engine-worker
+// pod (see charts/engine/templates/deployment.yaml) and every K8s Job pod it
+// launches (K8sJobRunnerOptions.workspaceMountPath below). WorkspaceManager
+// must create task workspaces under this same path -- otherwise a
+// workspaceRef it hands to K8sJobRunner points at a directory that only
+// exists on the engine-worker pod's own filesystem, and the Job container's
+// workingDir doesn't exist.
+export function workspaceMountPath(): string {
+  return process.env.WORKSPACE_MOUNT_PATH ?? '/workspace/tasks';
+}
+
+// Only in-cluster runAgent calls go through K8sJobRunner (see buildBackends
+// below) -- local/dev mode spawns the CLI in-process via ProcessCliRunner, so
+// there's no separate Job pod to line up with and the WorkspaceManager
+// default (home dir) is fine.
+export function resolveWorkspacesDir(inCluster: boolean): string | undefined {
+  return inCluster ? workspaceMountPath() : undefined;
 }
 
 export function buildJobRunnerOptions(
@@ -71,7 +90,7 @@ export function buildJobRunnerOptions(
   return {
     namespace: process.env.AGENT_NAMESPACE ?? 'dev-agents',
     workspacePvcName: process.env.WORKSPACE_PVC_NAME ?? 'workspace-tasks',
-    workspaceMountPath: process.env.WORKSPACE_MOUNT_PATH ?? '/workspace/tasks',
+    workspaceMountPath: workspaceMountPath(),
     authSecretName: opts.authSecretName,
     additionalSecretNames: opts.additionalSecretNames,
     serviceAccountName: opts.serviceAccountName,
@@ -181,7 +200,7 @@ async function main(): Promise<void> {
 
   const registry = loadProjectRegistry();
   const inCluster = Boolean(process.env.KUBERNETES_SERVICE_HOST);
-  const { scm, tracker, workspaces } = buildActivityDependencies(registry);
+  const { scm, tracker, workspaces } = buildActivityDependencies(registry, resolveWorkspacesDir(inCluster));
   console.log(
     registry.length > 0
       ? `agentops worker: LIVE mode — ${registry.length} project(s) registered: ${registry
