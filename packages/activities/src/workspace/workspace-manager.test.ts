@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -129,8 +129,52 @@ describe('WorkspaceManager', () => {
     await manager.prepare('task-a', 'owner/repo-a');
     await manager.prepare('task-b', 'owner/repo-b');
 
-    expect(callsA.map((args) => args[0])).toEqual(['clone', 'symbolic-ref', 'worktree']);
-    expect(callsB.map((args) => args[0])).toEqual(['clone', 'symbolic-ref', 'worktree']);
+    expect(callsA.map((args) => args[0])).toEqual(['clone', 'symbolic-ref', 'branch', 'worktree']);
+    expect(callsB.map((args) => args[0])).toEqual(['clone', 'symbolic-ref', 'branch', 'worktree']);
+  });
+});
+
+describe('WorkspaceManager — stale-state reclaim', () => {
+  // Reproduces the issue-broccoli-94 incident: a previous run of the same taskId
+  // never reached cleanup() (crashed, was canceled before the workflow's try/catch),
+  // leaving its worktree and/or branch behind. `git worktree add -b` isn't
+  // transactional with its own path check — it can create the branch even when the
+  // path-exists check subsequently fails — so a stale leftover poisons every future
+  // attempt with a *different* fatal error each time and never self-recovers.
+
+  it('reclaims a leftover worktree from an incomplete previous run when preparing the same taskId again', async () => {
+    const { manager } = buildManager();
+    const first = await manager.prepare('task-1', 'owner/repo');
+
+    const second = await manager.prepare('task-1', 'owner/repo');
+
+    expect(second.workspaceRef).toBe(first.workspaceRef);
+    expect(existsSync(second.workspaceRef)).toBe(true);
+    expect(existsSync(join(second.workspaceRef, 'README.md'))).toBe(true);
+  });
+
+  it('reclaims a stale untracked directory sitting at the workspace path', async () => {
+    const { manager } = buildManager();
+    const workspacePath = join(workspacesDir, 'task-1');
+    mkdirSync(workspacePath, { recursive: true });
+    writeFileSync(join(workspacePath, 'leftover.txt'), 'stale');
+
+    const result = await manager.prepare('task-1', 'owner/repo');
+
+    expect(existsSync(join(result.workspaceRef, 'leftover.txt'))).toBe(false);
+    expect(existsSync(join(result.workspaceRef, 'README.md'))).toBe(true);
+  });
+
+  it('reclaims a dangling branch left behind by a previous failed worktree add', async () => {
+    const { manager } = buildManager();
+    await manager.prepare('task-0', 'owner/repo'); // ensure the base clone exists
+    const cachePath = join(cacheDir, 'owner-repo');
+    execFileSync('git', ['branch', 'agentops/task-1'], { cwd: cachePath });
+
+    const result = await manager.prepare('task-1', 'owner/repo');
+
+    expect(result.branch).toBe('agentops/task-1');
+    expect(existsSync(join(result.workspaceRef, 'README.md'))).toBe(true);
   });
 });
 
