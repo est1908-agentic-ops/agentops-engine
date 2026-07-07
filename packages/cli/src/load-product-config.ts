@@ -5,25 +5,27 @@ import { InvalidProductConfigError, parseProductConfig, type ProductConfig } fro
 // backward compatibility with every product configured before the alternates existed.
 const CONFIG_CANDIDATE_PATHS = ['agentops.json', '.agentops.json', '.agentops/settings.json', '.agentops/agentops.json'];
 
-export async function loadProductConfig(scm: ScmPort, repo: string): Promise<ProductConfig> {
-  let raw: string | null = null;
-  let matchedPath: string | undefined;
+async function findConfigFile(scm: ScmPort, repo: string): Promise<{ path: string; raw: string } | null> {
   for (const path of CONFIG_CANDIDATE_PATHS) {
-    raw = await scm.readFile(repo, path);
+    const raw = await scm.readFile(repo, path);
     if (raw !== null) {
-      matchedPath = path;
-      break;
+      return { path, raw };
     }
   }
-  if (raw === null || matchedPath === undefined) {
+  return null;
+}
+
+export async function loadProductConfig(scm: ScmPort, repo: string): Promise<ProductConfig> {
+  const found = await findConfigFile(scm, repo);
+  if (found === null) {
     return parseProductConfig({});
   }
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(found.raw);
   } catch (err) {
-    throw new InvalidProductConfigError(`${repo}/${matchedPath} is not valid JSON: ${(err as Error).message}`);
+    throw new InvalidProductConfigError(`${repo}/${found.path} is not valid JSON: ${(err as Error).message}`);
   }
 
   return parseProductConfig(parsed);
