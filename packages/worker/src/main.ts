@@ -116,7 +116,7 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
       stub: new StubBackend(),
       claude: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), 'CLAUDE', 'claude'),
       pi: wrapWithRateWindow(new ProcessCliRunner(piSpec), 'PI', 'pi'),
-      platform: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), 'CLAUDE', 'platform'),
+      platform: wrapWithRateWindow(new ProcessCliRunner(piSpec), 'PI', 'platform'),
       litellm,
     };
   }
@@ -142,15 +142,15 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
     ),
     platform: wrapWithRateWindow(
       new K8sJobRunner(
-        claudeSpec,
+        piSpec,
         buildJobRunnerOptions(batchApi, {
-          authSecretName: process.env.CLAUDE_AUTH_SECRET_NAME,
+          authSecretName: process.env.PI_AUTH_SECRET_NAME,
           serviceAccountName: process.env.PLATFORM_AGENT_SERVICE_ACCOUNT,
           additionalSecretNames: process.env.PLATFORM_AGENT_SECRET_NAME ? [process.env.PLATFORM_AGENT_SECRET_NAME] : undefined,
           podLabels: { 'agentops/role': 'platform-agent' },
         }),
       ),
-      'CLAUDE',
+      'PI',
       'platform',
     ),
     litellm,

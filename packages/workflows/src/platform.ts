@@ -18,10 +18,10 @@ const agentActivities = proxyActivities<Pick<PlatformActivities, 'runAgent'>>({
 
 // This role isn't scoped to one product, so there's no ProductConfig to route
 // through -- fixed here at the same reasoning-heavy tier devCycle uses for
-// design/review. 'platform' (not 'claude') as the backend key: it's the same
-// claude CLI, but a distinct worker backend entry with this role's own
-// ServiceAccount/secrets (see packages/worker/src/main.ts buildBackends).
-const PLATFORM_MODEL = { backend: 'platform', model: 'claude-sonnet-5', effort: 'high' as const };
+// design/review. 'platform' (not 'pi') as the backend key: it's the pi CLI,
+// but a distinct worker backend entry with this role's own ServiceAccount/secrets
+// (see packages/worker/src/main.ts buildBackends).
+const PLATFORM_MODEL = { backend: 'platform', model: 'zai/glm-5.2', effort: 'high' as const };
 const PLATFORM_MAX_TOKENS = 400_000;
 const PLATFORM_TIMEOUT_MS = 1_800_000;
 const MAX_RESULT_CALLS = 2;
