@@ -18,7 +18,7 @@
 
 Native Kubernetes sidecars (`initContainers` with `restartPolicy: 'Always'`, which Task 6 depends on) require Kubernetes ≥1.29. `agentops-platform/bootstrap/bootstrap.sh` installs k3s via `curl -sfL https://get.k3s.io | sh -` with no version pin, so the real cluster's version can't be inferred from the repo — it must be checked live.
 
-- [ ] **Step 1: Check the live cluster's Kubernetes version**
+- [x] **Step 1: Check the live cluster's Kubernetes version**
 
 ```bash
 export KUBECONFIG=/etc/rancher/k3s/k3s.yaml   # run on the cluster host, or via your kubeconfig
@@ -27,9 +27,11 @@ kubectl version -o json | grep -A3 serverVersion
 
 Expected: a `serverVersion.minor` of `"29"` or higher (k3s versions track upstream Kubernetes minor versions, e.g. k3s `v1.31.x` → Kubernetes 1.31).
 
-- [ ] **Step 2: Branch on the result**
+**Confirmed 2026-07-07:** `kubectl version` on the real cluster reports `Server Version: v1.36.2+k3s1` — Kubernetes 1.36, well past the 1.29 requirement.
 
-If `serverVersion.minor >= 29`: proceed to Task 2 — the rest of this plan applies as written.
+- [x] **Step 2: Branch on the result**
+
+If `serverVersion.minor >= 29`: proceed to Task 2 — the rest of this plan applies as written. **This is the confirmed case — cleared to proceed.**
 
 If `serverVersion.minor < 29`: **stop**. Task 6's approach (native sidecars) doesn't work on this cluster — sidecars would need to be plain extra containers, which never exit, causing the Job to hang waiting for them to complete alongside the `agent` container. Revisit the design doc's §3 "K8sJobRunner rendering" section before writing any code; this is a design-level blocker, not a task-level one.
 

@@ -139,7 +139,7 @@ Registering broccoli in the project registry itself (GitHub token, `projects.bro
 
 ## Named risks
 
-- **K8s version dependency**: native sidecars require ≥1.29 — must be confirmed against the real cluster before implementation starts (§3).
+- **K8s version dependency**: native sidecars require ≥1.29. **Confirmed 2026-07-07** against the real cluster (`kubectl version` → `Server Version: v1.36.2+k3s1`) — well past the requirement.
 - **`:latest` drift**: a product's next image build silently picks up whatever `agent-runner` shipped most recently, with no breaking-change protection. Accepted (same trust model as any `FROM node:latest`); products wanting reproducibility can pin a sha tag instead.
 - **Startup latency on every stage**: the uniform (not per-stage) model means `context`/`assess`/`design`/`plan`/`review` Jobs also pay sidecar pull+start+readiness cost even though they never touch a database. Explicitly accepted for simplicity.
 - **Registry mismatch**: a product image pushed to a registry other than `gitactions.est1908.top` needs its own `imagePullSecretName` wiring not covered by this design — broccoli's onboarding must target the internal registry, not repurpose its existing `ghcr.io` images.
@@ -156,5 +156,5 @@ Registering broccoli in the project registry itself (GitHub token, `projects.bro
 
 ## Open questions carried forward
 
-- Exact k3s cluster version — blocking confirmation before implementation (§3).
+- ~~Exact k3s cluster version — blocking confirmation before implementation (§3).~~ Resolved 2026-07-07: `v1.36.2+k3s1`, clear to proceed.
 - Whether `agent-runner:latest` should eventually become a deliberately-bumped version tag instead of a floating one, once more than one product depends on it — not required for the first product.
