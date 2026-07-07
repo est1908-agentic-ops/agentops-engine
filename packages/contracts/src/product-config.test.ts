@@ -50,6 +50,38 @@ describe('ProductConfigSchema', () => {
       }),
     ).toThrow();
   });
+
+  it('accepts an optional image and services array', () => {
+    const parsed = ProductConfigSchema.parse({
+      ...validConfig,
+      image: 'ghcr.io/example/agentops:latest',
+      services: [
+        {
+          name: 'postgres',
+          image: 'pgvector/pgvector:pg18',
+          env: { POSTGRES_USER: 'app' },
+          readiness: { type: 'exec', command: ['pg_isready', '-U', 'app'] },
+        },
+        { name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } },
+      ],
+    });
+    expect(parsed.image).toBe('ghcr.io/example/agentops:latest');
+    expect(parsed.services).toHaveLength(2);
+    expect(parsed.services?.[1]).toEqual({
+      name: 'redis',
+      image: 'redis:7-alpine',
+      readiness: { type: 'tcpSocket', port: 6379 },
+    });
+  });
+
+  it('rejects a service missing a readiness check', () => {
+    expect(() =>
+      ProductConfigSchema.parse({
+        ...validConfig,
+        services: [{ name: 'postgres', image: 'pgvector/pgvector:pg18' }],
+      }),
+    ).toThrow();
+  });
 });
 
 describe('parseProductConfig', () => {
@@ -94,5 +126,20 @@ describe('parseProductConfig', () => {
     const config = parseProductConfig({ fastVerifyCommands: ['only-this'] });
     expect(config.fastVerifyCommands).toEqual(['only-this']);
     expect(config.fullVerifyCommands).toBeUndefined();
+  });
+
+  it('leaves image and services undefined when not configured, and passes them through untouched when supplied', () => {
+    const empty = parseProductConfig({});
+    expect(empty.image).toBeUndefined();
+    expect(empty.services).toBeUndefined();
+
+    const configured = parseProductConfig({
+      image: 'ghcr.io/example/agentops:latest',
+      services: [{ name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } }],
+    });
+    expect(configured.image).toBe('ghcr.io/example/agentops:latest');
+    expect(configured.services).toEqual([
+      { name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } },
+    ]);
   });
 });

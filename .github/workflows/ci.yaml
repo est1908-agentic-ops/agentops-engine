@@ -67,7 +67,9 @@ jobs:
           context: images/agent-runner
           file: images/agent-runner/Dockerfile
           push: ${{ github.ref == 'refs/heads/main' }}
-          tags: gitactions.est1908.top/agentic-ops/agent-runner:${{ github.sha }}
+          tags: |
+            gitactions.est1908.top/agentic-ops/agent-runner:${{ github.sha }}
+            gitactions.est1908.top/agentic-ops/agent-runner:latest
 
       - uses: docker/build-push-action@v6
         with:

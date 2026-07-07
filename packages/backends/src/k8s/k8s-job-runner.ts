@@ -2,7 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Context } from '@temporalio/activity';
-import type { AgentRunResult, BackendRunRequest } from '@agentops/contracts';
+import type { AgentRunResult, BackendRunRequest, VerifyService, VerifyServiceReadiness } from '@agentops/contracts';
 import type { AgentBackend } from '../agent-backend';
 import type { CliSpec } from '../cli-spec';
 import {
@@ -11,7 +11,7 @@ import {
   ProcessCliTimeoutError,
 } from '../process-cli-runner';
 import type { BatchV1ApiLike } from './fake-batch-api';
-import type { V1Job } from './k8s-types';
+import type { V1InitContainer, V1Job, V1ReadinessProbe } from './k8s-types';
 
 export interface K8sJobRunnerOptions {
   namespace: string;
@@ -55,6 +55,25 @@ export function k8sJobName(req: BackendRunRequest): string {
     .replace(/-+$/g, '');
 }
 
+function toReadinessProbe(readiness: VerifyServiceReadiness): V1ReadinessProbe {
+  return readiness.type === 'exec'
+    ? { exec: { command: readiness.command } }
+    : { tcpSocket: { port: readiness.port } };
+}
+
+function buildInitContainers(services: VerifyService[] | undefined): V1InitContainer[] | undefined {
+  if (!services || services.length === 0) {
+    return undefined;
+  }
+  return services.map((service) => ({
+    name: service.name,
+    image: service.image,
+    restartPolicy: 'Always',
+    env: service.env ? Object.entries(service.env).map(([name, value]) => ({ name, value })) : undefined,
+    readinessProbe: toReadinessProbe(service.readiness),
+  }));
+}
+
 export function buildAgentJob(
   req: BackendRunRequest,
   spec: CliSpec,
@@ -73,6 +92,7 @@ export function buildAgentJob(
   const envFrom = opts.authSecretName ? [{ secretRef: { name: opts.authSecretName } }] : undefined;
   const runAsUser = opts.runAsUser ?? 1000;
   const imagePullSecrets = opts.imagePullSecretName ? [{ name: opts.imagePullSecretName }] : undefined;
+  const initContainers = buildInitContainers(req.services);
 
   return {
     metadata: {
@@ -94,10 +114,11 @@ export function buildAgentJob(
               persistentVolumeClaim: { claimName: opts.workspacePvcName },
             },
           ],
+          initContainers,
           containers: [
             {
               name: 'agent',
-              image: spec.image,
+              image: req.image ?? spec.image,
               workingDir: req.workspaceRef,
               command: ['/bin/sh', '-c', SHELL_REDIRECT, spec.binary, ...args],
               env: [

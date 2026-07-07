@@ -139,6 +139,74 @@ describe('buildAgentJob', () => {
 
     expect(job.spec?.template?.spec?.imagePullSecrets).toEqual([{ name: 'registry-credentials' }]);
   });
+
+  it('uses req.image instead of spec.image when the request declares one', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      { ...baseRequest, image: 'gitactions.est1908.top/broccoli/agentops:latest' },
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+      paths,
+    );
+    const container = job.spec?.template?.spec?.containers?.[0];
+    expect(container?.image).toBe('gitactions.est1908.top/broccoli/agentops:latest');
+  });
+
+  it('has no initContainers when the request declares no services', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      baseRequest,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+      paths,
+    );
+    expect(job.spec?.template?.spec?.initContainers).toBeUndefined();
+  });
+
+  it('renders req.services as native sidecar initContainers with restartPolicy Always', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      {
+        ...baseRequest,
+        services: [
+          {
+            name: 'postgres',
+            image: 'pgvector/pgvector:pg18',
+            env: { POSTGRES_USER: 'broccoli', POSTGRES_PASSWORD: 'broccoli' },
+            readiness: { type: 'exec', command: ['pg_isready', '-U', 'broccoli'] },
+          },
+          {
+            name: 'redis',
+            image: 'redis:7-alpine',
+            readiness: { type: 'tcpSocket', port: 6379 },
+          },
+        ],
+      },
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+      paths,
+    );
+
+    expect(job.spec?.template?.spec?.initContainers).toEqual([
+      {
+        name: 'postgres',
+        image: 'pgvector/pgvector:pg18',
+        restartPolicy: 'Always',
+        env: [
+          { name: 'POSTGRES_USER', value: 'broccoli' },
+          { name: 'POSTGRES_PASSWORD', value: 'broccoli' },
+        ],
+        readinessProbe: { exec: { command: ['pg_isready', '-U', 'broccoli'] } },
+      },
+      {
+        name: 'redis',
+        image: 'redis:7-alpine',
+        restartPolicy: 'Always',
+        env: undefined,
+        readinessProbe: { tcpSocket: { port: 6379 } },
+      },
+    ]);
+  });
 });
 
 describe('K8sJobRunner', () => {

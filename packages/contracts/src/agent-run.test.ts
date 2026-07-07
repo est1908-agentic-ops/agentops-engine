@@ -47,6 +47,25 @@ describe('AgentRunRequestSchema', () => {
     expect(parsed.promptContext).toEqual({ goal: 'add a widget' });
     expect(parsed.effort).toBe('high');
   });
+
+  it('accepts an optional image and services array', () => {
+    const parsed = AgentRunRequestSchema.parse({
+      taskId: 't1',
+      stage: 'full_verify',
+      attempt: 1,
+      backend: 'claude',
+      model: 'claude-sonnet-5',
+      image: 'ghcr.io/example/agentops:latest',
+      services: [{ name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } }],
+      promptRef: 'full_verify.md',
+      workspaceRef: '/tmp/ws',
+      limits: { maxTokens: 1000, timeoutMs: 60_000 },
+    });
+    expect(parsed.image).toBe('ghcr.io/example/agentops:latest');
+    expect(parsed.services).toEqual([
+      { name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } },
+    ]);
+  });
 });
 
 describe('BackendRunRequestSchema', () => {
@@ -65,6 +84,24 @@ describe('BackendRunRequestSchema', () => {
     });
     expect(parsed.prompt).toBe('rendered prompt text');
     expect((parsed as Record<string, unknown>).promptRef).toBeUndefined();
+  });
+
+  it('carries image and services through, same as AgentRunRequestSchema', () => {
+    const parsed = BackendRunRequestSchema.parse({
+      taskId: 't1',
+      stage: 'full_verify',
+      attempt: 1,
+      callIndex: 1,
+      backend: 'claude',
+      model: 'claude-sonnet-5',
+      image: 'ghcr.io/example/agentops:latest',
+      services: [{ name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } }],
+      workspaceRef: '/tmp/ws',
+      limits: { maxTokens: 1000, timeoutMs: 60_000 },
+      prompt: 'run verify',
+    });
+    expect(parsed.image).toBe('ghcr.io/example/agentops:latest');
+    expect(parsed.services).toHaveLength(1);
   });
 });
 
