@@ -17,16 +17,17 @@ export interface CreateWorkerOptions {
 }
 
 export async function createWorker(options: CreateWorkerOptions): Promise<Worker> {
+  const { tracing } = options;
   return Worker.create({
     connection: options.connection,
     namespace: options.namespace,
     taskQueue: options.taskQueue,
     workflowsPath: options.workflowsPath ?? require.resolve('@agentops/workflows'),
     activities: options.activities as unknown as Record<string, (...args: never[]) => Promise<unknown>>,
-    sinks: options.tracing ? { exporter: options.tracing.workflowExporterSink } : undefined,
-    interceptors: options.tracing
+    sinks: tracing ? { exporter: tracing.workflowExporterSink } : undefined,
+    interceptors: tracing
       ? {
-          activity: [(ctx) => ({ inbound: new OpenTelemetryActivityInboundInterceptor(ctx, { tracer: options.tracing!.tracer }) })],
+          activity: [(ctx) => ({ inbound: new OpenTelemetryActivityInboundInterceptor(ctx, { tracer: tracing.tracer }) })],
           workflowModules: [OTEL_WORKFLOW_INTERCEPTOR_MODULE],
         }
       : undefined,
