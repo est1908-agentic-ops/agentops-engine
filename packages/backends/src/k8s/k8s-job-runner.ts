@@ -171,6 +171,9 @@ export class K8sJobRunner implements AgentBackend {
       // retry of this same activity call reissues the exact same create. If an earlier retry's create
       // already succeeded but this runner never got to see it finish (e.g. the status poll below
       // failed), the Job is still there under that name -- reuse it instead of erroring forever.
+      // Assumes buildAgentJob(req, ...) would still produce the same spec now (bounded retry backoff
+      // is on the order of seconds, far under a deploy cycle) -- Jobs are immutable once created, so
+      // there is nothing to reconcile if that assumption is ever wrong.
       if (!(err instanceof ApiException) || err.code !== 409) {
         throw err;
       }
