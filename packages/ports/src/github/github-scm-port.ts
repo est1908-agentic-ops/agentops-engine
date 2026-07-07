@@ -42,15 +42,36 @@ export class GithubScmPort implements ScmPort {
   async openPr(req: OpenPrRequest): Promise<OpenPrResult> {
     const { owner, repo } = parseRepoSlug(req.repo);
     const { data: repoData } = await this.client.rest.repos.get({ owner, repo });
-    const { data: prData } = await this.client.rest.pulls.create({
-      owner,
-      repo,
-      head: req.branch,
-      base: repoData.default_branch,
-      title: req.title,
-      body: req.body,
-    });
-    return { prRef: `${owner}/${repo}#${prData.number}`, url: prData.html_url };
+    try {
+      const { data: prData } = await this.client.rest.pulls.create({
+        owner,
+        repo,
+        head: req.branch,
+        base: repoData.default_branch,
+        title: req.title,
+        body: req.body,
+      });
+      return { prRef: `${owner}/${repo}#${prData.number}`, url: prData.html_url };
+    } catch (err) {
+      // req.branch is deterministic per task, so a Temporal retry of this same activity call
+      // (create succeeded at GitHub but the activity failed before returning) reissues the
+      // identical create and GitHub reports 422 "already exists" -- reuse that PR instead of
+      // failing every retry.
+      if ((err as { status?: number }).status !== 422) {
+        throw err;
+      }
+      const { data: existing } = await this.client.rest.pulls.list({
+        owner,
+        repo,
+        head: `${owner}:${req.branch}`,
+        state: 'open',
+      });
+      const pr = existing[0];
+      if (!pr) {
+        throw err;
+      }
+      return { prRef: `${owner}/${repo}#${pr.number}`, url: pr.html_url };
+    }
   }
 
   async getPrFeedback(prRef: string): Promise<PrFeedback> {
