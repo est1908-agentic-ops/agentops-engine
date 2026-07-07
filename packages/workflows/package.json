@@ -11,6 +11,7 @@
   "dependencies": {
     "@agentops/contracts": "workspace:*",
     "@agentops/policies": "workspace:*",
+    "@opentelemetry/api": "^1.9.0",
     "@temporalio/workflow": "^1.11.0"
   }
 }

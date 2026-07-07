@@ -15,6 +15,24 @@ replicas: 1
 
 temporalAddress: "localhost:7233"
 
+# Empty by default -- this chart ships no assumption about whether a cluster
+# has the observability stack (M4 sub-project 1, agentops-platform). Set by
+# agentops-platform's values override once Alloy is deployed there, same
+# pattern temporalAddress uses for a fixed in-cluster DNS name.
+otelExporterOtlpEndpoint: ""
+
+# Host empty by default -- same "chart ships no cluster assumption" pattern as
+# otelExporterOtlpEndpoint above. agentops-platform's values override sets the
+# real host once the agent_run_stats database exists there (M4 sub-project 3).
+# Password comes from the same postgres-credentials secret Temporal already
+# uses (shared Postgres instance, separate database, per ARCHITECTURE.md §5.2).
+agentStatsDb:
+  host: ""
+  port: "5432"
+  name: agent_run_stats
+  user: temporal
+  passwordSecretName: postgres-credentials
+
 taskQueue: agentops-devcycle
 
 # Per ARCHITECTURE.md §5.2/§6: dev-agents/prod-agents each get a separate
