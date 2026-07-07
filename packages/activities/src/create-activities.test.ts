@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentBackend } from '@agentops/backends';
+import type { BackendRunRequest } from '@agentops/contracts';
 import { LiteLlmBudgetExceededError, RateWindowExceededError, StubBackend } from '@agentops/backends';
 import { MemoryTrackerPort, MemoryScmPort } from '@agentops/ports';
 import { PromptPack } from '@agentops/prompts';
@@ -23,6 +24,38 @@ function buildDeps() {
 }
 
 describe('createActivities', () => {
+  it('runAgent passes image and services through to the backend', async () => {
+    const captured: BackendRunRequest[] = [];
+    const recording: AgentBackend = {
+      async run(req) {
+        captured.push(req);
+        return { output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 10 };
+      },
+    };
+    const deps = { ...buildDeps(), backends: { recording } };
+    const activities = createActivities(deps);
+
+    await activities.runAgent({
+      taskId: 't1',
+      stage: 'full_verify',
+      attempt: 1,
+      callIndex: 1,
+      backend: 'recording',
+      model: 'stub-v1',
+      image: 'ghcr.io/example/agentops:latest',
+      services: [{ name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } }],
+      promptRef: 'full_verify.md',
+      promptContext: { taskId: 't1', goal: 'g', verifyCommands: '' },
+      workspaceRef: 'demo/repo',
+      limits: { maxTokens: 1000, timeoutMs: 60_000 },
+    });
+
+    expect(captured[0].image).toBe('ghcr.io/example/agentops:latest');
+    expect(captured[0].services).toEqual([
+      { name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } },
+    ]);
+  });
+
   it('runAgent delegates to the named backend', async () => {
     const deps = buildDeps();
     (deps.backends.stub as StubBackend).scriptResponse('implement', 1, { output: 'diff' });

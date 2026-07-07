@@ -1,7 +1,23 @@
 import { z, ZodError } from 'zod';
 import { ModelRefSchema, BrakesSchema, RoutingSchema, StageToggleSchema } from './model';
 
+export const VerifyServiceReadinessSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('exec'), command: z.array(z.string()).min(1) }),
+  z.object({ type: z.literal('tcpSocket'), port: z.number().int().positive() }),
+]);
+export type VerifyServiceReadiness = z.infer<typeof VerifyServiceReadinessSchema>;
+
+export const VerifyServiceSchema = z.object({
+  name: z.string().min(1),
+  image: z.string().min(1),
+  env: z.record(z.string(), z.string()).optional(),
+  readiness: VerifyServiceReadinessSchema,
+});
+export type VerifyService = z.infer<typeof VerifyServiceSchema>;
+
 export const ProductConfigSchema = z.object({
+  image: z.string().min(1).optional(),
+  services: z.array(VerifyServiceSchema).optional(),
   fastVerifyCommands: z.array(z.string()).optional(),
   fullVerifyCommands: z.array(z.string()).optional(),
   stages: StageToggleSchema,
@@ -11,7 +27,10 @@ export const ProductConfigSchema = z.object({
 });
 export type ProductConfig = z.infer<typeof ProductConfigSchema>;
 
-export const DEFAULT_PRODUCT_CONFIG: Omit<ProductConfig, 'fastVerifyCommands' | 'fullVerifyCommands'> = {
+export const DEFAULT_PRODUCT_CONFIG: Omit<
+  ProductConfig,
+  'fastVerifyCommands' | 'fullVerifyCommands' | 'image' | 'services'
+> = {
   stages: {},
   routing: {
     context: { backend: 'claude', model: 'claude-sonnet-5', effort: 'medium' },

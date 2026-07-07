@@ -145,6 +145,8 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
           backend,
           model: modelName,
           effort: model?.effort,
+          image: input.config.image,
+          services: input.config.services,
           promptRef: `${stage}.md`,
           promptContext: { taskId: input.taskId, goal: input.goal, ...extraContext },
           workspaceRef: state.workspaceRef,

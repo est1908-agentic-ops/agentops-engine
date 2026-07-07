@@ -41,6 +41,8 @@ export function createActivities(deps: ActivityDependencies) {
           backend: req.backend,
           model: req.model,
           effort: req.effort,
+          image: req.image,
+          services: req.services,
           workspaceRef: req.workspaceRef,
           limits: req.limits,
           prompt,

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { VerifyServiceSchema } from './product-config';
 import { StageSchema } from './stage';
 
 export const AgentRunLimitsSchema = z.object({
@@ -17,6 +18,8 @@ export const AgentRunRequestSchema = z.object({
   backend: z.string().min(1),
   model: z.string().min(1),
   effort: EffortSchema.optional(),
+  image: z.string().min(1).optional(),
+  services: z.array(VerifyServiceSchema).optional(),
   promptRef: z.string().min(1),
   promptContext: z.record(z.string(), z.unknown()).default({}),
   workspaceRef: z.string().min(1),
