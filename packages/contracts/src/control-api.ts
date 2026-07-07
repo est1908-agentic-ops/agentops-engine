@@ -49,7 +49,7 @@ export const RunDetailSchema = z.object({
   error: z.string().min(1).optional(),
   temporalUrl: z.string().min(1),
 });
-export type RunDetail = z.infer<typeof RunDetailSchema>;
+export type RunDetail = z.output<typeof RunDetailSchema>;
 
 export const RepoListResponseSchema = z.object({
   repos: z.array(z.string()),
