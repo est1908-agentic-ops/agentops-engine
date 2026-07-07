@@ -96,6 +96,14 @@ projects: {}
 claudeAuthSecretName: claude-credentials
 piAuthSecretName: pi-credentials
 
+# The platform role (docs/superpowers/specs/2026-07-07-platform-agent-design.md)
+# needs credentials devCycle's claude/pi Jobs don't: Temporal REST/action creds
+# and Grafana basic auth, bundled by agentops-platform into one Secret with
+# whatever keys the platform-ops skill's toolbelt expects (TEMPORAL_HOST,
+# GRAFANA_HOST, GRAFANA_USER, GRAFANA_PASSWORD). Empty by default -- same
+# "chart ships no cluster assumption" pattern as otelExporterOtlpEndpoint.
+platformAgentSecretName: ""
+
 gateway:
   port: 3000
   triggerLabel: agentops

@@ -4,6 +4,8 @@ export class MemoryWorkspaceManager implements Workspaces {
   private readonly prepared = new Set<string>();
   private readonly cleanedUp = new Set<string>();
   private readonly initCommands = new Map<string, string[] | undefined>();
+  private readonly scratchPrepared = new Set<string>();
+  private readonly scratchCleanedUp = new Set<string>();
 
   async prepare(taskId: string, repo: string, initCommands?: string[]): Promise<PreparedWorkspace> {
     const workspaceRef = `memory://${repo}/${taskId}`;
@@ -29,5 +31,28 @@ export class MemoryWorkspaceManager implements Workspaces {
 
   isCleanedUp(workspaceRef: string): boolean {
     return this.cleanedUp.has(workspaceRef);
+  }
+
+  async prepareScratch(taskId: string): Promise<{ workspaceRef: string }> {
+    const workspaceRef = `memory://scratch/${taskId}`;
+    this.scratchPrepared.add(workspaceRef);
+    return { workspaceRef };
+  }
+
+  async cleanupScratch(workspaceRef: string): Promise<void> {
+    if (!this.scratchPrepared.has(workspaceRef)) {
+      throw new Error(
+        `MemoryWorkspaceManager: cleanupScratch called on a workspaceRef that was never prepared: "${workspaceRef}"`,
+      );
+    }
+    this.scratchCleanedUp.add(workspaceRef);
+  }
+
+  isScratchPrepared(workspaceRef: string): boolean {
+    return this.scratchPrepared.has(workspaceRef);
+  }
+
+  isScratchCleanedUp(workspaceRef: string): boolean {
+    return this.scratchCleanedUp.has(workspaceRef);
   }
 }

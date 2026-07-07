@@ -21,6 +21,9 @@ export interface K8sJobRunnerOptions {
   batchApi: BatchV1ApiLike;
   pollIntervalMs?: number;
   authSecretName?: string;
+  additionalSecretNames?: string[];
+  serviceAccountName?: string;
+  podLabels?: Record<string, string>;
   runAsUser?: number;
   imagePullSecretName?: string;
   heartbeat?: () => void;
@@ -84,13 +87,19 @@ export function buildAgentJob(
     | 'workspacePvcName'
     | 'workspaceMountPath'
     | 'authSecretName'
+    | 'additionalSecretNames'
+    | 'serviceAccountName'
+    | 'podLabels'
     | 'runAsUser'
     | 'imagePullSecretName'
   >,
   paths: ReturnType<typeof agentOpsArtifactPaths>,
 ): V1Job {
   const args = spec.buildArgs(req);
-  const envFrom = opts.authSecretName ? [{ secretRef: { name: opts.authSecretName } }] : undefined;
+  const envFrom = [
+    ...(opts.authSecretName ? [{ secretRef: { name: opts.authSecretName } }] : []),
+    ...(opts.additionalSecretNames ?? []).map((name) => ({ secretRef: { name } })),
+  ];
   const runAsUser = opts.runAsUser ?? 1000;
   const imagePullSecrets = opts.imagePullSecretName ? [{ name: opts.imagePullSecretName }] : undefined;
   const initContainers = buildInitContainers(req.services);
@@ -105,8 +114,10 @@ export function buildAgentJob(
       backoffLimit: 0,
       activeDeadlineSeconds: Math.ceil(req.limits.timeoutMs / 1000),
       template: {
+        metadata: opts.podLabels ? { labels: opts.podLabels } : undefined,
         spec: {
           restartPolicy: 'Never',
+          serviceAccountName: opts.serviceAccountName,
           securityContext: { runAsNonRoot: true, runAsUser },
           imagePullSecrets,
           volumes: [
@@ -127,7 +138,7 @@ export function buildAgentJob(
                 { name: 'OUT_FILE', value: paths.outFile },
                 { name: 'ERR_FILE', value: paths.errFile },
               ],
-              envFrom,
+              envFrom: envFrom.length > 0 ? envFrom : undefined,
               securityContext: { runAsNonRoot: true, runAsUser, allowPrivilegeEscalation: false },
               volumeMounts: [
                 {

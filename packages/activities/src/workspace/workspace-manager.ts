@@ -22,6 +22,8 @@ export interface PreparedWorkspace {
 export interface Workspaces {
   prepare(taskId: string, repo: string, initCommands?: string[]): Promise<PreparedWorkspace>;
   cleanup(workspaceRef: string, repo: string): Promise<void>;
+  prepareScratch(taskId: string): Promise<{ workspaceRef: string }>;
+  cleanupScratch(workspaceRef: string): Promise<void>;
 }
 
 export class WorkspaceError extends Error {
@@ -84,6 +86,16 @@ export class WorkspaceManager implements Workspaces {
     }
 
     return { workspaceRef: workspacePath, branch, baseBranch };
+  }
+
+  async prepareScratch(taskId: string): Promise<{ workspaceRef: string }> {
+    const workspaceRef = join(this.workspacesDir, 'scratch', taskId);
+    await mkdir(workspaceRef, { recursive: true });
+    return { workspaceRef };
+  }
+
+  async cleanupScratch(workspaceRef: string): Promise<void> {
+    await rm(workspaceRef, { recursive: true, force: true });
   }
 
   async cleanup(workspaceRef: string, repo: string): Promise<void> {

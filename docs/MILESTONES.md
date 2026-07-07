@@ -63,6 +63,8 @@ Alloy + LGTM; OTel spans from workers and runner Jobs; `agent_run_stats` project
 
 **Done when:** an injected agent failure and an injected prod exception each end in a merged fix or a well-reasoned human escalation.
 
+**Status (2026-07-07):** the manually-triggered `platform` workflow ([design](superpowers/specs/2026-07-07-platform-agent-design.md), [plan](superpowers/plans/2026-07-07-platform-agent.md)) generalizes this milestone's diagnosis-and-fix capability — same "read Temporal history + logs, fix via a devCycle PR" shape, just prompted by a human instead of auto-triggered. When this milestone starts, `Heal`'s auto-trigger should be a thin signal handler that starts a `platform` run with a synthesized prompt on `blocked`/`failed`, not a second diagnosis pipeline built from scratch.
+
 ## M7 — Recurrent quality → Phase 3 gate
 
 Schedules: `BugHunt`, `SecurityReview` (Semgrep/Trivy + agent), `EvalRun`; preview deploys (`pr-N.app.lab`); `QASquad` + `ProductProbe` (Playwright + MailPit API); `ConfigSync` + product-defined triggers & jobs (ARCHITECTURE.md §6.1).

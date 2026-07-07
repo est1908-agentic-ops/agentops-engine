@@ -41,7 +41,7 @@ import {
   type TrackerPort,
 } from '@agentops/ports';
 import { PromptPack } from '@agentops/prompts';
-import type { DevCycleActivities } from '@agentops/workflows';
+import type { DevCycleActivities, PlatformActivities } from '@agentops/workflows';
 import { createWorker } from './create-worker';
 import { setupTracing } from './tracing';
 
@@ -66,13 +66,16 @@ export function buildActivityDependencies(registry: ResolvedProjectEntry[]): Act
 
 export function buildJobRunnerOptions(
   batchApi: BatchV1ApiLike,
-  authSecretName: string | undefined,
+  opts: { authSecretName?: string; serviceAccountName?: string; additionalSecretNames?: string[]; podLabels?: Record<string, string> } = {},
 ): K8sJobRunnerOptions {
   return {
     namespace: process.env.AGENT_NAMESPACE ?? 'dev-agents',
     workspacePvcName: process.env.WORKSPACE_PVC_NAME ?? 'workspace-tasks',
     workspaceMountPath: process.env.WORKSPACE_MOUNT_PATH ?? '/workspace/tasks',
-    authSecretName,
+    authSecretName: opts.authSecretName,
+    additionalSecretNames: opts.additionalSecretNames,
+    serviceAccountName: opts.serviceAccountName,
+    podLabels: opts.podLabels,
     runAsUser: process.env.AGENT_RUNNER_UID ? Number(process.env.AGENT_RUNNER_UID) : undefined,
     imagePullSecretName: process.env.IMAGE_PULL_SECRET_NAME,
     batchApi,
@@ -113,6 +116,7 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
       stub: new StubBackend(),
       claude: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), 'CLAUDE', 'claude'),
       pi: wrapWithRateWindow(new ProcessCliRunner(piSpec), 'PI', 'pi'),
+      platform: wrapWithRateWindow(new ProcessCliRunner(piSpec), 'PI', 'platform'),
       litellm,
     };
   }
@@ -127,14 +131,27 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
     // and pi's (provider-dependent, see images/agent-runner/Dockerfile) are not
     // guaranteed to be the same shape, so they were never safe to share.
     claude: wrapWithRateWindow(
-      new K8sJobRunner(claudeSpec, buildJobRunnerOptions(batchApi, process.env.CLAUDE_AUTH_SECRET_NAME)),
+      new K8sJobRunner(claudeSpec, buildJobRunnerOptions(batchApi, { authSecretName: process.env.CLAUDE_AUTH_SECRET_NAME })),
       'CLAUDE',
       'claude',
     ),
     pi: wrapWithRateWindow(
-      new K8sJobRunner(piSpec, buildJobRunnerOptions(batchApi, process.env.PI_AUTH_SECRET_NAME)),
+      new K8sJobRunner(piSpec, buildJobRunnerOptions(batchApi, { authSecretName: process.env.PI_AUTH_SECRET_NAME })),
       'PI',
       'pi',
+    ),
+    platform: wrapWithRateWindow(
+      new K8sJobRunner(
+        piSpec,
+        buildJobRunnerOptions(batchApi, {
+          authSecretName: process.env.PI_AUTH_SECRET_NAME,
+          serviceAccountName: process.env.PLATFORM_AGENT_SERVICE_ACCOUNT,
+          additionalSecretNames: process.env.PLATFORM_AGENT_SECRET_NAME ? [process.env.PLATFORM_AGENT_SECRET_NAME] : undefined,
+          podLabels: { 'agentops/role': 'platform-agent' },
+        }),
+      ),
+      'PI',
+      'platform',
     ),
     litellm,
   };
@@ -185,7 +202,7 @@ async function main(): Promise<void> {
       : 'agentops worker: agent_run_stats in-memory only (AGENT_STATS_DB_HOST not set)',
   );
 
-  const activities: DevCycleActivities = createActivities({
+  const activities: DevCycleActivities & PlatformActivities = createActivities({
     backends: buildBackends(inCluster),
     tracker,
     scm,
@@ -193,6 +210,7 @@ async function main(): Promise<void> {
     stageResults: new InMemoryStageResultStore(),
     workspaces,
     prompts: new PromptPack(),
+    registry,
   });
 
   const tracing = setupTracing();

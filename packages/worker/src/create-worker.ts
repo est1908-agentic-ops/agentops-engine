@@ -1,6 +1,6 @@
 import { NativeConnection, Worker } from '@temporalio/worker';
 import { OpenTelemetryActivityInboundInterceptor } from '@temporalio/interceptors-opentelemetry/lib/worker';
-import type { DevCycleActivities } from '@agentops/workflows';
+import type { DevCycleActivities, PlatformActivities } from '@agentops/workflows';
 import type { TracingSetup } from './tracing';
 
 const OTEL_WORKFLOW_INTERCEPTOR_MODULE = require.resolve(
@@ -9,7 +9,7 @@ const OTEL_WORKFLOW_INTERCEPTOR_MODULE = require.resolve(
 
 export interface CreateWorkerOptions {
   taskQueue: string;
-  activities: DevCycleActivities;
+  activities: DevCycleActivities & PlatformActivities;
   connection?: NativeConnection;
   workflowsPath?: string;
   namespace?: string;

@@ -9,8 +9,16 @@
 FROM node:22-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates \
+    && apt-get install -y --no-install-recommends git ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
+
+# kubectl for the platform role's read-only cluster-state investigation (see
+# 2026-07-07-platform-agent-design.md §6) -- harmless for every other role's
+# Jobs, which run under the dev-agents namespace's `default` ServiceAccount
+# with no RBAC bindings: the binary is present but useless without a bound
+# Role/ClusterRole, so this doesn't change what a devCycle Job can reach.
+RUN curl -fsSL -o /usr/local/bin/kubectl "https://dl.k8s.io/release/v1.31.1/bin/linux/amd64/kubectl" \
+    && chmod +x /usr/local/bin/kubectl
 
 RUN npm install --global @anthropic-ai/claude-code@2.1.200
 
@@ -22,6 +30,8 @@ RUN npm install --global --ignore-scripts @earendil-works/pi-coding-agent@0.80.2
 
 COPY step-ca-root.crt /usr/local/share/ca-certificates/step-ca-root.crt
 RUN update-ca-certificates
+
+COPY --chown=1000:1000 skills/platform-ops /home/node/.claude/skills/platform-ops
 
 # Numeric, not the name "node": kubelet can't verify a pod's runAsNonRoot
 # against a named image user without a matching explicit runAsUser in the

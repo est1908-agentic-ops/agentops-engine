@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { loadProductConfig } from '@agentops/activities';
 import { GithubScmPort, MemoryScmPort } from '@agentops/ports';
-import { loadProductConfig } from './load-product-config';
 import { buildStartScmPort, parseFlags, seedDemoAgentopsConfig } from './main';
 
 describe('seedDemoAgentopsConfig', () => {

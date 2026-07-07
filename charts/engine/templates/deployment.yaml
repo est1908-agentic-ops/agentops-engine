@@ -52,6 +52,12 @@ spec:
               value: {{ .Values.claudeAuthSecretName | quote }}
             - name: PI_AUTH_SECRET_NAME
               value: {{ .Values.piAuthSecretName | quote }}
+            - name: PLATFORM_AGENT_SERVICE_ACCOUNT
+              value: {{ printf "%s-platform-agent" .Release.Name | quote }}
+            {{- if .Values.platformAgentSecretName }}
+            - name: PLATFORM_AGENT_SECRET_NAME
+              value: {{ .Values.platformAgentSecretName | quote }}
+            {{- end }}
             - name: IMAGE_PULL_SECRET_NAME
               value: {{ .Values.imagePullSecretName | quote }}
             {{- if .Values.otelExporterOtlpEndpoint }}

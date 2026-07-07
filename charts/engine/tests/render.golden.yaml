@@ -1,4 +1,44 @@
 ---
+# Source: engine/templates/platform-agent-networkpolicy.yaml
+# Standard Kubernetes NetworkPolicy can't match by hostname/FQDN, only by
+# port and podSelector/namespaceSelector/ipBlock -- and Temporal, Grafana,
+# forge, and LiteLLM/provider endpoints are all reached over HTTPS from this
+# role's Job today (see 2026-07-07-platform-agent-design.md §6), some through
+# the same public-style ingress hostnames debug-devcycle-issue already uses.
+# Port-scoping to DNS + HTTPS is the practical equivalent of "only these
+# services" without assuming a CNI capable of FQDN-based policy; revisit with
+# namespaceSelector rules once ARCHITECTURE.md's internal *.lab DNS zone (§5.1)
+# is in place for Temporal/Grafana specifically.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: engine-platform-agent
+  namespace: dev-agents
+spec:
+  podSelector:
+    matchLabels:
+      agentops/role: platform-agent
+  policyTypes:
+    - Egress
+  egress:
+    - ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+    - ports:
+        - protocol: TCP
+          port: 443
+
+---
+# Source: engine/templates/platform-agent-serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: engine-platform-agent
+  namespace: dev-agents
+
+---
 # Source: engine/templates/serviceaccount.yaml
 apiVersion: v1
 kind: ServiceAccount
@@ -32,6 +72,35 @@ spec:
   resources:
     requests:
       storage: 20Gi
+
+---
+# Source: engine/templates/platform-agent-clusterrole.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: engine-platform-agent
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "events", "nodes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "replicasets"]
+    verbs: ["get", "list", "watch"]
+
+---
+# Source: engine/templates/platform-agent-clusterrolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: engine-platform-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: engine-platform-agent
+subjects:
+  - kind: ServiceAccount
+    name: engine-platform-agent
+    namespace: dev-agents
 
 ---
 # Source: engine/templates/role.yaml
@@ -141,6 +210,8 @@ spec:
               value: "claude-credentials"
             - name: PI_AUTH_SECRET_NAME
               value: "pi-credentials"
+            - name: PLATFORM_AGENT_SERVICE_ACCOUNT
+              value: "engine-platform-agent"
             - name: IMAGE_PULL_SECRET_NAME
               value: "registry-credentials"
           resources:

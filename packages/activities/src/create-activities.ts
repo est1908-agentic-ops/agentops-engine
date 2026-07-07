@@ -1,11 +1,12 @@
 import { trace } from '@opentelemetry/api';
 import { LiteLlmBudgetExceededError, RateWindowExceededError, type AgentBackend } from '@agentops/backends';
 import type { Issue, OpenPrRequest, OpenPrResult, ScmPort, TrackerPort } from '@agentops/ports';
-import type { AgentRunRequest, AgentRunResult, PrFeedback, RunStats } from '@agentops/contracts';
+import type { AgentRunRequest, AgentRunResult, PrFeedback, ProductConfig, ResolvedProjectEntry, RunStats } from '@agentops/contracts';
 import type { PromptPack } from '@agentops/prompts';
 import type { StageResultRecord, StageResultStore } from './stage-result-store';
 import type { StatsStore } from './stats-store';
 import { WorkspaceError, type PreparedWorkspace, type Workspaces } from './workspace/workspace-manager';
+import { loadProductConfig } from './load-product-config';
 import { ApplicationFailure } from '@temporalio/common';
 
 export interface ActivityDependencies {
@@ -16,6 +17,7 @@ export interface ActivityDependencies {
   stageResults: StageResultStore;
   workspaces: Workspaces;
   prompts: PromptPack;
+  registry: ResolvedProjectEntry[];
 }
 
 function rethrowWorkspaceError(err: unknown): never {
@@ -118,6 +120,25 @@ export function createActivities(deps: ActivityDependencies) {
     async cleanupWorkspace(workspaceRef: string, repo: string): Promise<void> {
       try {
         await deps.workspaces.cleanup(workspaceRef, repo);
+      } catch (err) {
+        rethrowWorkspaceError(err);
+      }
+    },
+    async resolveRepoConfig(repo: string): Promise<{ product: string; config: ProductConfig }> {
+      const entry = deps.registry.find((candidate) => candidate.repo === repo);
+      const config = await loadProductConfig(deps.scm, repo);
+      return { product: entry?.product ?? 'default', config };
+    },
+    async prepareScratchWorkspace(taskId: string): Promise<{ workspaceRef: string }> {
+      try {
+        return await deps.workspaces.prepareScratch(taskId);
+      } catch (err) {
+        rethrowWorkspaceError(err);
+      }
+    },
+    async cleanupScratchWorkspace(workspaceRef: string): Promise<void> {
+      try {
+        await deps.workspaces.cleanupScratch(workspaceRef);
       } catch (err) {
         rethrowWorkspaceError(err);
       }

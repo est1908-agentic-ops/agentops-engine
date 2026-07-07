@@ -15,8 +15,10 @@ export interface V1Job {
     backoffLimit?: number;
     activeDeadlineSeconds?: number;
     template?: {
+      metadata?: { labels?: Record<string, string> };
       spec?: {
         restartPolicy?: string;
+        serviceAccountName?: string;
         securityContext?: { runAsNonRoot?: boolean; runAsUser?: number };
         imagePullSecrets?: Array<{ name: string }>;
         volumes?: Array<{ name: string; persistentVolumeClaim?: { claimName: string } }>;

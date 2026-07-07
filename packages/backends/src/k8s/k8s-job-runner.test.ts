@@ -207,6 +207,85 @@ describe('buildAgentJob', () => {
       },
     ]);
   });
+
+  it('sets serviceAccountName when provided', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      baseRequest,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+        serviceAccountName: 'engine-platform-agent',
+      },
+      paths,
+    );
+
+    expect(job.spec?.template?.spec?.serviceAccountName).toBe('engine-platform-agent');
+  });
+
+  it('omits serviceAccountName when not provided (devCycle Jobs are unaffected)', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      baseRequest,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+      paths,
+    );
+
+    expect(job.spec?.template?.spec?.serviceAccountName).toBeUndefined();
+  });
+
+  it('appends additionalSecretNames to envFrom alongside authSecretName', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      baseRequest,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+        authSecretName: 'claude-credentials',
+        additionalSecretNames: ['platform-agent-credentials'],
+      },
+      paths,
+    );
+
+    expect(job.spec?.template?.spec?.containers?.[0].envFrom).toEqual([
+      { secretRef: { name: 'claude-credentials' } },
+      { secretRef: { name: 'platform-agent-credentials' } },
+    ]);
+  });
+
+  it('sets pod template labels when podLabels is provided', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      baseRequest,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+        podLabels: { 'agentops/role': 'platform-agent' },
+      },
+      paths,
+    );
+
+    expect(job.spec?.template?.metadata?.labels).toEqual({ 'agentops/role': 'platform-agent' });
+  });
+
+  it('omits pod template labels when podLabels is not provided', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      baseRequest,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+      paths,
+    );
+
+    expect(job.spec?.template?.metadata?.labels).toBeUndefined();
+  });
 });
 
 describe('K8sJobRunner', () => {
