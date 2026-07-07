@@ -1,4 +1,4 @@
-{{- if .Values.control.ingress.enabled }}
+{{- if and .Values.control.ingress.enabled .Values.temporalUiBaseUrl }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

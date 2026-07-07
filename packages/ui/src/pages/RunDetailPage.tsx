@@ -26,6 +26,7 @@ export function RunDetailPage() {
           return;
         }
         setRun(detail);
+        setError(null);
         if (detail.status !== 'RUNNING' && intervalRef.current) {
           clearInterval(intervalRef.current);
           intervalRef.current = null;

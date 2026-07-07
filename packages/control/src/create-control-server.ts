@@ -114,16 +114,17 @@ async function handleListRuns(deps: ControlDeps, url: URL): Promise<HandlerRespo
   const items: unknown[] = [];
   for (const execution of executions.slice(0, limit)) {
     const prompt = memoPrompt(execution.memo);
-    items.push(
-      RunListItemSchema.parse({
-        workflowId: execution.workflowId,
-        runId: execution.runId,
-        status: execution.status.name,
-        startTime: execution.startTime.toISOString(),
-        closeTime: execution.closeTime?.toISOString(),
-        promptSnippet: prompt ? truncate(prompt, 120) : undefined,
-      }),
-    );
+    const parsed = RunListItemSchema.safeParse({
+      workflowId: execution.workflowId,
+      runId: execution.runId,
+      status: execution.status.name,
+      startTime: execution.startTime.toISOString(),
+      closeTime: execution.closeTime?.toISOString(),
+      promptSnippet: prompt ? truncate(prompt, 120) : undefined,
+    });
+    if (parsed.success) {
+      items.push(parsed.data);
+    }
   }
   return { status: 200, body: items };
 }

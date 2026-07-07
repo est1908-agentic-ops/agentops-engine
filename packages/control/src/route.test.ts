@@ -30,4 +30,8 @@ describe('matchPath', () => {
       params: { workflowId: 'platform/1' },
     });
   });
+
+  it('returns null for a malformed percent-encoded param', () => {
+    expect(matchPath('/api/platform/runs/:workflowId', '/api/platform/runs/platform%')).toBeNull();
+  });
 });

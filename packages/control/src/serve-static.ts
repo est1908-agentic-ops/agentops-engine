@@ -26,7 +26,7 @@ export interface StaticFile {
 export async function resolveStaticFile(rootDir: string, urlPath: string): Promise<StaticFile | null> {
   const resolvedRoot = resolve(rootDir);
   const hasExtension = extname(urlPath) !== '';
-  const relativePath = urlPath === '/' || !hasExtension ? 'index.html' : urlPath;
+  const relativePath = urlPath === '/' || !hasExtension ? 'index.html' : urlPath.replace(/^\//, '');
   const filePath = resolve(join(resolvedRoot, relativePath));
 
   if (filePath !== resolvedRoot && !filePath.startsWith(`${resolvedRoot}/`)) {

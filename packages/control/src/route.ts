@@ -14,7 +14,11 @@ export function matchPath(pattern: string, path: string): MatchedRoute | null {
   for (const [index, segment] of patternSegments.entries()) {
     const pathSegment = pathSegments[index];
     if (segment.startsWith(':')) {
-      params[segment.slice(1)] = decodeURIComponent(pathSegment);
+      try {
+        params[segment.slice(1)] = decodeURIComponent(pathSegment);
+      } catch {
+        return null;
+      }
     } else if (segment !== pathSegment) {
       return null;
     }
