@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Context } from '@temporalio/activity';
+import { ApiException } from '@kubernetes/client-node';
 import type { AgentRunResult, BackendRunRequest, VerifyService, VerifyServiceReadiness } from '@agentops/contracts';
 import type { AgentBackend } from '../agent-backend';
 import type { CliSpec } from '../cli-spec';
@@ -163,7 +164,17 @@ export class K8sJobRunner implements AgentBackend {
 
     const job = buildAgentJob(req, this.spec, this.opts, paths);
     const jobName = job.metadata!.name!;
-    await this.opts.batchApi.createNamespacedJob(this.opts.namespace, job);
+    try {
+      await this.opts.batchApi.createNamespacedJob(this.opts.namespace, job);
+    } catch (err) {
+      // The Job name is deterministic from (taskId, stage, attempt, callIndex), so a Temporal-level
+      // retry of this same activity call reissues the exact same create. If an earlier retry's create
+      // already succeeded but this runner never got to see it finish (e.g. the status poll below
+      // failed), the Job is still there under that name -- reuse it instead of erroring forever.
+      if (!(err instanceof ApiException) || err.code !== 409) {
+        throw err;
+      }
+    }
 
     const start = this.now();
     while (true) {
