@@ -43,4 +43,4 @@ export const PlatformAgentResultSchema = z.object({
     )
     .default([]),
 });
-export type PlatformAgentResult = z.infer<typeof PlatformAgentResultSchema>;
+export type PlatformAgentResult = z.output<typeof PlatformAgentResultSchema>;

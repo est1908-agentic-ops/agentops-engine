@@ -78,6 +78,13 @@ jobs:
           push: ${{ github.ref == 'refs/heads/main' }}
           tags: gitactions.est1908.top/agentic-ops/gateway:${{ github.sha }}
 
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: images/control/Dockerfile
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: gitactions.est1908.top/agentic-ops/control:${{ github.sha }}
+
       - uses: azure/setup-helm@v4
         with:
           version: v4.2.2
