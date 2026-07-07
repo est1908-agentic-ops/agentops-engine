@@ -11,7 +11,7 @@ import { StubBackend, type AgentBackend } from '@agentops/backends';
 import { MemoryScmPort, MemoryTrackerPort } from '@agentops/ports';
 import { PromptPack } from '@agentops/prompts';
 import type { DevCycleActivities, DevCycleState } from '@agentops/workflows';
-import { createWorker } from '@agentops/worker';
+import { createWorker, type TracingSetup } from '@agentops/worker';
 
 export interface TestEnv {
   env: TestWorkflowEnvironment;
@@ -32,7 +32,12 @@ export function nextTaskQueue(): string {
   return `agentops-devcycle-test-${counter}`;
 }
 
-export async function buildTestEnv(extraBackends: Record<string, AgentBackend> = {}): Promise<TestEnv> {
+export interface BuildTestEnvOptions {
+  extraBackends?: Record<string, AgentBackend>;
+  tracing?: TracingSetup;
+}
+
+export async function buildTestEnv(opts: BuildTestEnvOptions = {}): Promise<TestEnv> {
   const env = await TestWorkflowEnvironment.createTimeSkipping();
   const stub = new StubBackend();
   const tracker = new MemoryTrackerPort();
@@ -42,7 +47,7 @@ export async function buildTestEnv(extraBackends: Record<string, AgentBackend> =
   const workspaces = new MemoryWorkspaceManager();
 
   const activities: DevCycleActivities = createActivities({
-    backends: { stub, ...extraBackends },
+    backends: { stub, ...opts.extraBackends },
     tracker,
     scm,
     stats,
@@ -56,6 +61,7 @@ export async function buildTestEnv(extraBackends: Record<string, AgentBackend> =
     taskQueue,
     activities,
     connection: env.nativeConnection,
+    tracing: opts.tracing,
   });
 
   return { env, worker, stub, tracker, scm, stats, stageResults, workspaces, taskQueue };

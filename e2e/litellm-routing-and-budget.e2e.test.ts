@@ -44,7 +44,7 @@ describe('DevCycle e2e: LiteLLM routing and budget enforcement (M5 gate)', () =>
       apiKey: 'sk-virtual-key',
       fetchFn: (async () => fakeResponse(200, SUCCESS_BODY)) as unknown as typeof fetch,
     });
-    testEnv = await buildTestEnv({ litellm });
+    testEnv = await buildTestEnv({ extraBackends: { litellm } });
     const { env, worker, stub, scm, taskQueue } = testEnv;
 
     stub.scriptResponse('implement', 1, { output: 'diff', tokensIn: 10, tokensOut: 10 });
@@ -102,7 +102,7 @@ describe('DevCycle e2e: LiteLLM routing and budget enforcement (M5 gate)', () =>
         return calls === 1 ? fakeResponse(429, BUDGET_EXCEEDED_BODY) : fakeResponse(200, SUCCESS_BODY);
       }) as unknown as typeof fetch,
     });
-    testEnv = await buildTestEnv({ litellm });
+    testEnv = await buildTestEnv({ extraBackends: { litellm } });
     const { env, worker, stub, scm, taskQueue } = testEnv;
 
     stub.scriptResponse('implement', 1, { output: 'diff', tokensIn: 10, tokensOut: 10 });

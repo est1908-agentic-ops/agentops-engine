@@ -1,18 +1,18 @@
 import type { RunStats } from '@agentops/contracts';
 
 export interface StatsStore {
-  record(stats: RunStats): void;
-  all(): RunStats[];
+  record(stats: RunStats): Promise<void>;
+  all(): Promise<RunStats[]>;
 }
 
 export class InMemoryStatsStore implements StatsStore {
   private readonly entries: RunStats[] = [];
 
-  record(stats: RunStats): void {
+  async record(stats: RunStats): Promise<void> {
     this.entries.push(stats);
   }
 
-  all(): RunStats[] {
+  async all(): Promise<RunStats[]> {
     return [...this.entries];
   }
 }

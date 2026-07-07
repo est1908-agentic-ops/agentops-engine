@@ -1,5 +1,6 @@
 import { NativeConnection } from '@temporalio/worker';
 import { BatchV1Api, KubeConfig } from '@kubernetes/client-node';
+import { Pool } from 'pg';
 import {
   createActivities,
   InMemoryStageResultStore,
@@ -7,8 +8,10 @@ import {
   loadEnv,
   loadProjectRegistry,
   MemoryWorkspaceManager,
+  PostgresStatsStore,
   SpawnGitCommandRunner,
   WorkspaceManager,
+  type StatsStore,
   type Workspaces,
 } from '@agentops/activities';
 
@@ -40,6 +43,7 @@ import {
 import { PromptPack } from '@agentops/prompts';
 import type { DevCycleActivities } from '@agentops/workflows';
 import { createWorker } from './create-worker';
+import { setupTracing } from './tracing';
 
 export interface ActivityWiring {
   scm: ScmPort;
@@ -136,6 +140,23 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
   };
 }
 
+export async function buildStatsStore(): Promise<StatsStore> {
+  const host = process.env.AGENT_STATS_DB_HOST;
+  if (!host) {
+    return new InMemoryStatsStore();
+  }
+  const pool = new Pool({
+    host,
+    port: process.env.AGENT_STATS_DB_PORT ? Number(process.env.AGENT_STATS_DB_PORT) : 5432,
+    database: process.env.AGENT_STATS_DB_NAME ?? 'agent_run_stats',
+    user: process.env.AGENT_STATS_DB_USER ?? 'temporal',
+    password: process.env.AGENT_STATS_DB_PASSWORD,
+  });
+  const store = new PostgresStatsStore(pool);
+  await store.ensureSchema();
+  return store;
+}
+
 async function main(): Promise<void> {
   const connection = await NativeConnection.connect({
     address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233',
@@ -157,25 +178,44 @@ async function main(): Promise<void> {
       : 'agentops worker: LOCAL mode — claude/pi spawn as local processes',
   );
 
+  const stats = await buildStatsStore();
+  console.log(
+    stats instanceof PostgresStatsStore
+      ? 'agentops worker: agent_run_stats persisted to Postgres (AGENT_STATS_DB_HOST set)'
+      : 'agentops worker: agent_run_stats in-memory only (AGENT_STATS_DB_HOST not set)',
+  );
+
   const activities: DevCycleActivities = createActivities({
     backends: buildBackends(inCluster),
     tracker,
     scm,
-    stats: new InMemoryStatsStore(),
+    stats,
     stageResults: new InMemoryStageResultStore(),
     workspaces,
     prompts: new PromptPack(),
   });
+
+  const tracing = setupTracing();
+  console.log(
+    tracing
+      ? 'agentops worker: tracing ENABLED — exporting to OTEL_EXPORTER_OTLP_ENDPOINT'
+      : 'agentops worker: tracing disabled (OTEL_EXPORTER_OTLP_ENDPOINT not set)',
+  );
 
   const worker = await createWorker({
     taskQueue: 'agentops-devcycle',
     activities,
     connection,
     namespace: process.env.TEMPORAL_NAMESPACE,
+    tracing,
   });
 
   console.log('agentops worker started on task queue "agentops-devcycle"');
-  await worker.run();
+  try {
+    await worker.run();
+  } finally {
+    await tracing?.shutdown();
+  }
 }
 
 if (require.main === module) {
