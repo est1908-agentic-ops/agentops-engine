@@ -3,11 +3,17 @@ import type { PreparedWorkspace, Workspaces } from './workspace-manager';
 export class MemoryWorkspaceManager implements Workspaces {
   private readonly prepared = new Set<string>();
   private readonly cleanedUp = new Set<string>();
+  private readonly initCommands = new Map<string, string[] | undefined>();
 
-  async prepare(taskId: string, repo: string): Promise<PreparedWorkspace> {
+  async prepare(taskId: string, repo: string, initCommands?: string[]): Promise<PreparedWorkspace> {
     const workspaceRef = `memory://${repo}/${taskId}`;
     this.prepared.add(workspaceRef);
+    this.initCommands.set(workspaceRef, initCommands);
     return { workspaceRef, branch: `agentops/${taskId}`, baseBranch: 'main' };
+  }
+
+  initCommandsFor(workspaceRef: string): string[] | undefined {
+    return this.initCommands.get(workspaceRef);
   }
 
   async cleanup(workspaceRef: string, _repo: string): Promise<void> {

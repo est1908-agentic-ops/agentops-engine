@@ -134,6 +134,88 @@ describe('WorkspaceManager', () => {
   });
 });
 
+describe('WorkspaceManager — initCommands', () => {
+  function buildManagerWithCommandRunner(commandRunner: {
+    run: (command: string, opts: { cwd: string }) => Promise<{ stdout: string; stderr: string; exitCode: number; spawnFailed?: boolean }>;
+  }): WorkspaceManager {
+    const real = new SpawnGitCommandRunner();
+    return new WorkspaceManager({
+      resolveGit: () => real,
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+      commandRunner,
+    });
+  }
+
+  it('runs each initCommand in the new worktree, in order, after the worktree is created', async () => {
+    const calls: { command: string; cwd: string }[] = [];
+    const manager = buildManagerWithCommandRunner({
+      run: async (command, opts) => {
+        calls.push({ command, cwd: opts.cwd });
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    });
+
+    const result = await manager.prepare('task-1', 'owner/repo', ['pnpm install', 'pnpm build']);
+
+    expect(calls).toEqual([
+      { command: 'pnpm install', cwd: result.workspaceRef },
+      { command: 'pnpm build', cwd: result.workspaceRef },
+    ]);
+  });
+
+  it('does not invoke the command runner when initCommands is absent or empty', async () => {
+    let called = false;
+    const manager = buildManagerWithCommandRunner({
+      run: async () => {
+        called = true;
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    });
+
+    await manager.prepare('task-1', 'owner/repo');
+    await manager.prepare('task-2', 'owner/repo', []);
+
+    expect(called).toBe(false);
+  });
+
+  it('stops at the first failing initCommand and does not run the rest', async () => {
+    const calls: string[] = [];
+    const manager = buildManagerWithCommandRunner({
+      run: async (command) => {
+        calls.push(command);
+        return command === 'pnpm install'
+          ? { stdout: '', stderr: 'boom', exitCode: 1 }
+          : { stdout: '', stderr: '', exitCode: 0 };
+      },
+    });
+
+    await expect(manager.prepare('task-1', 'owner/repo', ['pnpm install', 'pnpm build'])).rejects.toThrow(/boom/);
+    expect(calls).toEqual(['pnpm install']);
+  });
+
+  it('throws a non-retryable WorkspaceError when an initCommand fails to spawn', async () => {
+    const manager = buildManagerWithCommandRunner({
+      run: async () => ({ stdout: '', stderr: 'spawn sh ENOENT', exitCode: -1, spawnFailed: true }),
+    });
+
+    await expect(manager.prepare('task-1', 'owner/repo', ['pnpm install'])).rejects.toMatchObject({
+      nonRetryable: true,
+    });
+  });
+
+  it('throws a retryable WorkspaceError when an initCommand runs but exits non-zero for an ordinary reason', async () => {
+    const manager = buildManagerWithCommandRunner({
+      run: async () => ({ stdout: '', stderr: 'pnpm: command not found', exitCode: 127 }),
+    });
+
+    await expect(manager.prepare('task-1', 'owner/repo', ['pnpm install'])).rejects.toMatchObject({
+      nonRetryable: false,
+    });
+  });
+});
+
 describe('WorkspaceManager — spawn failure classification', () => {
   it('throws a non-retryable WorkspaceError when the git binary itself fails to spawn', async () => {
     const fakeGit = {

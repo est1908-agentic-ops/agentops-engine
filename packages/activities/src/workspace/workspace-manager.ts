@@ -3,12 +3,14 @@ import { mkdir } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { GitCommandRunner } from '@agentops/ports';
+import { SpawnCommandRunner, type CommandRunner } from './spawn-command-runner';
 
 export interface WorkspaceManagerOptions {
   resolveGit: (repo: string) => GitCommandRunner;
   cacheDir?: string;
   workspacesDir?: string;
   cloneUrl: (repo: string) => string;
+  commandRunner?: CommandRunner;
 }
 
 export interface PreparedWorkspace {
@@ -18,7 +20,7 @@ export interface PreparedWorkspace {
 }
 
 export interface Workspaces {
-  prepare(taskId: string, repo: string): Promise<PreparedWorkspace>;
+  prepare(taskId: string, repo: string, initCommands?: string[]): Promise<PreparedWorkspace>;
   cleanup(workspaceRef: string, repo: string): Promise<void>;
 }
 
@@ -41,15 +43,17 @@ export class WorkspaceManager implements Workspaces {
   private readonly cacheDir: string;
   private readonly workspacesDir: string;
   private readonly cloneUrl: (repo: string) => string;
+  private readonly commandRunner: CommandRunner;
 
   constructor(opts: WorkspaceManagerOptions) {
     this.resolveGit = opts.resolveGit;
     this.cacheDir = opts.cacheDir ?? join(homedir(), '.agentops', 'cache');
     this.workspacesDir = opts.workspacesDir ?? join(homedir(), '.agentops', 'workspaces');
     this.cloneUrl = opts.cloneUrl;
+    this.commandRunner = opts.commandRunner ?? new SpawnCommandRunner();
   }
 
-  async prepare(taskId: string, repo: string): Promise<PreparedWorkspace> {
+  async prepare(taskId: string, repo: string, initCommands?: string[]): Promise<PreparedWorkspace> {
     const git = this.resolveGit(repo);
     await mkdir(this.cacheDir, { recursive: true });
     await mkdir(this.workspacesDir, { recursive: true });
@@ -65,6 +69,16 @@ export class WorkspaceManager implements Workspaces {
     );
     if (addResult.exitCode !== 0) {
       throw new WorkspaceError(`git worktree add failed for ${repo}: ${addResult.stderr}`, addResult.spawnFailed === true);
+    }
+
+    for (const command of initCommands ?? []) {
+      const result = await this.commandRunner.run(command, { cwd: workspacePath });
+      if (result.exitCode !== 0) {
+        throw new WorkspaceError(
+          `init command "${command}" failed for ${repo}: ${result.stderr}`,
+          result.spawnFailed === true,
+        );
+      }
     }
 
     return { workspaceRef: workspacePath, branch, baseBranch };
