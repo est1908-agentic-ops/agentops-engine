@@ -18,7 +18,10 @@ import {
   createClaudeCliSpec,
   createPiCliSpec,
   K8sJobRunner,
+  LiteLlmBackend,
   ProcessCliRunner,
+  RateWindowedBackend,
+  RateWindowLimiter,
   StubBackend,
   type AgentBackend,
   type BatchV1ApiLike,
@@ -72,17 +75,41 @@ export function buildJobRunnerOptions(
   };
 }
 
+// Subscription rate windows (ARCHITECTURE.md §5.5/§9: "prompts per 5h/week")
+// are real per-provider constraints, but the actual quota depends on which
+// plan tier is in use -- nothing here hardcodes a number. Unset (the
+// default) means unlimited, same as today; set both env vars for a backend
+// to turn the limit on. In-memory, per-worker-process: correct for today's
+// single-replica deployment, not for multiple replicas sharing one quota
+// (see RateWindowLimiter).
+function wrapWithRateWindow(backend: AgentBackend, envPrefix: string, name: string): AgentBackend {
+  const maxCalls = Number(process.env[`${envPrefix}_RATE_WINDOW_MAX_CALLS`]);
+  const windowMs = Number(process.env[`${envPrefix}_RATE_WINDOW_MS`]);
+  if (!Number.isFinite(maxCalls) || maxCalls <= 0 || !Number.isFinite(windowMs) || windowMs <= 0) {
+    return backend;
+  }
+  return new RateWindowedBackend(backend, new RateWindowLimiter({ maxCalls, windowMs }), name);
+}
+
 export function buildBackends(inCluster: boolean): Record<string, AgentBackend> {
   const agentImage =
     process.env.AGENT_RUNNER_IMAGE ?? 'ghcr.io/CHANGEME/agentops-engine/agent-runner:CHANGEME';
   const claudeSpec = createClaudeCliSpec({ image: agentImage });
   const piSpec = createPiCliSpec({ image: agentImage });
+  // Not a CLI spawn, so it doesn't switch between ProcessCliRunner and
+  // K8sJobRunner like claude/pi do -- it's a plain HTTP call to LiteLLM's
+  // in-cluster Service, made directly from the worker/activity either way.
+  const litellm = new LiteLlmBackend({
+    baseUrl: process.env.LITELLM_BASE_URL ?? 'http://litellm.platform.svc.cluster.local:4000',
+    apiKey: process.env.LITELLM_API_KEY ?? '',
+  });
 
   if (!inCluster) {
     return {
       stub: new StubBackend(),
-      claude: new ProcessCliRunner(claudeSpec),
-      pi: new ProcessCliRunner(piSpec),
+      claude: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), 'CLAUDE', 'claude'),
+      pi: wrapWithRateWindow(new ProcessCliRunner(piSpec), 'PI', 'pi'),
+      litellm,
     };
   }
 
@@ -95,8 +122,17 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
     // Each backend gets its own auth secret — claude's z.ai/Anthropic env vars
     // and pi's (provider-dependent, see images/agent-runner/Dockerfile) are not
     // guaranteed to be the same shape, so they were never safe to share.
-    claude: new K8sJobRunner(claudeSpec, buildJobRunnerOptions(batchApi, process.env.CLAUDE_AUTH_SECRET_NAME)),
-    pi: new K8sJobRunner(piSpec, buildJobRunnerOptions(batchApi, process.env.PI_AUTH_SECRET_NAME)),
+    claude: wrapWithRateWindow(
+      new K8sJobRunner(claudeSpec, buildJobRunnerOptions(batchApi, process.env.CLAUDE_AUTH_SECRET_NAME)),
+      'CLAUDE',
+      'claude',
+    ),
+    pi: wrapWithRateWindow(
+      new K8sJobRunner(piSpec, buildJobRunnerOptions(batchApi, process.env.PI_AUTH_SECRET_NAME)),
+      'PI',
+      'pi',
+    ),
+    litellm,
   };
 }
 

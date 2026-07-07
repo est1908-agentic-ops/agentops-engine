@@ -1,4 +1,4 @@
-import type { AgentBackend } from '@agentops/backends';
+import { LiteLlmBudgetExceededError, RateWindowExceededError, type AgentBackend } from '@agentops/backends';
 import type { Issue, OpenPrRequest, OpenPrResult, ScmPort, TrackerPort } from '@agentops/ports';
 import type { AgentRunRequest, AgentRunResult, PrFeedback, RunStats } from '@agentops/contracts';
 import type { PromptPack } from '@agentops/prompts';
@@ -32,18 +32,40 @@ export function createActivities(deps: ActivityDependencies) {
         throw new Error(`createActivities.runAgent: unknown backend "${req.backend}"`);
       }
       const prompt = deps.prompts.render(req.promptRef, req.promptContext);
-      return backend.run({
-        taskId: req.taskId,
-        stage: req.stage,
-        attempt: req.attempt,
-        callIndex: req.callIndex,
-        backend: req.backend,
-        model: req.model,
-        effort: req.effort,
-        workspaceRef: req.workspaceRef,
-        limits: req.limits,
-        prompt,
-      });
+      try {
+        return await backend.run({
+          taskId: req.taskId,
+          stage: req.stage,
+          attempt: req.attempt,
+          callIndex: req.callIndex,
+          backend: req.backend,
+          model: req.model,
+          effort: req.effort,
+          workspaceRef: req.workspaceRef,
+          limits: req.limits,
+          prompt,
+        });
+      } catch (err) {
+        // A LiteLLM virtual-key budget cap is definitive, not transient --
+        // same "typed error at the boundary, non-retryable ApplicationFailure
+        // here" shape as rethrowWorkspaceError below.
+        if (err instanceof LiteLlmBudgetExceededError) {
+          throw ApplicationFailure.nonRetryable(err.message, 'LiteLlmBudgetExceededError');
+        }
+        // A subscription rate window is a scheduling fact, not something a
+        // human needs to resolve -- retryable, with nextRetryDelay set to
+        // exactly how long until a slot frees up, so Temporal's own activity
+        // retry waits it out without ever surfacing as a blocked workflow.
+        if (err instanceof RateWindowExceededError) {
+          throw ApplicationFailure.create({
+            message: err.message,
+            type: 'RateWindowExceededError',
+            nonRetryable: false,
+            nextRetryDelay: err.retryAfterMs,
+          });
+        }
+        throw err;
+      }
     },
     async getIssue(ref: string): Promise<Issue> {
       return deps.tracker.getIssue(ref);

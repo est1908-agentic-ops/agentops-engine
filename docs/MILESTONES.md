@@ -55,6 +55,8 @@ Alloy + LGTM; OTel spans from workers and runner Jobs; `agent_run_stats` project
 
 **Done when:** two repos run different stage/model routing; a deliberately low budget trips the brake with a clear reason.
 
+**Status (2026-07-07):** decomposed into 4 sub-projects ([decomposition doc](superpowers/specs/2026-07-07-m5-decomposition.md)) — per-stage routing and escalation turned out to already be fully wired since M0; the actual gap was that nothing routed through LiteLLM. (1) LiteLLM gateway deployed in `agentops-platform` — [PR #20](https://github.com/flair-hr/agentops-platform/pull/20), not yet merged/synced to a live cluster. (2) `litellm` backend, (3) budget-exceeded → `blocked` wiring + e2e proof of both gate halves, (4) subscription rate-window awareness — all three implemented, tested, and committed on `agentops-engine`'s `thundering-area` branch — [PR #14](https://github.com/flair-hr/agentops-engine/pull/14), not yet merged. **Not yet done:** both PRs need review/merge; a real `ZAI_API_KEY` and a live in-cluster call are operator steps (DEPLOY.md Phase 8.1) not exercised from this sandbox. `cursor` backend is an explicit non-goal for now, deferred pending an automation-ToS check (ARCHITECTURE.md §9/§10).
+
 ## M6 — Self-healing → Phase 2 gate
 
 `Heal` workflow auto-starts on `blocked`/`failed`; GlitchTip → `ProdErrorTriage` → auto-filed issue → DevCycle with incident profile.

@@ -7,7 +7,7 @@ import {
   InMemoryStatsStore,
   MemoryWorkspaceManager,
 } from '@agentops/activities';
-import { StubBackend } from '@agentops/backends';
+import { StubBackend, type AgentBackend } from '@agentops/backends';
 import { MemoryScmPort, MemoryTrackerPort } from '@agentops/ports';
 import { PromptPack } from '@agentops/prompts';
 import type { DevCycleActivities, DevCycleState } from '@agentops/workflows';
@@ -32,7 +32,7 @@ export function nextTaskQueue(): string {
   return `agentops-devcycle-test-${counter}`;
 }
 
-export async function buildTestEnv(): Promise<TestEnv> {
+export async function buildTestEnv(extraBackends: Record<string, AgentBackend> = {}): Promise<TestEnv> {
   const env = await TestWorkflowEnvironment.createTimeSkipping();
   const stub = new StubBackend();
   const tracker = new MemoryTrackerPort();
@@ -42,7 +42,7 @@ export async function buildTestEnv(): Promise<TestEnv> {
   const workspaces = new MemoryWorkspaceManager();
 
   const activities: DevCycleActivities = createActivities({
-    backends: { stub },
+    backends: { stub, ...extraBackends },
     tracker,
     scm,
     stats,

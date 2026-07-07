@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AgentBackend } from '@agentops/backends';
-import { StubBackend } from '@agentops/backends';
+import { LiteLlmBudgetExceededError, RateWindowExceededError, StubBackend } from '@agentops/backends';
 import { MemoryTrackerPort, MemoryScmPort } from '@agentops/ports';
 import { PromptPack } from '@agentops/prompts';
 import { ApplicationFailure } from '@temporalio/common';
@@ -12,7 +12,7 @@ import { WorkspaceError, type Workspaces } from './workspace/workspace-manager';
 
 function buildDeps() {
   return {
-    backends: { stub: new StubBackend() },
+    backends: { stub: new StubBackend() } as Record<string, AgentBackend>,
     tracker: new MemoryTrackerPort(),
     scm: new MemoryScmPort(),
     stats: new InMemoryStatsStore(),
@@ -211,5 +211,55 @@ describe('createActivities — workspace error translation', () => {
 
     expect(err).toBeInstanceOf(ApplicationFailure);
     expect((err as ApplicationFailure).nonRetryable).toBe(true);
+  });
+});
+
+function runAgentReq(backend: string) {
+  return {
+    taskId: 't1',
+    stage: 'implement' as const,
+    attempt: 1,
+    callIndex: 1,
+    backend,
+    model: 'm',
+    promptRef: 'implement.md',
+    promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' },
+    workspaceRef: 'demo/repo',
+    limits: { maxTokens: 1000, timeoutMs: 60_000 },
+  };
+}
+
+describe('createActivities — backend error translation', () => {
+  it('converts a LiteLlmBudgetExceededError into a non-retryable ApplicationFailure', async () => {
+    const deps = buildDeps();
+    deps.backends.litellm = {
+      run: async () => {
+        throw new LiteLlmBudgetExceededError('Budget has been exceeded! Current cost: 1.20, Max budget: 1.00');
+      },
+    };
+    const activities = createActivities(deps);
+
+    const err: unknown = await activities.runAgent(runAgentReq('litellm')).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ApplicationFailure);
+    expect((err as ApplicationFailure).type).toBe('LiteLlmBudgetExceededError');
+    expect((err as ApplicationFailure).nonRetryable).toBe(true);
+  });
+
+  it('converts a RateWindowExceededError into a retryable ApplicationFailure with nextRetryDelay set', async () => {
+    const deps = buildDeps();
+    deps.backends.claude = {
+      run: async () => {
+        throw new RateWindowExceededError('claude subscription rate window exhausted, retry in 4200ms', 4200);
+      },
+    };
+    const activities = createActivities(deps);
+
+    const err: unknown = await activities.runAgent(runAgentReq('claude')).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ApplicationFailure);
+    expect((err as ApplicationFailure).type).toBe('RateWindowExceededError');
+    expect((err as ApplicationFailure).nonRetryable).toBe(false);
+    expect((err as ApplicationFailure).nextRetryDelay).toBe(4200);
   });
 });
