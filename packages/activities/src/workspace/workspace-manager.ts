@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { GitCommandRunner } from '@agentops/ports';
@@ -63,6 +63,8 @@ export class WorkspaceManager implements Workspaces {
     const branch = `agentops/${taskId}`;
     const workspacePath = join(this.workspacesDir, taskId);
 
+    await this.reclaimStaleWorktree(git, cachePath, workspacePath, branch);
+
     const addResult = await git.run(
       ['worktree', 'add', workspacePath, '-b', branch, `origin/${baseBranch}`],
       { cwd: cachePath },
@@ -96,6 +98,31 @@ export class WorkspaceManager implements Workspaces {
     if (result.exitCode !== 0) {
       throw new WorkspaceError(`git worktree remove failed for ${workspaceRef}: ${result.stderr}`, result.spawnFailed === true);
     }
+  }
+
+  // A previous run of the same taskId that never reached cleanup() (crashed, or was
+  // canceled before the workflow's own try/catch) can leave its worktree directory
+  // and/or branch behind. `git worktree add -b` isn't transactional with its own
+  // path-exists check -- it creates the branch before checking the path, so a stale
+  // leftover fails attempt 1 with "path already exists" and then poisons every
+  // subsequent attempt with a *different* fatal error ("branch already exists"),
+  // never self-recovering. Reclaim both before creating a fresh worktree; there's
+  // nothing durable to lose here (see ARCHITECTURE.md §1: worktrees are disposable,
+  // only pushed commits count).
+  private async reclaimStaleWorktree(
+    git: GitCommandRunner,
+    cachePath: string,
+    workspacePath: string,
+    branch: string,
+  ): Promise<void> {
+    if (existsSync(workspacePath)) {
+      const removeResult = await git.run(['worktree', 'remove', workspacePath, '--force'], { cwd: cachePath });
+      if (removeResult.exitCode !== 0) {
+        await rm(workspacePath, { recursive: true, force: true });
+        await git.run(['worktree', 'prune'], { cwd: cachePath });
+      }
+    }
+    await git.run(['branch', '-D', branch], { cwd: cachePath });
   }
 
   private async ensureBaseClone(git: GitCommandRunner, cachePath: string, repo: string): Promise<void> {
