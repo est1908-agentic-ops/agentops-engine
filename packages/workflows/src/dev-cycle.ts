@@ -115,7 +115,11 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
   });
   setHandler(stateQuery, () => state);
 
-  const prepared = await activities.prepareWorkspace({ taskId: input.taskId, repo: input.repo });
+  const prepared = await activities.prepareWorkspace({
+    taskId: input.taskId,
+    repo: input.repo,
+    initCommands: input.config.initCommands,
+  });
   state.workspaceRef = prepared.workspaceRef;
   state.branch = prepared.branch;
 

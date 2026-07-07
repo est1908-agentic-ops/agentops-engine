@@ -37,4 +37,49 @@ describe('loadProductConfig', () => {
 
     await expect(loadProductConfig(scm, 'octocat/demo')).rejects.toThrow(InvalidProductConfigError);
   });
+
+  it('falls back to .agentops.json when agentops.json is absent', async () => {
+    const scm = new MemoryScmPort();
+    scm.seedFile('octocat/demo', '.agentops.json', JSON.stringify({ fastVerifyCommands: ['pnpm lint'] }));
+
+    const config = await loadProductConfig(scm, 'octocat/demo');
+
+    expect(config.fastVerifyCommands).toEqual(['pnpm lint']);
+  });
+
+  it('falls back to .agentops/settings.json when agentops.json and .agentops.json are absent', async () => {
+    const scm = new MemoryScmPort();
+    scm.seedFile('octocat/demo', '.agentops/settings.json', JSON.stringify({ fastVerifyCommands: ['pnpm lint'] }));
+
+    const config = await loadProductConfig(scm, 'octocat/demo');
+
+    expect(config.fastVerifyCommands).toEqual(['pnpm lint']);
+  });
+
+  it('falls back to .agentops/agentops.json when every other candidate is absent', async () => {
+    const scm = new MemoryScmPort();
+    scm.seedFile('octocat/demo', '.agentops/agentops.json', JSON.stringify({ fastVerifyCommands: ['pnpm lint'] }));
+
+    const config = await loadProductConfig(scm, 'octocat/demo');
+
+    expect(config.fastVerifyCommands).toEqual(['pnpm lint']);
+  });
+
+  it('prefers agentops.json over any alternate path when more than one exists', async () => {
+    const scm = new MemoryScmPort();
+    scm.seedFile('octocat/demo', 'agentops.json', JSON.stringify({ fastVerifyCommands: ['from-canonical'] }));
+    scm.seedFile('octocat/demo', '.agentops.json', JSON.stringify({ fastVerifyCommands: ['from-dotfile'] }));
+    scm.seedFile('octocat/demo', '.agentops/settings.json', JSON.stringify({ fastVerifyCommands: ['from-settings'] }));
+
+    const config = await loadProductConfig(scm, 'octocat/demo');
+
+    expect(config.fastVerifyCommands).toEqual(['from-canonical']);
+  });
+
+  it('throws InvalidProductConfigError naming the alternate path that actually matched on malformed JSON', async () => {
+    const scm = new MemoryScmPort();
+    scm.seedFile('octocat/demo', '.agentops/settings.json', '{ not valid json');
+
+    await expect(loadProductConfig(scm, 'octocat/demo')).rejects.toThrow(/\.agentops\/settings\.json is not valid JSON/);
+  });
 });

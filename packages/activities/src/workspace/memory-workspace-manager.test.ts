@@ -30,4 +30,18 @@ describe('MemoryWorkspaceManager', () => {
     const manager = new MemoryWorkspaceManager();
     await expect(manager.cleanup('memory://never/prepared', 'owner/repo')).rejects.toThrow(/never prepared/);
   });
+
+  it('records the initCommands it was asked to prepare with, without executing anything', async () => {
+    const manager = new MemoryWorkspaceManager();
+    const { workspaceRef } = await manager.prepare('task-1', 'owner/repo', ['pnpm install']);
+
+    expect(manager.initCommandsFor(workspaceRef)).toEqual(['pnpm install']);
+  });
+
+  it('records initCommands as undefined when none were given', async () => {
+    const manager = new MemoryWorkspaceManager();
+    const { workspaceRef } = await manager.prepare('task-1', 'owner/repo');
+
+    expect(manager.initCommandsFor(workspaceRef)).toBeUndefined();
+  });
 });

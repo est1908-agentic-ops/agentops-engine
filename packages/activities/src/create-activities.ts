@@ -108,9 +108,9 @@ export function createActivities(deps: ActivityDependencies) {
     async recordRunStats(stats: RunStats): Promise<void> {
       await deps.stats.record(stats);
     },
-    async prepareWorkspace(req: { taskId: string; repo: string }): Promise<PreparedWorkspace> {
+    async prepareWorkspace(req: { taskId: string; repo: string; initCommands?: string[] }): Promise<PreparedWorkspace> {
       try {
-        return await deps.workspaces.prepare(req.taskId, req.repo);
+        return await deps.workspaces.prepare(req.taskId, req.repo, req.initCommands);
       } catch (err) {
         rethrowWorkspaceError(err);
       }

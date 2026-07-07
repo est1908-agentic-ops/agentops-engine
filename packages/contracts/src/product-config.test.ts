@@ -82,6 +82,15 @@ describe('ProductConfigSchema', () => {
       }),
     ).toThrow();
   });
+
+  it('accepts an optional initCommands string array', () => {
+    const parsed = ProductConfigSchema.parse({ ...validConfig, initCommands: ['pnpm install'] });
+    expect(parsed.initCommands).toEqual(['pnpm install']);
+  });
+
+  it('rejects initCommands when not a string array', () => {
+    expect(() => ProductConfigSchema.parse({ ...validConfig, initCommands: 'pnpm install' })).toThrow();
+  });
 });
 
 describe('parseProductConfig', () => {
@@ -141,5 +150,13 @@ describe('parseProductConfig', () => {
     expect(configured.services).toEqual([
       { name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } },
     ]);
+  });
+
+  it('leaves initCommands undefined when not configured, and passes it through untouched when supplied', () => {
+    const empty = parseProductConfig({});
+    expect(empty.initCommands).toBeUndefined();
+
+    const configured = parseProductConfig({ initCommands: ['pnpm install', 'pnpm worktree-setup'] });
+    expect(configured.initCommands).toEqual(['pnpm install', 'pnpm worktree-setup']);
   });
 });

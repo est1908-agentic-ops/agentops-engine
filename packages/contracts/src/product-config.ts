@@ -18,6 +18,7 @@ export type VerifyService = z.infer<typeof VerifyServiceSchema>;
 export const ProductConfigSchema = z.object({
   image: z.string().min(1).optional(),
   services: z.array(VerifyServiceSchema).optional(),
+  initCommands: z.array(z.string()).optional(),
   fastVerifyCommands: z.array(z.string()).optional(),
   fullVerifyCommands: z.array(z.string()).optional(),
   stages: StageToggleSchema,
@@ -29,7 +30,7 @@ export type ProductConfig = z.infer<typeof ProductConfigSchema>;
 
 export const DEFAULT_PRODUCT_CONFIG: Omit<
   ProductConfig,
-  'fastVerifyCommands' | 'fullVerifyCommands' | 'image' | 'services'
+  'fastVerifyCommands' | 'fullVerifyCommands' | 'image' | 'services' | 'initCommands'
 > = {
   stages: {},
   routing: {

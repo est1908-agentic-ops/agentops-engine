@@ -242,6 +242,25 @@ describe('createActivities — workspace lifecycle', () => {
       true,
     );
   });
+
+  it('prepareWorkspace forwards initCommands through to the workspaces dependency', async () => {
+    const captured: (string[] | undefined)[] = [];
+    const deps = {
+      ...buildDeps(),
+      workspaces: {
+        prepare: async (_taskId: string, _repo: string, initCommands?: string[]) => {
+          captured.push(initCommands);
+          return { workspaceRef: 'ref', branch: 'b', baseBranch: 'main' };
+        },
+        cleanup: async () => {},
+      } as Workspaces,
+    };
+    const activities = createActivities(deps);
+
+    await activities.prepareWorkspace({ taskId: 't1', repo: 'owner/repo', initCommands: ['pnpm install'] });
+
+    expect(captured).toEqual([['pnpm install']]);
+  });
 });
 
 describe('createActivities — prompt rendering', () => {
