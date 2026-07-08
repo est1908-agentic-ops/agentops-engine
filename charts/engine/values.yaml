@@ -49,6 +49,23 @@ engineDb:
 # generateManagedProjectKeyPair() and store the private half SOPS-encrypted.
 projectCredentialPrivateKeySecretName: ""
 
+# Base64 SPKI DER public key matching projectCredentialPrivateKeySecretName's
+# private half (design §5). NOT a secret -- mounted as a plain env var on
+# control ONLY, which can encrypt managed-project tokens it cannot decrypt.
+# The private key never reaches control. Generate with
+# generateManagedProjectKeyPair(); unset => control's /api/projects routes
+# are disabled (503). The platform follow-up PR sets this to the live key
+# (private key is already wired in agentops-platform PR #3).
+projectCredentialPublicKey: ""
+
+# Shared bearer token gating control's /api/projects CRUD routes
+# (CONTROL_CRUD_TOKEN). A SECRET -- sourced from a K8s Secret with a
+# controlCrudToken key. Unset => routes disabled (503). This is app-layer
+# defense-in-depth + the local CLI's auth; GitHub issue #4 (Traefik
+# basic-auth on the control ingress) is STILL REQUIRED before enabling the
+# control ingress publicly (control.ingress.enabled stays false by default).
+projectCrudTokenSecretName: ""
+
 taskQueue: agentops-devcycle
 
 # Per ARCHITECTURE.md §5.2/§6: dev-agents/prod-agents each get a separate
