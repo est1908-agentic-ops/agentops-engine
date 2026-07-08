@@ -36,6 +36,22 @@ pnpm engine start \
   --issue owner/repo#42 --repo owner/repo --product my-product --goal "..."
 ```
 
+### Start via GitHub label
+
+Add the **`agentops`** label to an issue on a registered repo to start `devCycle` automatically — no CLI command. The [gateway](packages/gateway/README.md) handles GitHub `issues` / `labeled` webhooks and starts the same workflow as `engine start` (`goal` = issue title). Override the trigger label with `TRIGGER_LABEL` (default `agentops`).
+
+Requires worker + Temporal (above), `PROJECT_REGISTRY_JSON`, and the gateway running with `GITHUB_WEBHOOK_SECRET`:
+
+```bash
+# terminal 3 (instead of engine start)
+GITHUB_WEBHOOK_SECRET=your-shared-secret \
+pnpm --filter @agentops/gateway run start
+```
+
+Point the repo webhook (Settings → Webhooks) at `POST https://<gateway-host>/webhooks/github` with the same secret, content type `application/json`, and **Issues** events. For local dev, tunnel port 3000 (e.g. `ngrok http 3000`) so GitHub can reach the gateway.
+
+Re-adding the label while a task is running is a no-op; re-labeling after the workflow completes starts a fresh run.
+
 Inspect and signal:
 
 ```bash
@@ -73,10 +89,10 @@ A follow-up CI job commits that same `<git-sha>` into
 `targetRevision` in `application.yaml`). Argo CD auto-sync then rolls the dev
 cluster — no manual platform PR and no `kubectl rollout restart`.
 
-Requires repo secret **`PLATFORM_DEPLOY_KEY`**: an SSH private key added as a
-write-enabled deploy key on `flair-hr/agentops-platform` (Settings → Deploy
-keys) — scoped to that one repo, unlike an account-wide PAT (store it only in
-GitHub Actions secrets, never in code).
+Requires repo secret **`PLATFORM_PAT`**: a fine-grained personal access token
+scoped to only `est1908-agentic-ops/agentops-platform` with **Contents:
+Read and write** permission (store it only in GitHub Actions secrets, never
+in code).
 
 `charts/engine/` is the Helm chart for the worker Deployment (RBAC to manage
 agent-runner Jobs, the `workspace-tasks`/`workspace-cache` PVCs). It ships no

@@ -103,8 +103,8 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          repository: flair-hr/agentops-platform
-          ssh-key: ${{ secrets.PLATFORM_DEPLOY_KEY }}
+          repository: est1908-agentic-ops/agentops-platform
+          token: ${{ secrets.PLATFORM_PAT }}
           path: platform
 
       - name: Bump engine image tags in platform GitOps
