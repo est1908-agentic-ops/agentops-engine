@@ -34,7 +34,9 @@ describe('PlatformSentinelSchema', () => {
   it('parses actionsTaken and proposedFixes when present', () => {
     const parsed = PlatformSentinelSchema.parse({
       summary: 'found one bug',
-      actionsTaken: [{ type: 'terminate', workflowId: 'issue-broccoli-94', reason: 'stuck retry loop' }],
+      actionsTaken: [
+        { type: 'terminate', workflowId: 'issue-broccoli-94', reason: 'stuck retry loop' },
+      ],
       proposedFixes: [{ repo: 'flair-hr/agentops-engine', goal: 'bound retry attempts' }],
     });
     expect(parsed.actionsTaken).toHaveLength(1);
@@ -52,17 +54,34 @@ describe('PlatformSentinelSchema', () => {
 });
 
 describe('PlatformAgentResultSchema', () => {
-  it('defaults actionsTaken and childWorkflows to empty arrays', () => {
+  it('defaults actionsTaken, childWorkflows, and skippedFixes to empty arrays', () => {
     const parsed = PlatformAgentResultSchema.parse({ summary: 'all quiet' });
     expect(parsed.actionsTaken).toEqual([]);
     expect(parsed.childWorkflows).toEqual([]);
+    expect(parsed.skippedFixes).toEqual([]);
   });
 
   it('parses a result with child workflows', () => {
     const parsed = PlatformAgentResultSchema.parse({
       summary: 'opened one fix',
-      childWorkflows: [{ workflowId: 'platform-1-fix-1', repo: 'flair-hr/agentops-engine', goal: 'bound retries' }],
+      childWorkflows: [
+        { workflowId: 'platform-1-fix-1', repo: 'flair-hr/agentops-engine', goal: 'bound retries' },
+      ],
     });
     expect(parsed.childWorkflows).toHaveLength(1);
+  });
+
+  it('parses a result with skipped fixes', () => {
+    const parsed = PlatformAgentResultSchema.parse({
+      summary: 'found one bug',
+      skippedFixes: [
+        {
+          repo: 'agentic-ops/agent-runner',
+          goal: 'add retry backoff',
+          reason: 'no project registered for repo "agentic-ops/agent-runner"',
+        },
+      ],
+    });
+    expect(parsed.skippedFixes).toHaveLength(1);
   });
 });

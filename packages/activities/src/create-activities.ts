@@ -1,11 +1,27 @@
 import { trace } from '@opentelemetry/api';
-import { LiteLlmBudgetExceededError, RateWindowExceededError, type AgentBackend } from '@agentops/backends';
+import {
+  LiteLlmBudgetExceededError,
+  RateWindowExceededError,
+  type AgentBackend,
+} from '@agentops/backends';
 import type { Issue, OpenPrRequest, OpenPrResult, ScmPort, TrackerPort } from '@agentops/ports';
-import type { AgentRunRequest, AgentRunResult, PrFeedback, ProductConfig, ResolvedProjectEntry, RunStats } from '@agentops/contracts';
+import type {
+  AgentRunRequest,
+  AgentRunResult,
+  PrFeedback,
+  ProductConfig,
+  ResolvedProjectEntry,
+  RunStats,
+} from '@agentops/contracts';
+import { parseProductConfig } from '@agentops/contracts';
 import type { PromptPack } from '@agentops/prompts';
 import type { StageResultRecord, StageResultStore } from './stage-result-store';
 import type { StatsStore } from './stats-store';
-import { WorkspaceError, type PreparedWorkspace, type Workspaces } from './workspace/workspace-manager';
+import {
+  WorkspaceError,
+  type PreparedWorkspace,
+  type Workspaces,
+} from './workspace/workspace-manager';
 import { loadProductConfig } from './load-product-config';
 import { ApplicationFailure } from '@temporalio/common';
 import { Context } from '@temporalio/activity';
@@ -113,7 +129,12 @@ export function createActivities(deps: ActivityDependencies) {
     async getPrFeedback(prRef: string): Promise<PrFeedback> {
       return deps.scm.getPrFeedback(prRef);
     },
-    async pushBranch(repo: string, workspaceRef: string, branch: string, contentHash: string): Promise<void> {
+    async pushBranch(
+      repo: string,
+      workspaceRef: string,
+      branch: string,
+      contentHash: string,
+    ): Promise<void> {
       await deps.scm.push(repo, workspaceRef, branch, contentHash);
     },
     async recordStageResult(result: StageResultRecord): Promise<void> {
@@ -122,7 +143,11 @@ export function createActivities(deps: ActivityDependencies) {
     async recordRunStats(stats: RunStats): Promise<void> {
       await deps.stats.record(stats);
     },
-    async prepareWorkspace(req: { taskId: string; repo: string; initCommands?: string[] }): Promise<PreparedWorkspace> {
+    async prepareWorkspace(req: {
+      taskId: string;
+      repo: string;
+      initCommands?: string[];
+    }): Promise<PreparedWorkspace> {
       try {
         return await deps.workspaces.prepare(req.taskId, req.repo, req.initCommands);
       } catch (err) {
@@ -136,10 +161,21 @@ export function createActivities(deps: ActivityDependencies) {
         rethrowWorkspaceError(err);
       }
     },
-    async resolveRepoConfig(repo: string): Promise<{ product: string; config: ProductConfig }> {
+    async resolveRepoConfig(
+      repo: string,
+    ): Promise<{ registered: boolean; product: string; config: ProductConfig }> {
       const entry = deps.registry.find((candidate) => candidate.repo === repo);
+      if (!entry) {
+        // No project registry entry means no SCM credentials scoped to this
+        // repo either -- loadProductConfig would just throw via the
+        // project-scoped ScmPort. Short-circuit instead of letting that
+        // throw bubble up as a fatal, deterministically-unretryable activity
+        // failure (see platform.ts, which treats `registered: false` as
+        // "skip this proposed fix" rather than crashing the whole run).
+        return { registered: false, product: 'default', config: parseProductConfig({}) };
+      }
       const config = await loadProductConfig(deps.scm, repo);
-      return { product: entry?.product ?? 'default', config };
+      return { registered: true, product: entry.product, config };
     },
     async prepareScratchWorkspace(taskId: string): Promise<{ workspaceRef: string }> {
       try {

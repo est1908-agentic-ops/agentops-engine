@@ -1,10 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { context, trace } from '@opentelemetry/api';
 import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import type { AgentBackend } from '@agentops/backends';
 import type { BackendRunRequest, ResolvedProjectEntry } from '@agentops/contracts';
-import { LiteLlmBudgetExceededError, RateWindowExceededError, StubBackend } from '@agentops/backends';
+import {
+  LiteLlmBudgetExceededError,
+  RateWindowExceededError,
+  StubBackend,
+} from '@agentops/backends';
 import { MemoryTrackerPort, MemoryScmPort } from '@agentops/ports';
 import { PromptPack } from '@agentops/prompts';
 import { ApplicationFailure } from '@temporalio/common';
@@ -48,7 +52,9 @@ describe('createActivities', () => {
       backend: 'recording',
       model: 'stub-v1',
       image: 'ghcr.io/example/agentops:latest',
-      services: [{ name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } }],
+      services: [
+        { name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } },
+      ],
       promptRef: 'full_verify.md',
       promptContext: { taskId: 't1', goal: 'g', verifyCommands: '' },
       workspaceRef: 'demo/repo',
@@ -285,7 +291,11 @@ describe('createActivities — workspace lifecycle', () => {
     };
     const activities = createActivities(deps);
 
-    await activities.prepareWorkspace({ taskId: 't1', repo: 'owner/repo', initCommands: ['pnpm install'] });
+    await activities.prepareWorkspace({
+      taskId: 't1',
+      repo: 'owner/repo',
+      initCommands: ['pnpm install'],
+    });
 
     expect(captured).toEqual([['pnpm install']]);
   });
@@ -357,7 +367,9 @@ describe('createActivities — workspace error translation', () => {
     };
     const activities = createActivities(deps);
 
-    const err: unknown = await activities.prepareWorkspace({ taskId: 't1', repo: 'owner/repo' }).catch((e) => e);
+    const err: unknown = await activities
+      .prepareWorkspace({ taskId: 't1', repo: 'owner/repo' })
+      .catch((e) => e);
 
     expect(err).toBeInstanceOf(ApplicationFailure);
     expect((err as ApplicationFailure).nonRetryable).toBe(true);
@@ -375,7 +387,9 @@ describe('createActivities — workspace error translation', () => {
     };
     const activities = createActivities(deps);
 
-    await expect(activities.prepareWorkspace({ taskId: 't1', repo: 'owner/repo' })).rejects.toThrow(WorkspaceError);
+    await expect(activities.prepareWorkspace({ taskId: 't1', repo: 'owner/repo' })).rejects.toThrow(
+      WorkspaceError,
+    );
   });
 
   it('converts a non-retryable WorkspaceError from cleanupWorkspace too', async () => {
@@ -417,7 +431,9 @@ describe('createActivities — backend error translation', () => {
     const deps = buildDeps();
     deps.backends.litellm = {
       run: async () => {
-        throw new LiteLlmBudgetExceededError('Budget has been exceeded! Current cost: 1.20, Max budget: 1.00');
+        throw new LiteLlmBudgetExceededError(
+          'Budget has been exceeded! Current cost: 1.20, Max budget: 1.00',
+        );
       },
     };
     const activities = createActivities(deps);
@@ -433,7 +449,10 @@ describe('createActivities — backend error translation', () => {
     const deps = buildDeps();
     deps.backends.claude = {
       run: async () => {
-        throw new RateWindowExceededError('claude subscription rate window exhausted, retry in 4200ms', 4200);
+        throw new RateWindowExceededError(
+          'claude subscription rate window exhausted, retry in 4200ms',
+          4200,
+        );
       },
     };
     const activities = createActivities(deps);
@@ -450,23 +469,44 @@ describe('createActivities — backend error translation', () => {
 describe('createActivities — resolveRepoConfig', () => {
   it("resolves product from the registry and loads that repo's ProductConfig", async () => {
     const deps = buildDeps();
-    deps.scm.seedFile('flair-hr/agentops-engine', 'agentops.json', JSON.stringify({ fastVerifyCommands: ['pnpm lint'] }));
-    deps.registry = [{ product: 'engine', repo: 'flair-hr/agentops-engine', trackerType: 'github', tokenEnvVar: 'X', token: 'fake' }];
+    deps.scm.seedFile(
+      'flair-hr/agentops-engine',
+      'agentops.json',
+      JSON.stringify({ fastVerifyCommands: ['pnpm lint'] }),
+    );
+    deps.registry = [
+      {
+        product: 'engine',
+        repo: 'flair-hr/agentops-engine',
+        trackerType: 'github',
+        tokenEnvVar: 'X',
+        token: 'fake',
+      },
+    ];
     const activities = createActivities(deps);
 
-    const { product, config } = await activities.resolveRepoConfig('flair-hr/agentops-engine');
+    const { registered, product, config } = await activities.resolveRepoConfig(
+      'flair-hr/agentops-engine',
+    );
 
+    expect(registered).toBe(true);
     expect(product).toBe('engine');
     expect(config.fastVerifyCommands).toEqual(['pnpm lint']);
   });
 
-  it('falls back to product "default" when the repo is not in the registry', async () => {
+  it('reports unregistered instead of touching the SCM when the repo is not in the registry', async () => {
     const deps = buildDeps();
+    const readFileSpy = vi.spyOn(deps.scm, 'readFile');
     const activities = createActivities(deps);
 
-    const { product } = await activities.resolveRepoConfig('flair-hr/some-other-repo');
+    const { registered, product } = await activities.resolveRepoConfig('flair-hr/some-other-repo');
 
+    expect(registered).toBe(false);
     expect(product).toBe('default');
+    // No registry entry means no SCM credentials scoped to this repo either --
+    // the real (non-fake) ScmPort throws for any repo it isn't configured
+    // for, so resolveRepoConfig must never reach it for an unregistered repo.
+    expect(readFileSpy).not.toHaveBeenCalled();
   });
 });
 
