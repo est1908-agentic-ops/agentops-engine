@@ -98,7 +98,7 @@ describe('parseProjectConfig', () => {
     const config = parseProjectConfig({});
     expect(config.fastVerifyCommands).toBeUndefined();
     expect(config.fullVerifyCommands).toBeUndefined();
-    expect(config.routing.implement).toEqual({ backend: 'claude', model: 'claude-sonnet-5', effort: 'high' });
+    expect(config.routing.implement).toEqual({ backend: 'pi', model: 'openrouter/deepseek-v4-flash', effort: 'high' });
     expect(config.brakes).toEqual({ maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 });
     expect(config.escalation).toBeUndefined();
   });
