@@ -11,7 +11,7 @@ describe('loadProjectConfig', () => {
     const config = await loadProjectConfig(scm, 'octocat/demo');
 
     expect(config.fastVerifyCommands).toEqual(['pnpm lint']);
-    expect(config.routing.implement).toEqual({ backend: 'claude', model: 'claude-sonnet-5', effort: 'high' });
+    expect(config.routing.implement).toEqual({ backend: 'pi', model: 'openrouter/deepseek-v4-flash', effort: 'high' });
   });
 
   it('falls back to full defaults when agentops.json is missing', async () => {
