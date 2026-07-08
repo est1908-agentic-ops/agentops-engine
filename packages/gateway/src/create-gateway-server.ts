@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Client } from '@temporalio/client';
-import { loadProjectConfig, resolveManagedProjectEntry, type ManagedProjectRegistryDeps } from '@agentops/activities';
+import { resolveManagedProjectEntry, resolveProjectConfig, type ManagedProjectRegistryDeps } from '@agentops/activities';
 import type { ResolvedProjectEntry } from '@agentops/contracts';
 import type { ScmPort } from '@agentops/ports';
 import { parseIssueLabeledEvent } from './parse-issue-labeled';
@@ -81,7 +81,7 @@ async function handleRequest(deps: GatewayDeps, req: IncomingMessage, res: Serve
 
   try {
     const scm = deps.buildScm(entry);
-    const config = await loadProjectConfig(scm, entry.repo);
+    const config = await resolveProjectConfig(deps.managedProjectDeps, scm, entry.repo);
     const result = await startDevCycleForIssue(deps.client, deps.taskQueue, entry.project, event, config);
     console.log(
       result.started
