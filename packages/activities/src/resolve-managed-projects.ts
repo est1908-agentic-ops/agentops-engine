@@ -24,12 +24,19 @@ async function resolveOne(deps: ManagedProjectRegistryDeps, repo: string): Promi
   if (!encryptedToken) {
     return null; // shouldn't happen (get() and getEncryptedToken() query the same row) -- fall through to the static registry rather than throw
   }
+  let token: string;
+  try {
+    token = decryptForManagedProject(deps.privateKey, encryptedToken);
+  } catch (err) {
+    console.warn(`resolveManagedProjects: failed to decrypt credential for repo "${repo}" — skipping DB entry`, err);
+    return null;
+  }
   return {
     project: managedProject.project,
     repo: managedProject.repo,
     trackerType: 'github',
     tokenEnvVar: MANAGED_PROJECT_TOKEN_ENV_VAR_SENTINEL,
-    token: decryptForManagedProject(deps.privateKey, encryptedToken),
+    token,
   };
 }
 

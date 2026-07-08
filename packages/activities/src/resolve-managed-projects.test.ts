@@ -56,6 +56,12 @@ describe('resolveManagedProjectEntry', () => {
     const resolved = await resolveManagedProjectEntry({ store, privateKey: 'unused' }, staticRegistry, 'acme/nowhere');
     expect(resolved).toBeNull();
   });
+
+  it('falls back to the static registry for the same repo when DB decrypt fails', async () => {
+    const store = fakeStore([{ project: 'acme-web', repo: 'acme/legacy', encryptedToken: 'not-valid-ciphertext' }]);
+    const resolved = await resolveManagedProjectEntry({ store, privateKey: 'unused' }, staticRegistry, 'acme/legacy');
+    expect(resolved).toEqual(staticRegistry[0]);
+  });
 });
 
 describe('loadManagedProjectRegistry', () => {
@@ -71,6 +77,20 @@ describe('loadManagedProjectRegistry', () => {
     expect(entries).toEqual([
       { project: 'a', repo: 'acme/a', trackerType: 'github', tokenEnvVar: '(managed-project, not env-backed)', token: 'token-a' },
       { project: 'b', repo: 'acme/b', trackerType: 'github', tokenEnvVar: '(managed-project, not env-backed)', token: 'token-b' },
+    ]);
+  });
+
+  it('skips managed projects that cannot be decrypted', async () => {
+    const { publicKey, privateKey } = generateManagedProjectKeyPair();
+    const store = fakeStore([
+      { project: 'good', repo: 'acme/good', encryptedToken: encryptForManagedProject(publicKey, 'token-good') },
+      { project: 'bad', repo: 'acme/bad', encryptedToken: 'not-valid-ciphertext' },
+    ]);
+
+    const entries = await loadManagedProjectRegistry({ store, privateKey });
+
+    expect(entries).toEqual([
+      { project: 'good', repo: 'acme/good', trackerType: 'github', tokenEnvVar: '(managed-project, not env-backed)', token: 'token-good' },
     ]);
   });
 });

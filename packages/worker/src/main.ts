@@ -292,6 +292,9 @@ async function main(): Promise<void> {
       })
     : undefined;
   const managedProjectDeps = buildManagedProjectDeps(enginePool);
+  if (enginePool && !managedProjectDeps) {
+    console.warn('agentops worker: ENGINE_DB_HOST set but PROJECT_CREDENTIAL_PRIVATE_KEY missing — managed-project DB lookup disabled');
+  }
   if (managedProjectDeps) {
     await managedProjectDeps.store.ensureSchema();
   }
