@@ -27,7 +27,11 @@ no line breaks inside it:
 
 PLATFORM_RESULT: {"summary": "...", "actionsTaken": [...], "proposedFixes": [...]}
 
-- `summary`: your findings or answer, in plain language, for a human to read.
+- `summary`: your findings or answer, for a human to read. Write it in Markdown — use
+  headings, bullet lists, `code spans` for identifiers (workflow IDs, repos, files), and
+  **bold** for anything that needs to stand out. It renders as formatted Markdown in the
+  console, not as plain text, so structure it accordingly (e.g. don't fake bullets with `-`
+  followed by prose that never breaks a line — use real list syntax).
 - `actionsTaken`: array of `{"type": "terminate"|"signal", "workflowId": "...", "reason": "..."}`
   for anything you already executed directly. Use `[]` if you took no actions.
 - `proposedFixes`: array of `{"repo": "owner/repo", "goal": "..."}` for anything you concluded

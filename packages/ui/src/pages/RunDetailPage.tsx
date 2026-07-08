@@ -1,10 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
+import type { ComponentPropsWithoutRef } from 'react';
 import { useParams } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { RunDetail } from '@agentops/contracts';
 import { getRun, siblingTemporalUrl } from '../api';
 import { StatusBadge } from '../components/StatusBadge';
 
 const POLL_INTERVAL_MS = 3000;
+
+const MARKDOWN_COMPONENTS = {
+  a: (props: ComponentPropsWithoutRef<'a'>) => <a {...props} target="_blank" rel="noreferrer" />,
+};
 
 export function RunDetailPage() {
   const { workflowId } = useParams<{ workflowId: string }>();
@@ -95,7 +102,11 @@ export function RunDetailPage() {
         <>
           <div className="section">
             <div className="field-label">Summary</div>
-            <pre className="summary-text">{run.result.summary}</pre>
+            <div className="summary-text">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
+                {run.result.summary}
+              </ReactMarkdown>
+            </div>
           </div>
 
           {run.result.actionsTaken.length > 0 && (
