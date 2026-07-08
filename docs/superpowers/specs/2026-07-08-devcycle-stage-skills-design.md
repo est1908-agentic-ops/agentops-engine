@@ -83,8 +83,10 @@ Adapted from `superpowers:writing-plans` the same way:
 
 Each gets, in addition to the existing `{{taskId}}`/`{{goal}}` framing:
 
-- An explicit unattended-mode line: no human will read this before the stage finishes; never
-  stop to ask a question — make the call yourself and record the assumption.
+- An explicit, unambiguous unattended-mode line, stated as a hard rule rather than a suggestion:
+  **"There is no human here. Do not ask anything — decide yourself and record the assumption."**
+  This is the first substantive line in both templates, ahead of the methodology guidance below,
+  so it can't be read as optional or missed.
 - A condensed version of the corresponding skill's methodology (approaches + trade-offs +
   self-review for `design.md`; ordered/verifiable steps for `plan.md`) — this is the part that
   makes `litellm` (no skill access) still get real guidance instead of a dangling reference.
