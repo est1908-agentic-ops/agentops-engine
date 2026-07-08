@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { Client, Connection } from '@temporalio/client';
-import { loadEnv, loadProductConfig, loadProjectRegistry, SpawnGitCommandRunner } from '@agentops/activities';
+import { loadEnv, loadProjectConfig, loadProjectRegistry, SpawnGitCommandRunner } from '@agentops/activities';
 
 loadEnv();
 import type { ResolvedProjectEntry, TaskInput } from '@agentops/contracts';
@@ -50,26 +50,26 @@ export function seedDemoAgentopsConfig(scm: MemoryScmPort, repo: string): void {
 
 export function resolveProjectEntry(
   registry: ResolvedProjectEntry[],
-  product: string,
+  project: string,
   repo: string,
 ): ResolvedProjectEntry {
   const entry = registry.find((candidate) => candidate.repo === repo);
   if (!entry) {
     throw new Error(`no project registered for repo "${repo}" — check the project registry`);
   }
-  if (entry.product !== product) {
-    throw new Error(`repo "${repo}" is registered under product "${entry.product}", not "${product}" — check --product`);
+  if (entry.project !== project) {
+    throw new Error(`repo "${repo}" is registered under project "${entry.project}", not "${project}" — check --project`);
   }
   return entry;
 }
 
-export function buildStartScmPort(registry: ResolvedProjectEntry[], product: string, repo: string): ScmPort {
+export function buildStartScmPort(registry: ResolvedProjectEntry[], project: string, repo: string): ScmPort {
   if (registry.length === 0) {
     const scm = new MemoryScmPort();
     seedDemoAgentopsConfig(scm, repo);
     return scm;
   }
-  const entry = resolveProjectEntry(registry, product, repo);
+  const entry = resolveProjectEntry(registry, project, repo);
   const git = new SpawnGitCommandRunner({ authToken: () => entry.token });
   return createGithubPorts(entry.token, git).scm;
 }
@@ -79,11 +79,11 @@ async function getClient(): Promise<Client> {
   return new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE });
 }
 
-async function cmdStart(taskId: string, goal: string, product: string, repo: string, issueRef?: string): Promise<void> {
+async function cmdStart(taskId: string, goal: string, project: string, repo: string, issueRef?: string): Promise<void> {
   const client = await getClient();
-  const scm = buildStartScmPort(loadProjectRegistry(), product, repo);
-  const config = await loadProductConfig(scm, repo);
-  const input: TaskInput = { taskId, product, repo, issueRef, goal, config };
+  const scm = buildStartScmPort(loadProjectRegistry(), project, repo);
+  const config = await loadProjectConfig(scm, repo);
+  const input: TaskInput = { taskId, project, repo, issueRef, goal, config };
   const handle = await client.workflow.start(devCycle, { taskQueue: TASK_QUEUE, workflowId: taskId, args: [input] });
   console.log(`started ${handle.workflowId}`);
 }
@@ -117,13 +117,13 @@ async function main(): Promise<void> {
   if (command === 'start') {
     const flags = parseFlags(rest);
     const taskId = flags['task-id'] ?? randomUUID();
-    const { goal, repo, product = 'default', issue } = flags;
+    const { goal, repo, project = 'default', issue } = flags;
     if (!goal || !repo) {
       throw new Error(
-        'usage: engine start --goal <text> --repo <owner/repo> [--product <name>] [--issue <owner/repo#N>] [--task-id <id>]',
+        'usage: engine start --goal <text> --repo <owner/repo> [--project <name>] [--issue <owner/repo#N>] [--task-id <id>]',
       );
     }
-    await cmdStart(taskId, goal, product, repo, issue);
+    await cmdStart(taskId, goal, project, repo, issue);
   } else if (command === 'signal') {
     const [taskId, signal, text] = rest;
     if (!taskId || !signal) {

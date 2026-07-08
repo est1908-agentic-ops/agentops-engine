@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { loadProductConfig } from '@agentops/activities';
+import { loadProjectConfig } from '@agentops/activities';
 import { GithubScmPort, MemoryScmPort } from '@agentops/ports';
 import { buildStartScmPort, parseFlags, seedDemoAgentopsConfig } from './main';
 
@@ -8,7 +8,7 @@ describe('seedDemoAgentopsConfig', () => {
     const scm = new MemoryScmPort();
     seedDemoAgentopsConfig(scm, 'demo/repo');
 
-    const config = await loadProductConfig(scm, 'demo/repo');
+    const config = await loadProjectConfig(scm, 'demo/repo');
 
     expect(config.fastVerifyCommands).toEqual(['pnpm lint']);
     expect(config.fullVerifyCommands).toEqual(['pnpm test']);
@@ -37,14 +37,14 @@ describe('buildStartScmPort', () => {
     const scm = buildStartScmPort([], 'demo', 'demo/repo');
 
     expect(scm).toBeInstanceOf(MemoryScmPort);
-    const config = await loadProductConfig(scm, 'demo/repo');
+    const config = await loadProjectConfig(scm, 'demo/repo');
     expect(config.routing.implement).toEqual({ backend: 'stub', model: 'stub-v1' });
   });
 
-  it('returns a GithubScmPort for a repo registered under the given product', () => {
+  it('returns a GithubScmPort for a repo registered under the given project', () => {
     const registry = [
       {
-        product: 'my-product',
+        project: 'my-project',
         repo: 'octocat/demo',
         trackerType: 'github' as const,
         tokenEnvVar: 'GITHUB_TOKEN__MY_PRODUCT',
@@ -52,7 +52,7 @@ describe('buildStartScmPort', () => {
       },
     ];
 
-    const scm = buildStartScmPort(registry, 'my-product', 'octocat/demo');
+    const scm = buildStartScmPort(registry, 'my-project', 'octocat/demo');
 
     expect(scm).toBeInstanceOf(GithubScmPort);
   });
@@ -60,7 +60,7 @@ describe('buildStartScmPort', () => {
   it('throws when the repo is not registered', () => {
     const registry = [
       {
-        product: 'my-product',
+        project: 'my-project',
         repo: 'octocat/demo',
         trackerType: 'github' as const,
         tokenEnvVar: 'GITHUB_TOKEN__MY_PRODUCT',
@@ -68,13 +68,13 @@ describe('buildStartScmPort', () => {
       },
     ];
 
-    expect(() => buildStartScmPort(registry, 'my-product', 'octocat/other')).toThrow(/no project registered/);
+    expect(() => buildStartScmPort(registry, 'my-project', 'octocat/other')).toThrow(/no project registered/);
   });
 
-  it('throws when the repo is registered under a different product', () => {
+  it('throws when the repo is registered under a different project', () => {
     const registry = [
       {
-        product: 'my-product',
+        project: 'my-project',
         repo: 'octocat/demo',
         trackerType: 'github' as const,
         tokenEnvVar: 'GITHUB_TOKEN__MY_PRODUCT',
@@ -82,8 +82,8 @@ describe('buildStartScmPort', () => {
       },
     ];
 
-    expect(() => buildStartScmPort(registry, 'wrong-product', 'octocat/demo')).toThrow(
-      /registered under product "my-product"/,
+    expect(() => buildStartScmPort(registry, 'wrong-project', 'octocat/demo')).toThrow(
+      /registered under project "my-project"/,
     );
   });
 });
