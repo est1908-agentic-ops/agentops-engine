@@ -27,9 +27,24 @@ const baseRequest: BackendRunRequest = {
 
 describe('k8sJobName', () => {
   it('sanitizes task ids for Kubernetes names', () => {
-    expect(
-      k8sJobName({ ...baseRequest, taskId: 'Owner/Repo#42' }),
-    ).toBe('agentops-owner-repo-42-implement-1-1');
+    expect(k8sJobName({ ...baseRequest, taskId: 'Owner/Repo#42' })).toMatch(
+      /^agentops-owner-repo-42-implement-1-1-[0-9a-f]{8}$/,
+    );
+  });
+
+  it('stays deterministic for the same request (Temporal retries reuse the same Job)', () => {
+    expect(k8sJobName(baseRequest)).toBe(k8sJobName(baseRequest));
+  });
+
+  // A RateLimitFallbackBackend retry reruns the same call with a different
+  // model. If the Job name and artifact paths ignored the model, that retry
+  // would 409-reuse the primary model's already-finished Job and re-read its
+  // (rate-limited) output instead of actually running the fallback.
+  it('derives a distinct Job name and artifact paths per model', () => {
+    const primary = { ...baseRequest, model: 'zai/glm-5.2' };
+    const fallback = { ...baseRequest, model: 'openrouter/deepseek-v4-pro' };
+    expect(k8sJobName(primary)).not.toBe(k8sJobName(fallback));
+    expect(agentOpsArtifactPaths(primary).outFile).not.toBe(agentOpsArtifactPaths(fallback).outFile);
   });
 });
 
@@ -73,7 +88,7 @@ describe('buildAgentJob', () => {
       paths,
     );
 
-    expect(job.metadata?.name).toBe('agentops-task-1-implement-1-1');
+    expect(job.metadata?.name).toMatch(/^agentops-task-1-implement-1-1-[0-9a-f]{8}$/);
     expect(job.spec?.backoffLimit).toBe(0);
     expect(job.spec?.ttlSecondsAfterFinished).toBe(300);
     const container = job.spec?.template?.spec?.containers?.[0];

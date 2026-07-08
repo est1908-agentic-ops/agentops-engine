@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -33,13 +34,25 @@ export interface K8sJobRunnerOptions {
 const SHELL_REDIRECT =
   'exec "$0" "$@" < "$PROMPT_FILE" > "$OUT_FILE" 2> "$ERR_FILE"';
 
+// A call's on-disk artifacts and its K8s Job are keyed by
+// (taskId, stage, attempt, callIndex) AND the model. A RateLimitFallbackBackend
+// retry reruns the exact same call with a different model, so without the model
+// in the key the fallback would 409-reuse the primary model's already-finished
+// Job and re-read its (rate-limited) output instead of actually running the
+// fallback. Folded in as a short stable hash so K8s names stay under the 63-char
+// limit and filenames stay safe; it's deterministic, so Temporal retries of the
+// same call still reuse the same Job/artifacts.
+function modelKey(model: string): string {
+  return createHash('sha256').update(model).digest('hex').slice(0, 8);
+}
+
 export function agentOpsArtifactPaths(req: BackendRunRequest): {
   dir: string;
   promptFile: string;
   outFile: string;
   errFile: string;
 } {
-  const id = `${req.stage}-${req.attempt}-${req.callIndex}`;
+  const id = `${req.stage}-${req.attempt}-${req.callIndex}-${modelKey(req.model)}`;
   const dir = path.join(req.workspaceRef, '.agentops');
   return {
     dir,
@@ -51,12 +64,14 @@ export function agentOpsArtifactPaths(req: BackendRunRequest): {
 
 export function k8sJobName(req: BackendRunRequest): string {
   const raw = `agentops-${req.taskId}-${req.stage}-${req.attempt}-${req.callIndex}`;
-  return raw
+  const suffix = `-${modelKey(req.model)}`;
+  const base = raw
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 63)
+    .slice(0, 63 - suffix.length)
     .replace(/-+$/g, '');
+  return `${base}${suffix}`;
 }
 
 function toReadinessProbe(readiness: VerifyServiceReadiness): V1ReadinessProbe {
