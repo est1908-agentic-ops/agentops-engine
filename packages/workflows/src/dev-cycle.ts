@@ -14,13 +14,21 @@ import { feedbackHash } from '@agentops/contracts';
 import { babysitDecision, nextRepairAction, parseVerdict, preImplementStages } from '@agentops/policies';
 import type { DevCycleActivities } from './activities-api';
 
+// No step retries forever: a failure that keeps recurring attempt after attempt
+// (a bad git ref, a repo that no longer exists, a deterministic backend error) is
+// never going to be fixed by trying again, and unbounded retries leave a workflow
+// silently stuck with no signal short of a human noticing it in the Temporal UI.
+// maximumAttempts caps every activity to a small number of tries before the
+// workflow fails the way any other unhandled error does.
 const activities = proxyActivities<DevCycleActivities>({
   startToCloseTimeout: '10 minutes',
+  retry: { maximumAttempts: 5 },
 });
 
 const agentActivities = proxyActivities<Pick<DevCycleActivities, 'runAgent'>>({
   startToCloseTimeout: '30 minutes',
   heartbeatTimeout: '15s',
+  retry: { maximumAttempts: 5 },
 });
 
 export const stopSignal = defineSignal('stop');
@@ -327,6 +335,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     const prBody = exhausted
       ? `Repair attempts exhausted after ${state.implementAttempts} implement attempt(s). Opening PR with outstanding findings.\n${findingsSummary}`
       : `Automated PR for task ${input.taskId}.`;
+    await activities.pushBranch(input.repo, state.workspaceRef, state.branch, `${input.taskId}-${implementAttempt}`);
     const { prRef } = await activities.openPr({
       repo: input.repo,
       branch: state.branch,

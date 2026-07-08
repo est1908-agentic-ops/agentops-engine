@@ -64,8 +64,6 @@ describe('ClaudeBackend', () => {
       'json',
       '--model',
       'claude-sonnet-5',
-      '--max-turns',
-      '30',
       '--dangerously-skip-permissions',
     ]);
     expect(stdinWrites.join('')).toBe('do the thing');
@@ -110,7 +108,7 @@ describe('ClaudeBackend', () => {
     expect(result).toEqual({ output: 'final text', tokensIn: 12, tokensOut: 34, wallMs: 999 });
   });
 
-  it('returns raw text with zero tokens when stdout is not valid JSON (never throws)', async () => {
+  it('throws ClaudeBackendProcessError when stdout is not valid JSON', async () => {
     const { child } = fakeChildProcess();
     const spawnFn = vi.fn(() => {
       queueMicrotask(() => {
@@ -122,14 +120,10 @@ describe('ClaudeBackend', () => {
     });
     const backend = new ProcessCliRunner(createClaudeCliSpec(), { spawn: spawnFn as never });
 
-    const result = await backend.run(baseRequest);
-
-    expect(result.output).toBe('not json at all');
-    expect(result.tokensIn).toBe(0);
-    expect(result.tokensOut).toBe(0);
+    await expect(backend.run(baseRequest)).rejects.toThrow(ClaudeBackendProcessError);
   });
 
-  it('returns is_error:true JSON output as a normal result (verdict parsing happens downstream)', async () => {
+  it('throws ClaudeBackendProcessError when the CLI reports is_error:true, instead of laundering the error text as a real result', async () => {
     const { child } = fakeChildProcess();
     const spawnFn = vi.fn(() => {
       queueMicrotask(() => {
@@ -143,9 +137,15 @@ describe('ClaudeBackend', () => {
     });
     const backend = new ProcessCliRunner(createClaudeCliSpec(), { spawn: spawnFn as never });
 
-    const result = await backend.run(baseRequest);
+    let error: unknown;
+    try {
+      await backend.run(baseRequest);
+    } catch (err) {
+      error = err;
+    }
 
-    expect(result.output).toBe('hit an internal snag');
+    expect(error).toBeInstanceOf(ClaudeBackendProcessError);
+    expect((error as Error).message).toMatch(/hit an internal snag/);
   });
 
   it('throws ClaudeBackendProcessError when the process exits nonzero with no stdout at all', async () => {

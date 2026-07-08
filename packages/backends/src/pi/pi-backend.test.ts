@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { BackendRunRequest } from '@agentops/contracts';
 import { createPiCliSpec } from './pi-backend';
 import { ProcessCliAuthError, ProcessCliProcessError, ProcessCliTimeoutError, ProcessCliRunner } from '../process-cli-runner';
+import { ProviderRateLimitedError } from '../provider-rate-limit';
 
 const baseRequest: BackendRunRequest = {
   taskId: 't1',
@@ -35,7 +36,7 @@ function fakeChildProcess() {
 
 const piJsonlOutput = [
   '{"type":"session","version":3,"id":"s1","timestamp":"2026-07-03T00:00:00.000Z","cwd":"/tmp/ws"}',
-  '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}',
+  '{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"ok"}],"usage":{"input":12,"output":34}}}',
 ].join('\n');
 
 describe('PiBackend', () => {
@@ -58,10 +59,10 @@ describe('PiBackend', () => {
     expect(calls[0].command).toBe('pi');
     expect(calls[0].args).toEqual(['--print', '--mode', 'json', '--model', 'pi-default', '--no-session']);
     expect(stdinWrites.join('')).toBe('do the thing');
-    expect(result).toEqual({ output: 'ok', tokensIn: 0, tokensOut: 0, wallMs: expect.any(Number) });
+    expect(result).toEqual({ output: 'ok', tokensIn: 12, tokensOut: 34, wallMs: expect.any(Number) });
   });
 
-  it('returns raw text with zero tokens when stdout is not valid JSONL (never throws)', async () => {
+  it('throws ProcessCliProcessError when stdout is not valid JSONL', async () => {
     const { child } = fakeChildProcess();
     const spawnFn = vi.fn(() => {
       queueMicrotask(() => {
@@ -73,10 +74,81 @@ describe('PiBackend', () => {
     });
     const backend = new ProcessCliRunner(createPiCliSpec(), { spawn: spawnFn as never });
 
-    const result = await backend.run(baseRequest);
+    await expect(backend.run(baseRequest)).rejects.toThrow(ProcessCliProcessError);
+  });
 
-    expect(result.output).toBe('not json');
-    expect(result.tokensIn).toBe(0);
+  it('throws ProcessCliProcessError when the last assistant turn ends with stopReason "error", even though pi exits 0', async () => {
+    const { child } = fakeChildProcess();
+    const errorJsonl = [
+      '{"type":"session","version":3,"id":"s1","timestamp":"2026-07-03T00:00:00.000Z","cwd":"/tmp/ws"}',
+      '{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"error","errorMessage":"401 token expired or incorrect"}}',
+    ].join('\n');
+    const spawnFn = vi.fn(() => {
+      queueMicrotask(() => {
+        child.stdout.end(errorJsonl);
+        child.stderr.end('');
+        child.emit('close', 0);
+      });
+      return child;
+    });
+    const backend = new ProcessCliRunner(createPiCliSpec(), { spawn: spawnFn as never });
+
+    let error: unknown;
+    try {
+      await backend.run(baseRequest);
+    } catch (err) {
+      error = err;
+    }
+
+    expect(error).toBeInstanceOf(ProcessCliProcessError);
+    expect((error as Error).message).toMatch(/401 token expired or incorrect/);
+  });
+
+  it('throws ProcessCliProcessError when the last assistant turn ends "aborted"', async () => {
+    const { child } = fakeChildProcess();
+    const abortedJsonl = [
+      '{"type":"message_end","message":{"role":"assistant","content":[],"stopReason":"aborted"}}',
+    ].join('\n');
+    const spawnFn = vi.fn(() => {
+      queueMicrotask(() => {
+        child.stdout.end(abortedJsonl);
+        child.stderr.end('');
+        child.emit('close', 0);
+      });
+      return child;
+    });
+    const backend = new ProcessCliRunner(createPiCliSpec(), { spawn: spawnFn as never });
+
+    await expect(backend.run(baseRequest)).rejects.toThrow(ProcessCliProcessError);
+  });
+
+  it('throws ProviderRateLimitedError (not ProcessCliProcessError) when the error message matches a provider rate-limit pattern', async () => {
+    const { child } = fakeChildProcess();
+    const errorMessage =
+      "429 Your account's current usage pattern does not comply with the Fair Usage Policy, and your request frequency has been limited.";
+    const rateLimitedJsonl = JSON.stringify({
+      type: 'message_end',
+      message: { role: 'assistant', content: [], stopReason: 'error', errorMessage },
+    });
+    const spawnFn = vi.fn(() => {
+      queueMicrotask(() => {
+        child.stdout.end(rateLimitedJsonl);
+        child.stderr.end('');
+        child.emit('close', 0);
+      });
+      return child;
+    });
+    const backend = new ProcessCliRunner(createPiCliSpec(), { spawn: spawnFn as never });
+
+    let error: unknown;
+    try {
+      await backend.run(baseRequest);
+    } catch (err) {
+      error = err;
+    }
+
+    expect(error).toBeInstanceOf(ProviderRateLimitedError);
+    expect(error).not.toBeInstanceOf(ProcessCliProcessError);
   });
 
   it('throws ProcessCliAuthError when stderr matches the auth-failure pattern', async () => {

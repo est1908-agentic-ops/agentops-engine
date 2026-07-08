@@ -7,6 +7,7 @@ image:
   # images/agent-runner/Dockerfile and ARCHITECTURE.md §5.4.
   agentRunnerTag: CHANGEME
   gatewayTag: CHANGEME
+  controlTag: CHANGEME
   pullPolicy: IfNotPresent
 
 imagePullSecretName: registry-credentials
@@ -14,6 +15,11 @@ imagePullSecretName: registry-credentials
 replicas: 1
 
 temporalAddress: "localhost:7233"
+
+# Empty by default -- same "chart ships no cluster assumption" pattern as
+# otelExporterOtlpEndpoint below. agentops-platform's values override sets
+# the real Temporal Web UI host once one exists for the cluster.
+temporalUiBaseUrl: ""
 
 # Empty by default -- this chart ships no assumption about whether a cluster
 # has the observability stack (M4 sub-project 1, agentops-platform). Set by
@@ -96,6 +102,34 @@ projects: {}
 claudeAuthSecretName: claude-credentials
 piAuthSecretName: pi-credentials
 
+# Empty by default -- same "chart ships no cluster assumption" pattern as
+# otelExporterOtlpEndpoint above. Unset means RateLimitFallbackBackend is a
+# passthrough no-op (packages/worker/src/main.ts's wrapWithRateLimitFallback),
+# same "off by default" convention as the PI_RATE_WINDOW_* vars. See
+# docs/superpowers/specs/2026-07-08-provider-rate-limit-fallback-design.md's
+# "open questions" -- deliberately left operator-set with no chart default
+# rather than a guessed value.
+piRateLimitFallbackModel: ""
+
+# The worker's LiteLLM backend (packages/worker/src/main.ts) calls the
+# in-cluster LiteLLM proxy directly over HTTP using its master key as a
+# bearer token -- unlike claude/pi above, this is the secret's *value*, not
+# just its name, so it's wired via secretKeyRef (see templates/deployment.yaml)
+# rather than passed through as a plain env var. Defaults match the Secret
+# agentops-platform's litellm app already produces (masterkeySecretName /
+# masterkeySecretKey in its own values.yaml) and engine-secrets retargets into
+# this namespace the same way it does for postgres-credentials.
+litellmApiKeySecretName: litellm-credentials
+litellmApiKeySecretKey: masterkey
+
+# The platform role (docs/superpowers/specs/2026-07-07-platform-agent-design.md)
+# needs credentials devCycle's claude/pi Jobs don't: Temporal REST/action creds
+# and Grafana basic auth, bundled by agentops-platform into one Secret with
+# whatever keys the platform-ops skill's toolbelt expects (TEMPORAL_HOST,
+# GRAFANA_HOST, GRAFANA_USER, GRAFANA_PASSWORD). Empty by default -- same
+# "chart ships no cluster assumption" pattern as otelExporterOtlpEndpoint.
+platformAgentSecretName: ""
+
 gateway:
   port: 3000
   triggerLabel: agentops
@@ -107,6 +141,22 @@ gateway:
   # domain is pointed at the cluster. clusterIssuer must be a cert-manager
   # ClusterIssuer using a publicly-trusted CA (Let's Encrypt) — step-ca's
   # internal-only CA is not trusted by GitHub's webhook delivery.
+  ingress:
+    enabled: false
+    host: ""
+    clusterIssuer: letsencrypt
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+control:
+  port: 3001
+  # Disabled by default, same reasoning as gateway.ingress -- this chart
+  # ships no real public hostname.
   ingress:
     enabled: false
     host: ""

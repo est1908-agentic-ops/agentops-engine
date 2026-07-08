@@ -45,3 +45,28 @@ describe('MemoryWorkspaceManager', () => {
     expect(manager.initCommandsFor(workspaceRef)).toBeUndefined();
   });
 });
+
+describe('MemoryWorkspaceManager — scratch workspaces', () => {
+  it('prepareScratch returns a workspaceRef and marks it prepared', async () => {
+    const manager = new MemoryWorkspaceManager();
+
+    const { workspaceRef } = await manager.prepareScratch('task-1');
+
+    expect(manager.isScratchPrepared(workspaceRef)).toBe(true);
+  });
+
+  it('cleanupScratch marks a prepared scratch workspace cleaned up', async () => {
+    const manager = new MemoryWorkspaceManager();
+    const { workspaceRef } = await manager.prepareScratch('task-1');
+
+    await manager.cleanupScratch(workspaceRef);
+
+    expect(manager.isScratchCleanedUp(workspaceRef)).toBe(true);
+  });
+
+  it('throws when cleanupScratch is called on a workspaceRef that was never prepared', async () => {
+    const manager = new MemoryWorkspaceManager();
+
+    await expect(manager.cleanupScratch('memory://scratch/never-prepared')).rejects.toThrow(/never prepared/);
+  });
+});

@@ -1,0 +1,26 @@
+{{- if and .Values.control.ingress.enabled .Values.temporalUiBaseUrl }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Release.Name }}-control
+  namespace: {{ .Values.namespace }}
+  annotations:
+    cert-manager.io/cluster-issuer: {{ .Values.control.ingress.clusterIssuer }}
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - {{ .Values.control.ingress.host | quote }}
+      secretName: {{ .Release.Name }}-control-tls
+  rules:
+    - host: {{ .Values.control.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ .Release.Name }}-control
+                port:
+                  number: {{ .Values.control.port }}
+{{- end }}

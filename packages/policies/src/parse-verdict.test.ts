@@ -36,4 +36,27 @@ describe('parseVerdict', () => {
   it('never matches a sentinel prefix that only appears mid-line', () => {
     expect(parseVerdict('not a VERDICT: PASS really', 'VERDICT:')).toEqual({ kind: 'unparseable' });
   });
+
+  it('tolerates a bold-wrapped sentinel line', () => {
+    expect(parseVerdict('Looks good.\n**FULL: PASS**', 'FULL:')).toEqual({ kind: 'pass' });
+  });
+
+  it('tolerates a bullet-prefixed sentinel line', () => {
+    expect(parseVerdict('- FULL: PASS', 'FULL:')).toEqual({ kind: 'pass' });
+  });
+
+  it('tolerates a blockquote-prefixed sentinel line', () => {
+    expect(parseVerdict('> FULL: FAIL missing tests', 'FULL:')).toEqual({
+      kind: 'fail',
+      findings: ['missing tests'],
+    });
+  });
+
+  it('tolerates a heading-prefixed sentinel line', () => {
+    expect(parseVerdict('#### FULL: PASS', 'FULL:')).toEqual({ kind: 'pass' });
+  });
+
+  it('still never matches a sentinel that only appears after real words on the line', () => {
+    expect(parseVerdict('Summary: FULL: PASS', 'FULL:')).toEqual({ kind: 'unparseable' });
+  });
 });

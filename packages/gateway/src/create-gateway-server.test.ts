@@ -89,6 +89,19 @@ describe('createGatewayServer', () => {
     expect(options.args[0]).toMatchObject({ product: 'my-product', repo: 'octocat/hello-world', goal: 'Add a widget' });
   });
 
+  it('finds a product config stored at .agentops/agentops.json, not just repo-root agentops.json', async () => {
+    registeredScm.seedFile('octocat/hello-world', '.agentops/agentops.json', JSON.stringify({ fastVerifyCommands: ['pnpm test'] }));
+    const body = JSON.stringify(labeledPayload());
+    const res = await post(port, '/webhooks/github', body, {
+      'content-type': 'application/json',
+      'x-github-event': 'issues',
+      'x-hub-signature-256': sign(body),
+    });
+    expect(res.status).toBe(202);
+    const [, options] = start.mock.calls[0];
+    expect(options.args[0].config.fastVerifyCommands).toEqual(['pnpm test']);
+  });
+
   it('ignores (204) a labeled event for a label other than the trigger label', async () => {
     const body = JSON.stringify(labeledPayload({ label: { name: 'bug' } }));
     const res = await post(port, '/webhooks/github', body, {

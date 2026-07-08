@@ -21,6 +21,12 @@ export interface GithubClient {
         body: string;
       }): Promise<{ data: { number: number; html_url: string } }>;
       get(params: { owner: string; repo: string; pull_number: number }): Promise<{ data: { head: { sha: string } } }>;
+      list(params: {
+        owner: string;
+        repo: string;
+        head: string;
+        state?: 'open' | 'closed' | 'all';
+      }): Promise<{ data: Array<{ number: number; html_url: string }> }>;
     };
     repos: {
       get(params: { owner: string; repo: string }): Promise<{ data: { default_branch: string } }>;

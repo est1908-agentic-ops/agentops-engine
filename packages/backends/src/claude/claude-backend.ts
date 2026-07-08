@@ -12,7 +12,6 @@ export { ProcessCliAuthError as ClaudeBackendAuthError };
 
 export interface ClaudeCliSpecOptions {
   image?: string;
-  maxTurns?: number;
 }
 
 interface ClaudeJsonResult {
@@ -26,23 +25,22 @@ const AUTH_ERROR_PATTERN = /(invalid|expired).{0,30}(api key|token)/i;
 const DEFAULT_IMAGE = 'ghcr.io/CHANGEME/agentops-engine/agent-claude:CHANGEME';
 
 export function createClaudeCliSpec(opts: ClaudeCliSpecOptions = {}): CliSpec {
-  const maxTurns = opts.maxTurns ?? 30;
   const image = opts.image ?? DEFAULT_IMAGE;
 
   return {
     image,
     binary: 'claude',
     buildArgs(req: BackendRunRequest): string[] {
-      const args = [
-        '-p',
-        '--output-format',
-        'json',
-        '--model',
-        req.model,
-        '--max-turns',
-        String(maxTurns),
-        '--dangerously-skip-permissions',
-      ];
+      // No per-call turn cap is passed here: the CLI's `--max-turns` flag was
+      // removed upstream (confirmed absent from `claude --help` on the pinned
+      // agent-runner image version) and was being silently ignored -- a
+      // no-op flag is worse than no flag, since it reads as a safety bound
+      // that isn't actually enforced. Wall-clock (`limits.timeoutMs`) and
+      // Temporal's activity retry cap are the only real bounds today;
+      // `--max-budget-usd` is a real flag on the current CLI and the likely
+      // replacement if a per-call cap is wanted again, but that's a product
+      // decision (what budget?) left for whoever picks this up next.
+      const args = ['-p', '--output-format', 'json', '--model', req.model, '--dangerously-skip-permissions'];
       if (req.effort) {
         args.push('--effort', req.effort);
       }
@@ -57,7 +55,18 @@ export function createClaudeCliSpec(opts: ClaudeCliSpecOptions = {}): CliSpec {
       }
 
       if (!parsed || typeof parsed.result !== 'string') {
-        return { output: stdout || stderr, tokensIn: 0, tokensOut: 0, wallMs: elapsedMs };
+        throw new ProcessCliProcessError(`claude produced no parseable JSON result: ${(stdout || stderr).slice(0, 500)}`);
+      }
+
+      // is_error can be true on a JSON blob that still parses fine and still has
+      // a string `result` (the error message itself) -- e.g. a bad model name,
+      // an auth failure mid-turn, a provider outage. Left unchecked, that error
+      // text silently becomes this stage's "output": fed into the next stage's
+      // prompt as if it were real reasoning, and into verdict parsing for
+      // full_verify/review, where it can never match FULL:/VERDICT: and just
+      // reads as a garbled response instead of the actual failure it is.
+      if (parsed.is_error) {
+        throw new ProcessCliProcessError(`claude reported is_error: ${parsed.result}`);
       }
 
       return {

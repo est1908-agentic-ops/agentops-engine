@@ -1,5 +1,7 @@
 import type { AgentRunResult, BackendRunRequest } from '@agentops/contracts';
 import type { CliSpec } from '../cli-spec';
+import { ProcessCliProcessError } from '../process-cli-runner';
+import { isProviderRateLimitMessage, ProviderRateLimitedError } from '../provider-rate-limit';
 
 export interface PiCliSpecOptions {
   image?: string;
@@ -10,9 +12,17 @@ interface PiTextContent {
   text?: string;
 }
 
+interface PiUsage {
+  input?: number;
+  output?: number;
+}
+
 interface PiMessage {
   role?: string;
   content?: PiTextContent[];
+  stopReason?: string;
+  errorMessage?: string;
+  usage?: PiUsage;
 }
 
 interface PiJsonEvent {
@@ -47,29 +57,50 @@ export function createPiCliSpec(opts: PiCliSpecOptions = {}): CliSpec {
     },
     parseOutput(stdout: string, stderr: string, elapsedMs: number): AgentRunResult {
       const lines = stdout.split('\n').filter((line) => line.trim().length > 0);
-      let output = '';
+      let lastAssistantMessage: PiMessage | undefined;
 
       for (const line of lines) {
         try {
           const event = JSON.parse(line) as PiJsonEvent;
           if (event.type === 'message_end' && event.message?.role === 'assistant') {
-            output = extractAssistantText(event.message);
+            lastAssistantMessage = event.message;
           }
           if (event.type === 'agent_end' && event.messages) {
-            const lastAssistant = [...event.messages].reverse().find((m) => m.role === 'assistant');
-            const text = extractAssistantText(lastAssistant);
-            if (text) output = text;
+            const found = [...event.messages].reverse().find((m) => m.role === 'assistant');
+            if (found) lastAssistantMessage = found;
           }
         } catch {
           // skip malformed JSONL lines
         }
       }
 
-      if (!output) {
-        return { output: stdout || stderr, tokensIn: 0, tokensOut: 0, wallMs: elapsedMs };
+      // pi's --mode json print mode always exits 0, even when a turn ends in
+      // error or gets aborted -- process exit code carries no failure signal
+      // at all here (unlike claude's is_error field, which at least comes
+      // with a nonzero exit in some cases). stopReason/errorMessage on the
+      // last assistant message is the only place a mid-session failure shows
+      // up, and leaving it unchecked means that failure gets read as this
+      // stage's real output instead.
+      if (lastAssistantMessage?.stopReason === 'error' || lastAssistantMessage?.stopReason === 'aborted') {
+        const message =
+          lastAssistantMessage.errorMessage || `pi turn ended with stopReason "${lastAssistantMessage.stopReason}"`;
+        if (isProviderRateLimitMessage(message)) {
+          throw new ProviderRateLimitedError(message);
+        }
+        throw new ProcessCliProcessError(message);
       }
 
-      return { output, tokensIn: 0, tokensOut: 0, wallMs: elapsedMs };
+      const output = extractAssistantText(lastAssistantMessage);
+      if (!output) {
+        throw new ProcessCliProcessError(`pi produced no assistant text: ${(stdout || stderr).slice(0, 500)}`);
+      }
+
+      return {
+        output,
+        tokensIn: lastAssistantMessage?.usage?.input ?? 0,
+        tokensOut: lastAssistantMessage?.usage?.output ?? 0,
+        wallMs: elapsedMs,
+      };
     },
     isAuthError(stderr: string): boolean {
       return AUTH_ERROR_PATTERN.test(stderr);

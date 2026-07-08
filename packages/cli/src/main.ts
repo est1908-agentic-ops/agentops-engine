@@ -1,12 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { Client, Connection } from '@temporalio/client';
-import { loadEnv, loadProjectRegistry, SpawnGitCommandRunner } from '@agentops/activities';
+import { loadEnv, loadProductConfig, loadProjectRegistry, SpawnGitCommandRunner } from '@agentops/activities';
 
 loadEnv();
 import type { ResolvedProjectEntry, TaskInput } from '@agentops/contracts';
 import { createGithubPorts, MemoryScmPort, type ScmPort } from '@agentops/ports';
 import { cancelSignal, clarifySignal, devCycle, resumeSignal, stateQuery, stopSignal } from '@agentops/workflows';
-import { loadProductConfig } from './load-product-config';
 
 const TASK_QUEUE = 'agentops-devcycle';
 

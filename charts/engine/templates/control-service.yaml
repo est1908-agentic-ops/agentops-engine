@@ -1,0 +1,13 @@
+{{- if .Values.temporalUiBaseUrl }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-control
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: {{ .Release.Name }}-control
+  ports:
+    - port: {{ .Values.control.port }}
+      targetPort: {{ .Values.control.port }}
+{{- end }}

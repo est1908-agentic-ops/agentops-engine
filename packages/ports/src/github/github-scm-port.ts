@@ -42,15 +42,36 @@ export class GithubScmPort implements ScmPort {
   async openPr(req: OpenPrRequest): Promise<OpenPrResult> {
     const { owner, repo } = parseRepoSlug(req.repo);
     const { data: repoData } = await this.client.rest.repos.get({ owner, repo });
-    const { data: prData } = await this.client.rest.pulls.create({
-      owner,
-      repo,
-      head: req.branch,
-      base: repoData.default_branch,
-      title: req.title,
-      body: req.body,
-    });
-    return { prRef: `${owner}/${repo}#${prData.number}`, url: prData.html_url };
+    try {
+      const { data: prData } = await this.client.rest.pulls.create({
+        owner,
+        repo,
+        head: req.branch,
+        base: repoData.default_branch,
+        title: req.title,
+        body: req.body,
+      });
+      return { prRef: `${owner}/${repo}#${prData.number}`, url: prData.html_url };
+    } catch (err) {
+      // req.branch is deterministic per task, so a Temporal retry of this same activity call
+      // (create succeeded at GitHub but the activity failed before returning) reissues the
+      // identical create and GitHub reports 422 "already exists" -- reuse that PR instead of
+      // failing every retry.
+      if ((err as { status?: number }).status !== 422) {
+        throw err;
+      }
+      const { data: existing } = await this.client.rest.pulls.list({
+        owner,
+        repo,
+        head: `${owner}:${req.branch}`,
+        state: 'open',
+      });
+      const pr = existing[0];
+      if (!pr) {
+        throw err;
+      }
+      return { prRef: `${owner}/${repo}#${pr.number}`, url: pr.html_url };
+    }
   }
 
   async getPrFeedback(prRef: string): Promise<PrFeedback> {
@@ -76,7 +97,13 @@ export class GithubScmPort implements ScmPort {
   }
 
   async push(_repo: string, workspaceRef: string, branch: string, _contentHash: string): Promise<void> {
-    const result = await this.git.run(['push', 'origin', branch], { cwd: workspaceRef });
+    // --force: this branch is task-owned and disposable (ARCHITECTURE.md §1 -- only
+    // pushed commits count, worktrees aren't). prepareWorkspace always rebuilds it
+    // fresh off origin/<base> (see reclaimStaleWorktree), so a rerun of the same
+    // taskId produces a branch with different commits than any prior run's remote
+    // copy; a plain push would be rejected as a non-fast-forward. No human or other
+    // task ever pushes to agentops/<taskId>, so clobbering it here is safe.
+    const result = await this.git.run(['push', '--force', 'origin', branch], { cwd: workspaceRef });
     if (result.exitCode !== 0) {
       throw new Error(`GithubScmPort.push: git push failed: ${result.stderr}`);
     }
