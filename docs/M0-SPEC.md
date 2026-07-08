@@ -28,8 +28,8 @@ Fixed vocabularies — do not extend without design discussion:
 
 Schemas (zod), minimum fields:
 
-- `TaskInput`: `{ taskId, product, repo, issueRef?, goal, config: ProductConfig }`
-- `ProductConfig`: `{ fastVerifyCommands[], fullVerifyCommands[], stages: { assess?: bool, triage?: bool }, routing: Record<Stage, ModelRef>, escalation?: ModelRef, brakes: { maxImplementAttempts=3, maxIterations, maxTokens, maxBabysitRounds } }`
+- `TaskInput`: `{ taskId, project, repo, issueRef?, goal, config: ProjectConfig }`
+- `ProjectConfig`: `{ fastVerifyCommands[], fullVerifyCommands[], stages: { assess?: bool, triage?: bool }, routing: Record<Stage, ModelRef>, escalation?: ModelRef, brakes: { maxImplementAttempts=3, maxIterations, maxTokens, maxBabysitRounds } }`
 - `StageResult`: `{ stage, source: agent|human|triage, contentHash, tokens, outcome }`
 - `Verdict`: `{ kind: pass|fail|unparseable, findings? }`
 - `AgentRunRequest` / `AgentRunResult`: see `backends` below

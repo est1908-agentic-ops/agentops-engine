@@ -262,7 +262,7 @@ async function main(): Promise<void> {
   console.log(
     registry.length > 0
       ? `agentops worker: LIVE mode — ${registry.length} project(s) registered: ${registry
-          .map((entry) => `${entry.product} (${entry.repo})`)
+          .map((entry) => `${entry.project} (${entry.repo})`)
           .join(', ')} — real GitHub + real agent CLIs, will spend tokens and open real PRs`
       : 'agentops worker: DEMO mode (no PROJECT_REGISTRY_JSON) — in-memory ports + stub backend only',
   );

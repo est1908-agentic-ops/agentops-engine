@@ -27,7 +27,7 @@ describe('DevCycle e2e: garbage verdict never blocks', () => {
 
     const input: TaskInput = {
       taskId: 'garbage-verdict-task',
-      product: 'demo',
+      project: 'demo',
       repo: 'demo/repo',
       goal: 'Survive a garbled reviewer',
       config: {

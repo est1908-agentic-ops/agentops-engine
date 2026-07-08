@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { VerifyServiceSchema } from './product-config';
+import { VerifyServiceSchema } from './project-config';
 import { StageSchema } from './stage';
 
 export const AgentRunLimitsSchema = z.object({

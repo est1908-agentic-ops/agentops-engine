@@ -1,11 +1,11 @@
-import type { AgentRunRequest, AgentRunResult, ProductConfig, RunStats } from '@agentops/contracts';
+import type { AgentRunRequest, AgentRunResult, ProjectConfig, RunStats } from '@agentops/contracts';
 
 export interface PlatformActivities {
   runAgent(req: AgentRunRequest): Promise<AgentRunResult>;
   recordRunStats(stats: RunStats): Promise<void>;
   resolveRepoConfig(
     repo: string,
-  ): Promise<{ registered: boolean; product: string; config: ProductConfig }>;
+  ): Promise<{ registered: boolean; project: string; config: ProjectConfig }>;
   prepareScratchWorkspace(taskId: string): Promise<{ workspaceRef: string }>;
   cleanupScratchWorkspace(workspaceRef: string): Promise<void>;
 }

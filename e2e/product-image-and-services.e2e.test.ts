@@ -4,7 +4,7 @@ import type { BackendRunRequest, TaskInput } from '@agentops/contracts';
 import { devCycle } from '@agentops/workflows';
 import { buildTestEnv, waitForStatus, type TestEnv } from './helpers';
 
-describe('DevCycle e2e: product image and services reach every stage agent call', () => {
+describe('DevCycle e2e: project image and services reach every stage agent call', () => {
   let testEnv: TestEnv | undefined;
 
   afterEach(async () => {
@@ -31,7 +31,7 @@ describe('DevCycle e2e: product image and services reach every stage agent call'
     const recordingRoute = { backend: 'recording', model: 'recording-v1' };
     const input: TaskInput = {
       taskId: 'image-services-task',
-      product: 'demo',
+      project: 'demo',
       repo: 'demo/repo',
       issueRef: 'issue-1',
       goal: 'Add a widget',

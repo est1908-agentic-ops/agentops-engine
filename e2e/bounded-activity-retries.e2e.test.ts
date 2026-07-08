@@ -52,7 +52,7 @@ describe('DevCycle e2e: bounded activity retries', () => {
 
     const input: TaskInput = {
       taskId: 'stuck-workspace-task',
-      product: 'demo',
+      project: 'demo',
       repo: 'demo/repo',
       goal: 'Should give up, not retry forever',
       config: {

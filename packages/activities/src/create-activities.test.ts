@@ -467,7 +467,7 @@ describe('createActivities — backend error translation', () => {
 });
 
 describe('createActivities — resolveRepoConfig', () => {
-  it("resolves product from the registry and loads that repo's ProductConfig", async () => {
+  it("resolves project from the registry and loads that repo's ProjectConfig", async () => {
     const deps = buildDeps();
     deps.scm.seedFile(
       'flair-hr/agentops-engine',
@@ -476,7 +476,7 @@ describe('createActivities — resolveRepoConfig', () => {
     );
     deps.registry = [
       {
-        product: 'engine',
+        project: 'engine',
         repo: 'flair-hr/agentops-engine',
         trackerType: 'github',
         tokenEnvVar: 'X',
@@ -485,12 +485,12 @@ describe('createActivities — resolveRepoConfig', () => {
     ];
     const activities = createActivities(deps);
 
-    const { registered, product, config } = await activities.resolveRepoConfig(
+    const { registered, project, config } = await activities.resolveRepoConfig(
       'flair-hr/agentops-engine',
     );
 
     expect(registered).toBe(true);
-    expect(product).toBe('engine');
+    expect(project).toBe('engine');
     expect(config.fastVerifyCommands).toEqual(['pnpm lint']);
   });
 
@@ -499,10 +499,10 @@ describe('createActivities — resolveRepoConfig', () => {
     const readFileSpy = vi.spyOn(deps.scm, 'readFile');
     const activities = createActivities(deps);
 
-    const { registered, product } = await activities.resolveRepoConfig('flair-hr/some-other-repo');
+    const { registered, project } = await activities.resolveRepoConfig('flair-hr/some-other-repo');
 
     expect(registered).toBe(false);
-    expect(product).toBe('default');
+    expect(project).toBe('default');
     // No registry entry means no SCM credentials scoped to this repo either --
     // the real (non-fake) ScmPort throws for any repo it isn't configured
     // for, so resolveRepoConfig must never reach it for an unregistered repo.

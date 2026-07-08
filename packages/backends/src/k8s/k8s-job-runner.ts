@@ -140,13 +140,13 @@ export function buildAgentJob(
   const args = spec.buildArgs(req);
   const image = req.image ?? spec.image;
   // A "CHANGEME" placeholder means whoever wired this up (an operator's
-  // AGENT_RUNNER_IMAGE, or a product's own agentops.json) never got replaced
+  // AGENT_RUNNER_IMAGE, or a project's own agentops.json) never got replaced
   // with a real image -- letting that reach the cluster means an
   // ImagePullBackOff that eats the activity's timeout before failing, instead
   // of a clear error at the one point that actually knows the image is fake.
   if (image.includes('CHANGEME')) {
     throw new Error(
-      `refusing to build a Job with a placeholder image ("${image}") -- set a real image via the product's ` +
+      `refusing to build a Job with a placeholder image ("${image}") -- set a real image via the project's ` +
         'agentops.json "image" field or the worker\'s AGENT_RUNNER_IMAGE env var.',
     );
   }

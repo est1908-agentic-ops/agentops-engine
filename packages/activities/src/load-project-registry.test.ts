@@ -9,30 +9,30 @@ describe('loadProjectRegistry', () => {
   it("resolves each entry's token from its tokenEnvVar", () => {
     const env = {
       PROJECT_REGISTRY_JSON: JSON.stringify([
-        { product: 'product-a', repo: 'flair-hr/product-a', trackerType: 'github', tokenEnvVar: 'GITHUB_TOKEN__PRODUCT_A' },
+        { project: 'project-a', repo: 'flair-hr/project-a', trackerType: 'github', tokenEnvVar: 'GITHUB_TOKEN__PROJECT_A' },
       ]),
-      GITHUB_TOKEN__PRODUCT_A: 'ghp_fake',
+      GITHUB_TOKEN__PROJECT_A: 'ghp_fake',
     };
 
     expect(loadProjectRegistry(env)).toEqual([
       {
-        product: 'product-a',
-        repo: 'flair-hr/product-a',
+        project: 'project-a',
+        repo: 'flair-hr/project-a',
         trackerType: 'github',
-        tokenEnvVar: 'GITHUB_TOKEN__PRODUCT_A',
+        tokenEnvVar: 'GITHUB_TOKEN__PROJECT_A',
         token: 'ghp_fake',
       },
     ]);
   });
 
-  it('throws naming the product and env var when a referenced tokenEnvVar is missing', () => {
+  it('throws naming the project and env var when a referenced tokenEnvVar is missing', () => {
     const env = {
       PROJECT_REGISTRY_JSON: JSON.stringify([
-        { product: 'product-a', repo: 'flair-hr/product-a', trackerType: 'github', tokenEnvVar: 'GITHUB_TOKEN__PRODUCT_A' },
+        { project: 'project-a', repo: 'flair-hr/project-a', trackerType: 'github', tokenEnvVar: 'GITHUB_TOKEN__PROJECT_A' },
       ]),
     };
 
-    expect(() => loadProjectRegistry(env)).toThrow(/"GITHUB_TOKEN__PRODUCT_A".*"product-a"/);
+    expect(() => loadProjectRegistry(env)).toThrow(/"GITHUB_TOKEN__PROJECT_A".*"project-a"/);
   });
 
   it('throws on a malformed PROJECT_REGISTRY_JSON', () => {
@@ -42,11 +42,11 @@ describe('loadProjectRegistry', () => {
   it('resolves multiple entries independently', () => {
     const env = {
       PROJECT_REGISTRY_JSON: JSON.stringify([
-        { product: 'product-a', repo: 'flair-hr/product-a', trackerType: 'github', tokenEnvVar: 'GITHUB_TOKEN__PRODUCT_A' },
-        { product: 'product-b', repo: 'flair-hr/product-b', trackerType: 'github', tokenEnvVar: 'GITHUB_TOKEN__PRODUCT_B' },
+        { project: 'project-a', repo: 'flair-hr/project-a', trackerType: 'github', tokenEnvVar: 'GITHUB_TOKEN__PROJECT_A' },
+        { project: 'project-b', repo: 'flair-hr/project-b', trackerType: 'github', tokenEnvVar: 'GITHUB_TOKEN__PROJECT_B' },
       ]),
-      GITHUB_TOKEN__PRODUCT_A: 'token-a',
-      GITHUB_TOKEN__PRODUCT_B: 'token-b',
+      GITHUB_TOKEN__PROJECT_A: 'token-a',
+      GITHUB_TOKEN__PROJECT_B: 'token-b',
     };
 
     const resolved = loadProjectRegistry(env);

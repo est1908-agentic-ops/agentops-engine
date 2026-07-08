@@ -41,7 +41,7 @@ describe('DevCycle e2e: OTel instrumentation', () => {
 
     const input: TaskInput = {
       taskId: 'otel-e2e-task',
-      product: 'demo',
+      project: 'demo',
       repo: 'demo/repo',
       issueRef: 'issue-1',
       goal: 'Add a widget',

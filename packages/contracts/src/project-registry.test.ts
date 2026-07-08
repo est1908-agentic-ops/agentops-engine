@@ -2,10 +2,10 @@ import { describe, expect, it } from 'vitest';
 import { InvalidProjectRegistryError, parseProjectRegistry, ProjectRegistrySchema } from './project-registry';
 
 const validEntry = {
-  product: 'product-a',
-  repo: 'flair-hr/product-a',
+  project: 'project-a',
+  repo: 'flair-hr/project-a',
   trackerType: 'github',
-  tokenEnvVar: 'GITHUB_TOKEN__PRODUCT_A',
+  tokenEnvVar: 'GITHUB_TOKEN__PROJECT_A',
 };
 
 describe('ProjectRegistrySchema', () => {
@@ -32,19 +32,19 @@ describe('parseProjectRegistry', () => {
     expect(parseProjectRegistry([])).toEqual([]);
   });
 
-  it('passes through a valid registry with distinct products/repos/tokenEnvVars', () => {
+  it('passes through a valid registry with distinct projects/repos/tokenEnvVars', () => {
     const second = {
-      product: 'product-b',
-      repo: 'flair-hr/product-b',
+      project: 'project-b',
+      repo: 'flair-hr/project-b',
       trackerType: 'github',
-      tokenEnvVar: 'GITHUB_TOKEN__PRODUCT_B',
+      tokenEnvVar: 'GITHUB_TOKEN__PROJECT_B',
     };
     expect(parseProjectRegistry([validEntry, second])).toEqual([validEntry, second]);
   });
 
   it('throws InvalidProjectRegistryError on a schema violation', () => {
     expect(() =>
-      parseProjectRegistry([{ product: '', repo: 'x', trackerType: 'github', tokenEnvVar: 'X' }]),
+      parseProjectRegistry([{ project: '', repo: 'x', trackerType: 'github', tokenEnvVar: 'X' }]),
     ).toThrow(InvalidProjectRegistryError);
   });
 
@@ -52,20 +52,20 @@ describe('parseProjectRegistry', () => {
     expect(() => parseProjectRegistry(validEntry)).toThrow(InvalidProjectRegistryError);
   });
 
-  it('throws naming a duplicate product', () => {
+  it('throws naming a duplicate project', () => {
     const duplicate = { ...validEntry, repo: 'flair-hr/other-repo', tokenEnvVar: 'GITHUB_TOKEN__OTHER' };
-    expect(() => parseProjectRegistry([validEntry, duplicate])).toThrow(/duplicate product "product-a"/);
+    expect(() => parseProjectRegistry([validEntry, duplicate])).toThrow(/duplicate project "project-a"/);
   });
 
   it('throws naming a duplicate repo', () => {
-    const duplicate = { ...validEntry, product: 'product-c', tokenEnvVar: 'GITHUB_TOKEN__OTHER' };
-    expect(() => parseProjectRegistry([validEntry, duplicate])).toThrow(/duplicate repo "flair-hr\/product-a"/);
+    const duplicate = { ...validEntry, project: 'project-c', tokenEnvVar: 'GITHUB_TOKEN__OTHER' };
+    expect(() => parseProjectRegistry([validEntry, duplicate])).toThrow(/duplicate repo "flair-hr\/project-a"/);
   });
 
   it('throws naming a duplicate tokenEnvVar', () => {
-    const duplicate = { ...validEntry, product: 'product-c', repo: 'flair-hr/other-repo' };
+    const duplicate = { ...validEntry, project: 'project-c', repo: 'flair-hr/other-repo' };
     expect(() => parseProjectRegistry([validEntry, duplicate])).toThrow(
-      /duplicate tokenEnvVar "GITHUB_TOKEN__PRODUCT_A"/,
+      /duplicate tokenEnvVar "GITHUB_TOKEN__PROJECT_A"/,
     );
   });
 });

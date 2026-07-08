@@ -15,7 +15,7 @@ export const VerifyServiceSchema = z.object({
 });
 export type VerifyService = z.infer<typeof VerifyServiceSchema>;
 
-export const ProductConfigSchema = z.object({
+export const ProjectConfigSchema = z.object({
   image: z.string().min(1).optional(),
   services: z.array(VerifyServiceSchema).optional(),
   initCommands: z.array(z.string()).optional(),
@@ -26,10 +26,10 @@ export const ProductConfigSchema = z.object({
   escalation: ModelRefSchema.optional(),
   brakes: BrakesSchema,
 });
-export type ProductConfig = z.infer<typeof ProductConfigSchema>;
+export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 
-export const DEFAULT_PRODUCT_CONFIG: Omit<
-  ProductConfig,
+export const DEFAULT_PROJECT_CONFIG: Omit<
+  ProjectConfig,
   'fastVerifyCommands' | 'fullVerifyCommands' | 'image' | 'services' | 'initCommands'
 > = {
   stages: {},
@@ -45,7 +45,7 @@ export const DEFAULT_PRODUCT_CONFIG: Omit<
   brakes: { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 },
 };
 
-export class InvalidProductConfigError extends Error {
+export class InvalidProjectConfigError extends Error {
   constructor(
     message: string,
     public readonly issues?: unknown,
@@ -58,23 +58,23 @@ function formatZodError(err: ZodError): string {
   return err.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ');
 }
 
-export function parseProductConfig(raw: unknown): ProductConfig {
+export function parseProjectConfig(raw: unknown): ProjectConfig {
   if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
-    throw new InvalidProductConfigError('agentops.json must be a JSON object');
+    throw new InvalidProjectConfigError('agentops.json must be a JSON object');
   }
-  const rawConfig = raw as Partial<ProductConfig>;
+  const rawConfig = raw as Partial<ProjectConfig>;
   const merged = {
-    ...DEFAULT_PRODUCT_CONFIG,
+    ...DEFAULT_PROJECT_CONFIG,
     ...rawConfig,
-    stages: { ...DEFAULT_PRODUCT_CONFIG.stages, ...rawConfig.stages },
-    routing: { ...DEFAULT_PRODUCT_CONFIG.routing, ...rawConfig.routing },
-    brakes: { ...DEFAULT_PRODUCT_CONFIG.brakes, ...rawConfig.brakes },
+    stages: { ...DEFAULT_PROJECT_CONFIG.stages, ...rawConfig.stages },
+    routing: { ...DEFAULT_PROJECT_CONFIG.routing, ...rawConfig.routing },
+    brakes: { ...DEFAULT_PROJECT_CONFIG.brakes, ...rawConfig.brakes },
   };
   try {
-    return ProductConfigSchema.parse(merged);
+    return ProjectConfigSchema.parse(merged);
   } catch (err) {
     if (err instanceof ZodError) {
-      throw new InvalidProductConfigError(formatZodError(err), err.issues);
+      throw new InvalidProjectConfigError(formatZodError(err), err.issues);
     }
     throw err;
   }

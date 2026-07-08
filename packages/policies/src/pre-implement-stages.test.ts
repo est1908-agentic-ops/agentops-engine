@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import type { ProductConfig } from '@agentops/contracts';
+import type { ProjectConfig } from '@agentops/contracts';
 import { preImplementStages } from './pre-implement-stages';
 
-const baseConfig: ProductConfig = {
+const baseConfig: ProjectConfig = {
   fastVerifyCommands: [],
   fullVerifyCommands: [],
   stages: {},

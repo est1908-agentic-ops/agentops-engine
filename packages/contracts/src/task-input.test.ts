@@ -13,7 +13,7 @@ describe('TaskInputSchema', () => {
   it('parses a task with an issueRef', () => {
     const parsed = TaskInputSchema.parse({
       taskId: 'task-1',
-      product: 'demo',
+      project: 'demo',
       repo: 'demo/repo',
       issueRef: 'issue-42',
       goal: 'Add a widget',
@@ -25,7 +25,7 @@ describe('TaskInputSchema', () => {
   it('allows issueRef to be omitted for ad-hoc goal-driven tasks', () => {
     const parsed = TaskInputSchema.parse({
       taskId: 'task-2',
-      product: 'demo',
+      project: 'demo',
       repo: 'demo/repo',
       goal: 'Localize strings',
       config,

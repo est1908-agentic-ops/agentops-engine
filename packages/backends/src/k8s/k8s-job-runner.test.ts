@@ -83,12 +83,12 @@ describe('buildAgentJob', () => {
     ).toThrow(/CHANGEME/);
   });
 
-  it('refuses to build a Job when the product-supplied image (req.image) is still a placeholder', () => {
+  it('refuses to build a Job when the project-supplied image (req.image) is still a placeholder', () => {
     const paths = agentOpsArtifactPaths(baseRequest);
 
     expect(() =>
       buildAgentJob(
-        { ...baseRequest, image: 'ghcr.io/CHANGEME/some-product:CHANGEME' },
+        { ...baseRequest, image: 'ghcr.io/CHANGEME/some-project:CHANGEME' },
         createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
         { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
         paths,

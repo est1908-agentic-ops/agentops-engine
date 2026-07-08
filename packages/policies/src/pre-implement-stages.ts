@@ -1,9 +1,9 @@
-import type { ProductConfig, Stage } from '@agentops/contracts';
+import type { ProjectConfig, Stage } from '@agentops/contracts';
 
 export type TriageLevel = 'TRIVIAL' | 'STANDARD';
 
 export interface PreImplementInput {
-  config: ProductConfig;
+  config: ProjectConfig;
   triageLevel?: TriageLevel;
   hasHumanDesign: boolean;
   hasHumanPlan: boolean;

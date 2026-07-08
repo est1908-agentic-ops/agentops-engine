@@ -29,7 +29,7 @@ describe('DevCycle e2e: pushes the branch before opening the first PR', () => {
 
     const input: TaskInput = {
       taskId: 'push-before-pr-task',
-      product: 'demo',
+      project: 'demo',
       repo: 'demo/repo',
       issueRef: 'issue-1',
       goal: 'Add a widget',

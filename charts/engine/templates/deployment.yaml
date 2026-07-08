@@ -39,8 +39,8 @@ spec:
               value: "{{ .Values.image.repository }}/agent-runner:{{ .Values.image.agentRunnerTag }}"
             - name: AGENT_RUNNER_UID
               value: {{ .Values.agentRunnerUid | quote }}
-            {{- range $product, $cfg := .Values.projects }}
-            - name: {{ printf "GITHUB_TOKEN__%s" (upper (replace "-" "_" $product)) }}
+            {{- range $project, $cfg := .Values.projects }}
+            - name: {{ printf "GITHUB_TOKEN__%s" (upper (replace "-" "_" $project)) }}
               valueFrom:
                 secretKeyRef:
                   name: {{ $cfg.githubTokenSecretName }}

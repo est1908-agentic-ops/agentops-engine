@@ -45,7 +45,7 @@ describe('DevCycle e2e: happy path with one repair round', () => {
 
     const input: TaskInput = {
       taskId: 'happy-path-task',
-      product: 'demo',
+      project: 'demo',
       repo: 'demo/repo',
       issueRef: 'issue-1',
       goal: 'Add a widget',

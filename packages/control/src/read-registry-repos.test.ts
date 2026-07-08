@@ -9,22 +9,22 @@ describe('readRegistryRepos', () => {
   it('returns repo slugs without requiring any token env vars to be set', () => {
     const env = {
       PROJECT_REGISTRY_JSON: JSON.stringify([
-        { product: 'product-a', repo: 'flair-hr/product-a', trackerType: 'github', tokenEnvVar: 'GITHUB_TOKEN__PRODUCT_A' },
+        { project: 'project-a', repo: 'flair-hr/project-a', trackerType: 'github', tokenEnvVar: 'GITHUB_TOKEN__PROJECT_A' },
       ]),
     };
 
-    expect(readRegistryRepos(env)).toEqual(['flair-hr/product-a']);
+    expect(readRegistryRepos(env)).toEqual(['flair-hr/project-a']);
   });
 
   it('returns multiple repo slugs in registry order', () => {
     const env = {
       PROJECT_REGISTRY_JSON: JSON.stringify([
-        { product: 'product-a', repo: 'flair-hr/product-a', trackerType: 'github', tokenEnvVar: 'X' },
-        { product: 'product-b', repo: 'flair-hr/product-b', trackerType: 'github', tokenEnvVar: 'Y' },
+        { project: 'project-a', repo: 'flair-hr/project-a', trackerType: 'github', tokenEnvVar: 'X' },
+        { project: 'project-b', repo: 'flair-hr/project-b', trackerType: 'github', tokenEnvVar: 'Y' },
       ]),
     };
 
-    expect(readRegistryRepos(env)).toEqual(['flair-hr/product-a', 'flair-hr/product-b']);
+    expect(readRegistryRepos(env)).toEqual(['flair-hr/project-a', 'flair-hr/project-b']);
   });
 
   it('throws on a malformed PROJECT_REGISTRY_JSON', () => {

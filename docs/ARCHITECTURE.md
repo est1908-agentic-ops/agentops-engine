@@ -91,17 +91,17 @@ flowchart LR
 
 ### 5.1 Cluster base & GitOps
 - **k3s** single-node to start; nothing below assumes multi-node. Traefik (bundled) for ingress.
-- **ArgoCD** as the GitOps engine: one platform repo (app-of-apps) holds all manifests/Helm values; a fresh host bootstraps with `k3s install → argocd install → apply root app`. Everything else — Temporal, LGTM, LiteLLM, the product itself — reconciles from git. This also makes the platform *agent-operable*: an agent changes infrastructure by opening a PR against the platform repo, which goes through the same DevCycle pipeline as product code.
+- **ArgoCD** as the GitOps engine: one platform repo (app-of-apps) holds all manifests/Helm values; a fresh host bootstraps with `k3s install → argocd install → apply root app`. Everything else — Temporal, LGTM, LiteLLM, the project itself — reconciles from git. This also makes the platform *agent-operable*: an agent changes infrastructure by opening a PR against the platform repo, which goes through the same DevCycle pipeline as project code.
 - **Secrets: SOPS + age.** Secrets live encrypted in the same git repo (age recipients = ArgoCD's key + admin keys), decrypted only at deploy time via the KSOPS/helm-secrets plugin inside ArgoCD's repo-server. Consequence for agent safety: agents can read the whole platform repo (and even edit secret *structure*) without ever seeing plaintext values; the age private key exists only in the ArgoCD namespace, never in agent pods.
 - **TLS: step-ca** as internal certificate authority with an ACME provisioner; **cert-manager** points at it as an ACME issuer, so every internal service gets real, auto-renewed certificates. Its root cert is baked into agent-runner images — no self-signed warnings, no `NODE_TLS_REJECT_UNAUTHORIZED=0` creeping into agent-written code.
 - **DNS: Technitium DNS** serving an internal zone (e.g. `*.lab`) pointed at the cluster ingress: `temporal.lab`, `grafana.lab`, `git.lab`, `mail.lab`, preview deploys as `pr-123.app.lab`. No hosts-file sprawl, no `srv01:8443`-style addresses; combined with step-ca, internal URLs behave exactly like production ones — which matters because agents (and Playwright) hit them constantly.
 - **Mail: MailPit** as the SMTP sink for all non-prod outbound mail — test emails never reach real people. Its REST API doubles as a *test surface*: QASquad and ProductProbe agents verify signup confirmations, resets, and notification content by reading the trap.
-- **Container registry: self-hosted** (`gitactions.est1908.top`, valid Let's Encrypt TLS). Engine images (`agent-<backend>`, worker, gateway) and product images push here from CI over basic auth (`REGISTRY_USERNAME`/`REGISTRY_PASSWORD`); the cluster pulls via a basic-auth `imagePullSecrets` entry (`imagePullSecretName` chart value, default `registry-credentials`). Superseded the original GHCR choice (2026-07-06) once a self-hosted registry existed anyway — note this reopens the operational tradeoff GHCR was originally chosen to avoid (one more stateful service: GC, storage, backups, uptime).
+- **Container registry: self-hosted** (`gitactions.est1908.top`, valid Let's Encrypt TLS). Engine images (`agent-<backend>`, worker, gateway) and project images push here from CI over basic auth (`REGISTRY_USERNAME`/`REGISTRY_PASSWORD`); the cluster pulls via a basic-auth `imagePullSecrets` entry (`imagePullSecretName` chart value, default `registry-credentials`). Superseded the original GHCR choice (2026-07-06) once a self-hosted registry existed anyway — note this reopens the operational tradeoff GHCR was originally chosen to avoid (one more stateful service: GC, storage, backups, uptime).
 
 ### 5.2 Temporal
 - Official Helm chart, Postgres persistence (shared Postgres instance, separate DB).
 - Namespaces per environment (`prod-agents`, `dev-agents`) — Temporal doesn't create these on its own, so the engine chart's `temporal-namespace-job.yaml` pre-install/pre-upgrade hook runs an idempotent `temporal operator namespace create` (describes first, skips if already registered) against `temporalAddress`, keyed off the `temporal.namespace` value. Without it, a fresh Temporal install leaves the worker and gateway crash-looping on "Namespace X is not found".
-- **Workers**: one Deployment running the engine's workflow + activity code. Replicas + task-queue slots = concurrency. One worker fleet serves all repos and products (repo/product are workflow arguments).
+- **Workers**: one Deployment running the engine's workflow + activity code. Replicas + task-queue slots = concurrency. One worker fleet serves all repos and products (repo/project are workflow arguments).
 
 ### 5.3 Gateway (trigger layer)
 Small HTTP service (part of the engine repo):
@@ -137,49 +137,49 @@ Model routing policy lives in config: per stage (cheap model for `context`, stro
 Single ingestion point: **Grafana Alloy** exposes one OTLP endpoint for every app, worker, and agent pod. Nothing ships logs/traces directly to a backend — Alloy routes:
 
 - metrics → **Prometheus** (also scrapes k3s/Temporal/LiteLLM exporters)
-- logs → **Loki** (agent stdout/stderr, product logs, platform logs)
+- logs → **Loki** (agent stdout/stderr, project logs, platform logs)
 - traces → **Tempo** (agent runs are one trace: stage span → CLI span → LLM-call spans, via OpenLLMetry/OTel instrumentation)
 - dashboards/alerts → **Grafana** on top of all three (and yes — Loki, Tempo, Grafana: it does sing)
 
 | Layer | Question | Where |
 |---|---|---|
-| Infra/app | Is the platform healthy? Is the *product* healthy? | Prometheus + Loki + Grafana; GlitchTip or self-hosted Sentry for product errors |
+| Infra/app | Is the platform healthy? Is the *project* healthy? | Prometheus + Loki + Grafana; GlitchTip or self-hosted Sentry for project errors |
 | Orchestration | What did each task do, where is it stuck? | Temporal Web UI (every workflow, every retry), search attributes: repo, stage, status, backend |
 | Agent cognition | What did the agent think/spend? | Tempo traces (LLM spans carry prompt/token/cost attributes). Optional: Alloy fans LLM spans out to **Langfuse** too, if we want prompt-diff UX, scoring, and eval datasets beyond what Grafana gives |
 
 Everything queryable by agents: Healer and Meta-Optimizer read Temporal histories, Loki, and Tempo (and Langfuse if enabled) through read-only APIs. Instrumentation is OTel-standard, so backends stay swappable.
 
-### 5.7 Multi-product topology
+### 5.7 Multi-project topology
 
-**One shared agent-ops cluster serves all products** — the platform stack (Temporal, LGTM, ArgoCD, LiteLLM, step-ca, Technitium, MailPit) is not duplicated per product. Duplicating it would multiply resource/maintenance cost by N and fork the learning loop: eval scores, heal cases, budget analytics, and routing recommendations are most valuable aggregated across all products. The design is already multi-product: repo/product is a workflow argument, one worker fleet serves all repos.
+**One shared agent-ops cluster serves all products** — the platform stack (Temporal, LGTM, ArgoCD, LiteLLM, step-ca, Technitium, MailPit) is not duplicated per project. Duplicating it would multiply resource/maintenance cost by N and fork the learning loop: eval scores, heal cases, budget analytics, and routing recommendations are most valuable aggregated across all products. The design is already multi-project: repo/project is a workflow argument, one worker fleet serves all repos.
 
-**Per-product isolation inside the cluster:**
+**Per-project isolation inside the cluster:**
 
-- **Namespace per product** (`prod-a-agents`, `prod-a-preview`, …) for agent Jobs and preview deploys.
-- **ResourceQuota + LimitRange** per namespace — one product's QASquad can't starve another's DevCycle.
-- **NetworkPolicy** — product A's agents cannot reach product B's services or previews; all agents reach only forge, LiteLLM, and their own product's endpoints.
-- **Budget separation** — LiteLLM virtual keys per product×role; Temporal search attributes (`product`) make every dashboard, budget report, and routing recommendation sliceable per product.
-- **DNS/TLS** — per-product subzones (`pr-123.prod-a.lab`) via Technitium + step-ca, no cross-product ambiguity.
-- **Escalation path**: if a product ever needs hard isolation (untrusted code, client contract), give it a **vcluster** — a virtual k3s inside the shared one — before considering a physically separate cluster.
+- **Namespace per project** (`prod-a-agents`, `prod-a-preview`, …) for agent Jobs and preview deploys.
+- **ResourceQuota + LimitRange** per namespace — one project's QASquad can't starve another's DevCycle.
+- **NetworkPolicy** — project A's agents cannot reach project B's services or previews; all agents reach only forge, LiteLLM, and their own project's endpoints.
+- **Budget separation** — LiteLLM virtual keys per project×role; Temporal search attributes (`project`) make every dashboard, budget report, and routing recommendation sliceable per project.
+- **DNS/TLS** — per-project subzones (`pr-123.prod-a.lab`) via Technitium + step-ca, no cross-project ambiguity.
+- **Escalation path**: if a project ever needs hard isolation (untrusted code, client contract), give it a **vcluster** — a virtual k3s inside the shared one — before considering a physically separate cluster.
 
-**Production stays out.** Each product's prod runs on its own host/cluster, added to the central ArgoCD as a destination. Platform incidents, agent swarms, or noisy ProductProbe runs can never touch any prod; agents can't either — deploys happen only via ArgoCD sync.
+**Production stays out.** Each project's prod runs on its own host/cluster, added to the central ArgoCD as a destination. Platform incidents, agent swarms, or noisy ProductProbe runs can never touch any prod; agents can't either — deploys happen only via ArgoCD sync.
 
 ### 5.8 Repository layout (N products + 2)
 
 | Repo | Contents | Changed by |
 |---|---|---|
-| **`agentops-engine`** (greenfield) | Platform *code* monorepo: workflows, activities, ports, backends, Gateway, agent-runner Dockerfiles, shared role packs. Product-agnostic. CI builds & pushes images. See §5.9. | Humans + DevCycle (the platform develops itself) |
-| **`agentops-platform`** | Platform *state*: ArgoCD app-of-apps, Helm values for Temporal/LGTM/LiteLLM/step-ca/Technitium/MailPit, SOPS-encrypted secrets, per-cluster env overlays, **product registry** (one ArgoCD Application/ApplicationSet entry per product), pinned image tags. | Humans + agents via PR; ArgoCD watches only this repo |
-| **N product repos** | Product code + its own `deploy/` manifests (ArgoCD Application targets this path) + `agentops.json` agent config (zod-validated `ProductConfig`): verify commands, stage/model routing, prompts overrides, budgets. | Product DevCycle agents |
+| **`agentops-engine`** (greenfield) | Platform *code* monorepo: workflows, activities, ports, backends, Gateway, agent-runner Dockerfiles, shared role packs. Project-agnostic. CI builds & pushes images. See §5.9. | Humans + DevCycle (the platform develops itself) |
+| **`agentops-platform`** | Platform *state*: ArgoCD app-of-apps, Helm values for Temporal/LGTM/LiteLLM/step-ca/Technitium/MailPit, SOPS-encrypted secrets, per-cluster env overlays, **project registry** (one ArgoCD Application/ApplicationSet entry per project), pinned image tags. | Humans + agents via PR; ArgoCD watches only this repo |
+| **N project repos** | Project code + its own `deploy/` manifests (ArgoCD Application targets this path) + `agentops.json` agent config (zod-validated `ProjectConfig`): verify commands, stage/model routing, prompts overrides, budgets. | Project DevCycle agents |
 
 Why this split and not one monorepo:
 
 - **Code/state separation is the standard ArgoCD pattern** — it avoids the CI loop (image build commit → sync → build …): `agentops-engine` CI pushes an image, a bot/agent PR bumps the tag in `agentops-platform`, ArgoCD syncs. Rollback = git revert in one place.
-- **Blast-radius & access match repo boundaries**: product agents get write access only to their product repo; only platform-role agents (and humans) touch `agentops-platform`; SOPS secrets live where code-churning agents don't work daily.
-- **Deploy manifests live in the product repo** so an agent changes app code and its manifests in *one atomic PR* through one review gate — the gitops repo only registers the product and holds env-specific values/secrets.
-- **Onboarding a new product = one PR** to `agentops-platform` (register Application, namespace, quotas, LiteLLM keys, DNS subzone). An ApplicationSet generator can automate even that from a repo label. Concretely, for forge access: a **project registry** (`projects` map in the engine chart values, one entry per product — `repo`, `githubTokenSecretName`) replaces the single global `GITHUB_TOKEN` this repo shipped with through M2; the worker builds one scoped GitHub client per registered repo instead of sharing one token across every product. See [project-registry-design.md](superpowers/specs/2026-07-06-project-registry-design.md) for the full design and onboarding runbook.
+- **Blast-radius & access match repo boundaries**: project agents get write access only to their project repo; only platform-role agents (and humans) touch `agentops-platform`; SOPS secrets live where code-churning agents don't work daily.
+- **Deploy manifests live in the project repo** so an agent changes app code and its manifests in *one atomic PR* through one review gate — the gitops repo only registers the project and holds env-specific values/secrets.
+- **Onboarding a new project = one PR** to `agentops-platform` (register Application, namespace, quotas, LiteLLM keys, DNS subzone). An ApplicationSet generator can automate even that from a repo label. Concretely, for forge access: a **project registry** (`projects` map in the engine chart values, one entry per project — `repo`, `githubTokenSecretName`) replaces the single global `GITHUB_TOKEN` this repo shipped with through M2; the worker builds one scoped GitHub client per registered repo instead of sharing one token across every project. See [project-registry-design.md](superpowers/specs/2026-07-06-project-registry-design.md) for the full design and onboarding runbook.
 
-Not a product monorepo: products have different lifecycles, and access boundaries are the isolation mechanism (§5.7).
+Not a project monorepo: products have different lifecycles, and access boundaries are the isolation mechanism (§5.7).
 
 **`agentops-platform` structure:**
 
@@ -195,27 +195,27 @@ agentops-platform/
         argocd/  step-ca/  technitium/  mailpit/  glitchtip/
       engine/
         values.yaml           # engine chart values, pinned image tags
-      products/               # product registry
-        product-a.yaml        # Application → product repo /deploy path,
-        product-b.yaml        #   namespace, quotas, DNS subzone
-    prod-product-a/           # destination cluster defs (prod stays out, §5.7)
+      products/               # project registry
+        project-a.yaml        # Application → project repo /deploy path,
+        project-b.yaml        #   namespace, quotas, DNS subzone
+    prod-project-a/           # destination cluster defs (prod stays out, §5.7)
   secrets/                    # SOPS-encrypted (age)
     model-tokens/             # CLAUDE_CODE_OAUTH_TOKEN, CURSOR_API_KEY, z.ai, codex
     forge/  litellm/  smtp/
   .sops.yaml                  # age recipients, path rules
 ```
 
-**Product repo structure (each product):**
+**Project repo structure (each project):**
 
 ```
-product-a/
-  src/ ...                    # the product itself, any language
+project-a/
+  src/ ...                    # the project itself, any language
   deploy/                     # ArgoCD Application target
     base/  overlays/preview/  overlays/prod/
-  agentops.json               # ProductConfig: verify commands (fast/full),
+  agentops.json               # ProjectConfig: verify commands (fast/full),
                               #   stage→model routing, budgets, prompt overrides,
                               #   review mandate, hooks, triggers & jobs (§6.1)
-  agentops/prompts/           # product prompt packs (localization job, etc.)
+  agentops/prompts/           # project prompt packs (localization job, etc.)
   .github/workflows/ci.yaml   # CI the babysit loop watches
 ```
 
@@ -228,7 +228,7 @@ pnpm/TS monorepo, Temporal TS SDK. The load-bearing rule: **workflows are determ
 ```
 packages/
   contracts/    # zod schemas, the engine's spine: TaskEvent, StageResult,
-                # Verdict, RunStats, RoleManifest, ProductConfig
+                # Verdict, RunStats, RoleManifest, ProjectConfig
   ports/        # TrackerPort, ScmPort + adapters: github, gitea, linear
   backends/     # AgentBackend interface + adapters: claude, cursor, pi, codex, stub
                 # (spawn CLI, stream output, parse usage & sentinels)
@@ -253,7 +253,7 @@ Design decisions (where this improves on the prototype):
 2. **One activity contract for all agent execution.** `runAgent({backend, model, promptRef, workspaceRef, limits}) → {sentinel, usage, artifacts}` launches a K8s Job, heartbeats, kills on cancel. Workflows never know *how* agents run; swapping local-spawn for Jobs (or nanoClaw later) touches one activity.
 3. **Policies as pure functions.** The §2 semantics live in `policies/` with exhaustive unit tests — independent of Temporal, independent of backends. This is where the vibeteam lessons are encoded and protected against regression.
 4. **Temporal is the only state machine.** No event bus, no task DB. Postgres holds *projections only*: `agent_run_stats`, `heal_cases`, `repo_memory`, eval scores — written by activities, read by analytics and the meta-agents.
-5. **Product config lives in the product repo** (`agentops.json` or similar, zod-validated `ProductConfig`): verify commands, stage/model routing, budgets, prompt overrides. The engine ships defaults.
+5. **Project config lives in the project repo** (`agentops.json` or similar, zod-validated `ProjectConfig`): verify commands, stage/model routing, budgets, prompt overrides. The engine ships defaults.
 6. **Testing built in from the start:** Temporal's `TestWorkflowEnvironment` for time-skipped workflow tests (babysit timers, brakes); the `stub` backend for full-pipeline e2e without spending tokens; golden-file snapshots for prompts.
 7. **Worktrees:** base-clone cache PVC + `git worktree` per task, owned by workspace activities — same mechanics the prototype validated.
 
@@ -261,10 +261,10 @@ Design decisions (where this improves on the prototype):
 
 Three UIs come for free and are *not* rebuilt: **Temporal Web UI** (workflow forensics: history, retries, stack traces, terminate), **Grafana** (metrics, costs, alerts), and the **tracker** (creating/labeling an issue *is* the primary "run agent" button). **Mission Control** is a React SPA (`packages/ui` + small BFF over Temporal SDK, Postgres projections, and Loki; served at `control.lab`), covering only what those three can't:
 
-- **Board:** all tasks across products/workflow types (Temporal visibility search on `product`, `stage`, `status`, `backend`), one row per running/blocked/recent workflow.
-- **Actions:** start a `DevCycle` (pick repo + issue, or ad-hoc prompt task), `resume`/`clarify` blocked tasks, stop/cancel, retry, "run now" for any Schedule (BugHunt tonight, not Sunday), pause a product.
+- **Board:** all tasks across products/workflow types (Temporal visibility search on `project`, `stage`, `status`, `backend`), one row per running/blocked/recent workflow.
+- **Actions:** start a `DevCycle` (pick repo + issue, or ad-hoc prompt task), `resume`/`clarify` blocked tasks, stop/cancel, retry, "run now" for any Schedule (BugHunt tonight, not Sunday), pause a project.
 - **Run detail:** stage timeline with verdicts and token/cost per stage, live agent output (Loki tail), diff preview, and deep links into Temporal UI / Grafana / Langfuse for anything deeper.
-- **Budgets:** subscription window usage (prompts left in the 5h window per plan), spend per product×role, brake events.
+- **Budgets:** subscription window usage (prompts left in the 5h window per plan), spend per project×role, brake events.
 - **Knowledge:** browse `heal_cases`, `repo_memory`, eval scores; edit role manifests (Phase 4) — edits land as PRs to the engine repo, not direct writes.
 
 Auth: behind Traefik + step-ca; single-user basic auth/OIDC to start. Everything Mission Control does goes through the same engine APIs agents use — it's a client, not a second control path. Live updates via SSE/WebSocket (workflow events + Loki tail), so a running agent's output streams into the browser.
@@ -280,13 +280,13 @@ Auth: behind Traefik + step-ca; single-user basic auth/OIDC to start. Everything
 | `SecurityReview` | Schedule | Recurrent security audit; SAST tools (Semgrep/Trivy) + agent review; files issues |
 | `EvalRun` | Schedule / on model change | Runs agent evals; writes scores to Postgres; feeds routing policy |
 | `QASquad` | Schedule / pre-release | N parallel QA agent sessions against a preview deploy (Playwright MCP); email flows verified via MailPit API; files issues |
-| `ProductProbe` | Schedule | "Fake company" personas exercise the product end-to-end via browser/API, including email loops through MailPit; UX findings → issues |
+| `ProductProbe` | Schedule | "Fake company" personas exercise the project end-to-end via browser/API, including email loops through MailPit; UX findings → issues |
 | `MetaOptimize` | Schedule (weekly) | Reads Temporal histories + Langfuse + `agent_run_stats`; files issues *on the platform repo* about wasted tokens, flaky stages, slow models |
 | `BudgetReport` | Schedule (daily) | Aggregates spend/speed per repo/role/model; Grafana dashboard + report; recommends routing changes |
 
 All non-DevCycle workflows reuse the same Agent Runner and ports — a "role agent" (Phase 4) is just: workflow definition + prompt pack + allowed tools + budget. Adding marketing or cost-adviser agents is config + one workflow file, not new infrastructure.
 
-### 6.1 Product-defined triggers & jobs
+### 6.1 Project-defined triggers & jobs
 
 Products extend the platform **declaratively** — `agentops.json` grows two sections, validated by `contracts`, requiring no engine code:
 
@@ -296,7 +296,7 @@ Products extend the platform **declaratively** — `agentops.json` grows two sec
     {
       "name": "external-errors",           // e.g. Sentry SaaS, Rollbar, client's system
       "type": "webhook",                   // or "poll" for sources without webhooks
-      "secretRef": "product-a/errors-api", // SOPS secret in agentops-platform
+      "secretRef": "project-a/errors-api", // SOPS secret in agentops-platform
       "poll": { "every": "5m", "cursor": "lastSeenId" },   // poll-type only
       "filters": { "environment": "production", "minEvents": 10 },
       "dedupe": "fingerprint",             // one task per error group, not per event
@@ -318,19 +318,19 @@ Products extend the platform **declaratively** — `agentops.json` grows two sec
 
 How it runs:
 
-- **Reconciliation:** a `ConfigSync` workflow watches product-repo pushes (via Gateway) and reconciles declared triggers/jobs into reality — Temporal Schedules created/updated/deleted, Gateway webhook routes registered, poll loops (Schedule + fetch activity with durable cursor) started. Config *is* the state; deleting the entry deletes the automation.
-- **Webhook triggers** get a per-trigger URL + secret; payloads are normalized to `TaskEvent` by a mapping the trigger declares (or a small adapter in `ports/` if the source is common enough to share — that's the one case that touches engine code, once per *source type*, reusable by every product).
+- **Reconciliation:** a `ConfigSync` workflow watches project-repo pushes (via Gateway) and reconciles declared triggers/jobs into reality — Temporal Schedules created/updated/deleted, Gateway webhook routes registered, poll loops (Schedule + fetch activity with durable cursor) started. Config *is* the state; deleting the entry deletes the automation.
+- **Webhook triggers** get a per-trigger URL + secret; payloads are normalized to `TaskEvent` by a mapping the trigger declares (or a small adapter in `ports/` if the source is common enough to share — that's the one case that touches engine code, once per *source type*, reusable by every project).
 - **Poll triggers** cover sources without webhooks: durable cursor in workflow state, dedupe by fingerprint so a noisy error group becomes one task.
-- **Jobs** are the generalized recurrent pattern (localization, dependency bumps, docs regeneration, changelog writing): schedule + prompt pack + budget, output as PR or filed issues. Prompt packs live in the product repo (`agentops/prompts/`), so iterating on the localization prompt is a normal product PR — reviewable, revertable, and improvable by agents themselves.
+- **Jobs** are the generalized recurrent pattern (localization, dependency bumps, docs regeneration, changelog writing): schedule + prompt pack + budget, output as PR or filed issues. Prompt packs live in the project repo (`agentops/prompts/`), so iterating on the localization prompt is a normal project PR — reviewable, revertable, and improvable by agents themselves.
 - Everything downstream is unchanged: same DevCycle policies, brakes, babysit, observability, and budget accounting — a localization run shows up in Grafana next to everything else.
 
 ### 6.2 Worked example: marketing agent (changelog → marketing site)
 
-A product wants its web-marketing site updated whenever a release ships. This composes existing pieces — no engine changes — and exposes one pattern worth naming: **cross-repo tasks** (trigger fires in one repo, the PR lands in another).
+A project wants its web-marketing site updated whenever a release ships. This composes existing pieces — no engine changes — and exposes one pattern worth naming: **cross-repo tasks** (trigger fires in one repo, the PR lands in another).
 
-1. **The marketing site is just another product**: its own repo with `deploy/` (so it gets preview deploys at `pr-N.marketing.lab`) and its own `agentops.json` — verify commands are things like build + linkcheck, not unit tests.
+1. **The marketing site is just another project**: its own repo with `deploy/` (so it gets preview deploys at `pr-N.marketing.lab`) and its own `agentops.json` — verify commands are things like build + linkcheck, not unit tests.
 2. **The role lives with the content owner**: `agentops/prompts/marketing-writer/` *in the marketing-site repo* — brand voice, tone rules, what never to promise. The site owns its voice; improving it is a PR to the site repo.
-3. **The product declares the trigger**: in product-a's `agentops.json` — `{"triggers": [{"name": "release-to-marketing", "type": "webhook", "on": "release.published", "start": {"workflow": "DevCycle", "targetRepo": "marketing-site", "role": "marketing-writer", "context": ["changelog", "releaseNotes"]}}]}`. `targetRepo` is the cross-repo bit: the workflow's worktree, verify commands, and PR all belong to the target repo, while the release diff and notes arrive as task context.
+3. **The project declares the trigger**: in project-a's `agentops.json` — `{"triggers": [{"name": "release-to-marketing", "type": "webhook", "on": "release.published", "start": {"workflow": "DevCycle", "targetRepo": "marketing-site", "role": "marketing-writer", "context": ["changelog", "releaseNotes"]}}]}`. `targetRepo` is the cross-repo bit: the workflow's worktree, verify commands, and PR all belong to the target repo, while the release diff and notes arrive as task context.
 4. **Same pipeline, different gate**: DevCycle runs as usual (design/plan skippable via triage for content tasks), preview deploy lets a reviewer *see* the page. For public-facing content, the role manifest sets `approval: "human"` — the workflow parks on a Temporal signal before merge, surfaced as an approve button in Mission Control (and a `blocked`-style tracker comment). Brakes, budget accounting, and observability apply unchanged; the marketing agent's tokens show up in Grafana per role.
 
 The same shape covers release notes → blog posts, docs-site sync, App Store descriptions — any "content follows code" automation: register target repo, write role pack there, declare trigger at the source.
@@ -339,11 +339,11 @@ The same shape covers release notes → blog posts, docs-site sync, App Store de
 
 Support is a second **workload kind**: conversational, latency-sensitive, always-on — a Deployment, not a K8s Job; per-message LLM calls, not a task pipeline. The role model splits accordingly: `kind: workflow` (everything above) vs `kind: service`. A serving role manifest declares channels, knowledge sources, tools, model, and budget; the engine ships one generic `agent-service` runtime that loads it.
 
-- **Knowledge:** RAG over product docs, changelogs, release notes, and (internal only) code/issues/heal cases. Embeddings in **pgvector** on the existing Postgres; an indexer job (§6.1-style, on push/release) keeps it fresh. No new database.
+- **Knowledge:** RAG over project docs, changelogs, release notes, and (internal only) code/issues/heal cases. Embeddings in **pgvector** on the existing Postgres; an indexer job (§6.1-style, on push/release) keeps it fresh. No new database.
 - **Channels:** internal — Slack/Mission Control chat, full knowledge incl. code and internal issues. Public — website widget/email via **Chatwoot** (self-hosted OSS helpdesk) as the channel hub: the agent answers as a Chatwoot bot, humans see every conversation, and takeover is one click.
 - **The loop back into the pipeline:** when a conversation reveals a real bug or feature request, the support agent files a deduplicated tracker issue (fingerprint on symptom) with the conversation attached — public complaints become DevCycle tasks. This is the platform's front-door sensor.
 - **Public hardening (non-negotiable):** read-only tools only (search knowledge, read docs) — no repo, no shell, no MCP with side effects; treat all user input as hostile (prompt-injection assumption); per-session and per-day token caps via a dedicated LiteLLM virtual key; rate limiting at Traefik; separate namespace with egress locked to LiteLLM only; low-confidence → hand off to human, never guess about billing/security/legal.
-- **Model lane:** serving traffic goes through **LiteLLM** (API lane — subscriptions' 5h windows don't fit 24/7 serving); cheap model default, escalation to a stronger model on low confidence. Full OTel tracing per conversation; support cost per product is one more Grafana panel.
+- **Model lane:** serving traffic goes through **LiteLLM** (API lane — subscriptions' 5h windows don't fit 24/7 serving); cheap model default, escalation to a stronger model on low confidence. Full OTel tracing per conversation; support cost per project is one more Grafana panel.
 - **Escalation asymmetry:** internal agent may *do* things (query Temporal, restart a Schedule) via the same engine APIs Mission Control uses; the public agent can only *know* things and *file* things.
 
 ### One platform for dev work and prod fixing — deliberately
@@ -411,7 +411,7 @@ Second+third backends (`pi`, `cursor`); LiteLLM with virtual keys and hard caps;
 *Done when:* an injected agent failure and an injected prod exception each end in a merged fix or a well-reasoned human escalation.
 
 **M7 — Recurrent quality → Phase 3 gate.**
-Temporal Schedules: `BugHunt`, `SecurityReview` (Semgrep/Trivy + agent), `EvalRun`; preview deploys per PR (`pr-N.app.lab`); `QASquad` + `ProductProbe` against previews using Playwright + MailPit API. `ConfigSync` + product-defined triggers & jobs (§6.1) — external error sources and product jobs like localization become pure config.
+Temporal Schedules: `BugHunt`, `SecurityReview` (Semgrep/Trivy + agent), `EvalRun`; preview deploys per PR (`pr-N.app.lab`); `QASquad` + `ProductProbe` against previews using Playwright + MailPit API. `ConfigSync` + project-defined triggers & jobs (§6.1) — external error sources and project jobs like localization become pure config.
 *Done when:* recurring flows file issues that flow through the pipeline unattended; at least one such fix merges per week.
 
 **M8 — Roles as config → Phase 4 gate.**
@@ -419,7 +419,7 @@ Temporal Schedules: `BugHunt`, `SecurityReview` (Semgrep/Trivy + agent), `EvalRu
 *Done when:* a brand-new role (e.g. cost adviser) goes from manifest PR to first useful output with zero engine code changes.
 
 **M9 — Budget intelligence → Phase 5 gate.**
-`BudgetReport` schedule; spend/speed dashboards per product×role×model; routing recommendations backed by `EvalRun` scores.
+`BudgetReport` schedule; spend/speed dashboards per project×role×model; routing recommendations backed by `EvalRun` scores.
 *Done when:* one routing recommendation is accepted and shows measured savings at equal quality.
 
 ## 9. Risks & open questions

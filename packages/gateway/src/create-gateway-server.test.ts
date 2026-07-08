@@ -41,7 +41,7 @@ describe('createGatewayServer', () => {
       webhookSecret: SECRET,
       triggerLabel: TRIGGER_LABEL,
       registry: [
-        { product: 'my-product', repo: 'octocat/hello-world', trackerType: 'github', tokenEnvVar: 'X', token: 't' },
+        { project: 'my-project', repo: 'octocat/hello-world', trackerType: 'github', tokenEnvVar: 'X', token: 't' },
       ],
       buildScm: () => registeredScm,
     };
@@ -86,10 +86,10 @@ describe('createGatewayServer', () => {
     expect(res.status).toBe(202);
     expect(start).toHaveBeenCalledTimes(1);
     const [, options] = start.mock.calls[0];
-    expect(options.args[0]).toMatchObject({ product: 'my-product', repo: 'octocat/hello-world', goal: 'Add a widget' });
+    expect(options.args[0]).toMatchObject({ project: 'my-project', repo: 'octocat/hello-world', goal: 'Add a widget' });
   });
 
-  it('finds a product config stored at .agentops/agentops.json, not just repo-root agentops.json', async () => {
+  it('finds a project config stored at .agentops/agentops.json, not just repo-root agentops.json', async () => {
     registeredScm.seedFile('octocat/hello-world', '.agentops/agentops.json', JSON.stringify({ fastVerifyCommands: ['pnpm test'] }));
     const body = JSON.stringify(labeledPayload());
     const res = await post(port, '/webhooks/github', body, {

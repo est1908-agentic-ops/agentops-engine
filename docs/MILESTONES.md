@@ -31,7 +31,7 @@ k3s + ArgoCD + SOPS/age bootstrap (see `agentops-platform`); Technitium + step-c
 
 **Status (2026-07-06):** all 8 ArgoCD Applications `Synced`/`Healthy` on a rebuilt host — the infra half of the gate holds. The actual gate (a real issue → real in-cluster PR) has **not** been executed yet. Remaining before it can run: (1) a way to invoke `engine start --issue <N>` against the in-cluster Temporal (README's port-forward runbook is written but unexercised), (2) real `GITHUB_TOKEN`/z.ai `ANTHROPIC_AUTH_TOKEN` values in place of today's placeholders, (3) confirm the agent-runner Job pod actually receives the `claude-credentials` secret's env vars. None of these are new engineering — they're the last mile of an already-built path.
 
-**Hardening (2026-07-06, implementation in progress):** M1/M2 shipped with a single global `GITHUB_TOKEN` shared by every product/repo the worker fleet ever touches — a problem as soon as a second real product needs its own least-privilege credential. A **project registry** (per-project GitHub tokens, chart-driven) replaces it; see [project-registry-design.md](superpowers/specs/2026-07-06-project-registry-design.md) for the engine-side design and the runbook for onboarding a new repo/product. The registry's *data* and each project's SOPS-encrypted secret live in `agentops-platform`, not here — see that repo's [forge-project-secrets-design.md](https://github.com/flair-hr/agentops-platform/blob/main/docs/superpowers/specs/2026-07-06-forge-project-secrets-design.md) for how a per-project token is encrypted, wired through KSOPS, and materialized into the cluster. **Not on the critical path for a single product** — one shared token is fine until product #2 shows up; this is a prerequisite for M5's "two repos" done-when criterion, not for M2's gate.
+**Hardening (2026-07-06, implementation in progress):** M1/M2 shipped with a single global `GITHUB_TOKEN` shared by every project/repo the worker fleet ever touches — a problem as soon as a second real project needs its own least-privilege credential. A **project registry** (per-project GitHub tokens, chart-driven) replaces it; see [project-registry-design.md](superpowers/specs/2026-07-06-project-registry-design.md) for the engine-side design and the runbook for onboarding a new repo/project. The registry's *data* and each project's SOPS-encrypted secret live in `agentops-platform`, not here — see that repo's [forge-project-secrets-design.md](https://github.com/flair-hr/agentops-platform/blob/main/docs/superpowers/specs/2026-07-06-forge-project-secrets-design.md) for how a per-project token is encrypted, wired through KSOPS, and materialized into the cluster. **Not on the critical path for a single project** — one shared token is fine until project #2 shows up; this is a prerequisite for M5's "two repos" done-when criterion, not for M2's gate.
 
 **Also (2026-07-06):** the single-image consolidation for agent-CLI backends (`images/agent-claude/` → `images/agent-runner/`, both `claude` and `pi` in one image) landed, and `pi` now runs as a real K8s Job in-cluster instead of falling back to a local process (it previously would have failed silently in that mode). Each backend has its own auth secret (`CLAUDE_AUTH_SECRET_NAME`/`PI_AUTH_SECRET_NAME`) — no longer sharing one.
 
@@ -67,7 +67,7 @@ Alloy + LGTM; OTel spans from workers and runner Jobs; `agent_run_stats` project
 
 ## M7 — Recurrent quality → Phase 3 gate
 
-Schedules: `BugHunt`, `SecurityReview` (Semgrep/Trivy + agent), `EvalRun`; preview deploys (`pr-N.app.lab`); `QASquad` + `ProductProbe` (Playwright + MailPit API); `ConfigSync` + product-defined triggers & jobs (ARCHITECTURE.md §6.1).
+Schedules: `BugHunt`, `SecurityReview` (Semgrep/Trivy + agent), `EvalRun`; preview deploys (`pr-N.app.lab`); `QASquad` + `ProductProbe` (Playwright + MailPit API); `ConfigSync` + project-defined triggers & jobs (ARCHITECTURE.md §6.1).
 
 **Done when:** recurring flows file issues that flow through the pipeline unattended; ≥1 such fix merges per week.
 
@@ -79,6 +79,6 @@ Schedules: `BugHunt`, `SecurityReview` (Semgrep/Trivy + agent), `EvalRun`; previ
 
 ## M9 — Budget intelligence → Phase 5 gate
 
-`BudgetReport` schedule; spend/speed dashboards per product×role×model; routing recommendations backed by `EvalRun` scores.
+`BudgetReport` schedule; spend/speed dashboards per project×role×model; routing recommendations backed by `EvalRun` scores.
 
 **Done when:** one routing recommendation is accepted and shows measured savings at equal quality.
