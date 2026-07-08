@@ -124,3 +124,72 @@ describe('createGatewayServer', () => {
     expect(start).not.toHaveBeenCalled();
   });
 });
+
+import { encryptForManagedProject, generateManagedProjectKeyPair } from '@agentops/activities';
+
+describe('createGatewayServer with a managed-project registry', () => {
+  let server: ReturnType<typeof createGatewayServer>;
+  let port: number;
+  let start: ReturnType<typeof vi.fn>;
+  let privateKey: string;
+
+  beforeEach(async () => {
+    start = vi.fn().mockResolvedValue(undefined);
+    const keyPair = generateManagedProjectKeyPair();
+    privateKey = keyPair.privateKey;
+    const registeredScm = new MemoryScmPort();
+    const managedProjectDeps = {
+      store: {
+        async get(repo: string) {
+          return repo === 'octocat/hello-world'
+            ? { id: '1', project: 'my-project', repo, credentialSet: true, config: null, createdAt: '', updatedAt: '' }
+            : null;
+        },
+        async getEncryptedToken(repo: string) {
+          return repo === 'octocat/hello-world' ? encryptForManagedProject(keyPair.publicKey, 'db-token') : null;
+        },
+      } as never,
+      privateKey,
+    };
+    const deps: GatewayDeps = {
+      client: { workflow: { start } } as never,
+      taskQueue: 'agentops-devcycle',
+      webhookSecret: SECRET,
+      triggerLabel: TRIGGER_LABEL,
+      registry: [], // deliberately empty -- proves the DB path resolved this, not the static one
+      buildScm: () => registeredScm,
+      managedProjectDeps,
+    };
+    server = createGatewayServer(deps);
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    port = (server.address() as AddressInfo).port;
+  });
+
+  afterEach(() => {
+    server.close();
+  });
+
+  it('starts devCycle for a repo that only the DB registry has, not the static one', async () => {
+    const body = JSON.stringify(labeledPayload());
+    const res = await post(port, '/webhooks/github', body, {
+      'content-type': 'application/json',
+      'x-github-event': 'issues',
+      'x-hub-signature-256': sign(body),
+    });
+    expect(res.status).toBe(202);
+    expect(start).toHaveBeenCalledTimes(1);
+    const [, options] = start.mock.calls[0];
+    expect(options.args[0]).toMatchObject({ project: 'my-project', repo: 'octocat/hello-world', goal: 'Add a widget' });
+  });
+
+  it('still falls through to "no project registered" for a repo neither source has', async () => {
+    const body = JSON.stringify(labeledPayload({ repository: { full_name: 'octocat/unregistered' } }));
+    const res = await post(port, '/webhooks/github', body, {
+      'content-type': 'application/json',
+      'x-github-event': 'issues',
+      'x-hub-signature-256': sign(body),
+    });
+    expect(res.status).toBe(202);
+    expect(start).not.toHaveBeenCalled();
+  });
+});
