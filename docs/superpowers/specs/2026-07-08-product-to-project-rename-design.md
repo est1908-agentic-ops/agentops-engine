@@ -19,9 +19,12 @@ This is a pure rename: swap the word `product` → `project` everywhere it names
 | `packages/cli` | `main.ts`: `resolveProjectEntry(registry, product, repo)` → `(registry, project, repo)`; `cmdStart(taskId, goal, product, repo, ...)` → `project`; CLI flag `--product` → `--project` (keep no deprecated alias — this is pre-webhook, operator-only tooling, not a public API) |
 | `packages/worker` | log line `entry.product` → `entry.project` |
 | `packages/policies` | `ProductConfig` type references → `ProjectConfig` |
-| `packages/activities` | `load-project-registry.ts`: `entry.product` → `entry.project`, error strings |
+| `packages/activities` | `load-project-registry.ts`: `entry.product` → `entry.project`, error strings; `load-product-config.ts` → `load-project-config.ts` (+ `loadProductConfig` → `loadProjectConfig`); `create-activities.ts`: `ProductConfig`/`parseProductConfig`/`loadProductConfig` imports, `resolveRepoConfig`'s `{ product }` return field → `{ project }` |
+| `packages/workflows` | `platform-activities-api.ts`: `PlatformActivities.resolveRepoConfig` return type's `product` field → `project`, `ProductConfig` → `ProjectConfig`; `platform.ts`: comment + `product: resolved.product` → `project: resolved.project` |
+| `packages/backends` | `k8s-job-runner.ts` + its test: comments/test descriptions about "a product's own agentops.json" → "a project's own agentops.json" (its example placeholder image string too, for consistency). **Excluded:** `claude-backend.ts`'s "that's a product decision (what budget?)" — generic English usage (a product-management decision), not this concept — leave untouched. |
+| `packages/control` | `read-registry-repos.test.ts` fixture data (`product:` field, `PRODUCT_A` env var name) — the non-test `read-registry-repos.ts` itself has no `product` reference. |
 | `charts/engine` | `_helpers.tpl`, `deployment.yaml`, `gateway-deployment.yaml`: Helm loop var `$product` → `$project`; `values.yaml` comments |
-| `docs/ARCHITECTURE.md`, `docs/MILESTONES.md`, `docs/M0-SPEC.md`, `AGENTS.md` | terminology pass: "product" → "project" wherever it means this concept (e.g. "Multi-product topology" → "Multi-project topology", "N product repos" → "N project repos", `agentops.json` description, per-product namespaces/quotas language) |
+| `docs/ARCHITECTURE.md`, `docs/MILESTONES.md`, `docs/M0-SPEC.md` | terminology pass: "product" → "project" wherever it means this concept (e.g. "Multi-product topology" → "Multi-project topology", "N product repos" → "N project repos", `agentops.json` description, per-product namespaces/quotas language). **Excluded:** generic English uses of "product" meaning "the software being built" (e.g. ARCHITECTURE.md line 5's "improve a product with minimal human involvement") — judgment call per occurrence, not a blind pass. `AGENTS.md` has zero occurrences — nothing to change there. |
 
 **Out of scope:**
 - Dated historical specs under `docs/superpowers/specs/*.md` and `docs/superpowers/plans/*.md` — those are point-in-time records (the org-migration memory already established this repo treats stale references in dated docs as acceptable history, not something retroactively fixed).
@@ -35,11 +38,12 @@ Contracts first (AGENTS.md rule 3), then consumers, matching the import graph so
 
 1. `packages/contracts` (schemas, types, error class, field names)
 2. `packages/policies`, `packages/activities` (consumers of the contracts types)
-3. `packages/cli`, `packages/gateway`, `packages/worker` (consumers + their own local `product` vars)
-4. `charts/engine` (Helm templates + values comments)
-5. `docs/ARCHITECTURE.md`, `docs/MILESTONES.md`, `docs/M0-SPEC.md`, `AGENTS.md`
+3. `packages/workflows`, `packages/backends`, `packages/control` (further consumers of `ProductConfig`/registry entries pulled in by the merge from `main` after this doc's first draft)
+4. `packages/cli`, `packages/gateway`, `packages/worker` (consumers + their own local `product` vars)
+5. `charts/engine` (Helm templates + values comments)
+6. `docs/ARCHITECTURE.md`, `docs/MILESTONES.md`, `docs/M0-SPEC.md`
 
-One PR is fine given the size (164 code occurrences, no behavioral change) — this doesn't need per-step PRs the way a risky migration would.
+One PR is fine given the size (192 code occurrences as of the post-merge recount, no behavioral change) — this doesn't need per-step PRs the way a risky migration would.
 
 ## 4. Verification
 
