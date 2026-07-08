@@ -144,14 +144,14 @@ describe('GithubScmPort — readFile', () => {
 });
 
 describe('GithubScmPort — push', () => {
-  it('runs git push origin <branch> in the given workspace, with no token handling here', async () => {
+  it('force-pushes origin <branch> in the given workspace, with no token handling here', async () => {
     const client = fakeClient();
     const { git, calls } = fakeGit();
     const scm = new GithubScmPort(client, git);
 
     await scm.push('octocat/hello-world', '/tmp/workspace', 'agentops/t1', 'hash-1');
 
-    expect(calls).toEqual([{ args: ['push', 'origin', 'agentops/t1'], cwd: '/tmp/workspace' }]);
+    expect(calls).toEqual([{ args: ['push', '--force', 'origin', 'agentops/t1'], cwd: '/tmp/workspace' }]);
   });
 
   it('throws if the push fails', async () => {
