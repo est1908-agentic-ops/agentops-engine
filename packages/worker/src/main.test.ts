@@ -4,7 +4,52 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MemoryWorkspaceManager, WorkspaceManager } from '@agentops/activities';
 import { MemoryScmPort, MemoryTrackerPort } from '@agentops/ports';
-import { buildActivityDependencies, resolveWorkspacesDir } from './main';
+import { assertLiveBackendConfig, buildActivityDependencies, resolveWorkspacesDir } from './main';
+
+const validLiveEnv: NodeJS.ProcessEnv = {
+  AGENT_RUNNER_IMAGE: 'gitactions.est1908.top/agentic-ops/agent-runner:abc123',
+  LITELLM_API_KEY: 'sk-real-key',
+  CLAUDE_AUTH_SECRET_NAME: 'claude-credentials',
+  PI_AUTH_SECRET_NAME: 'pi-credentials',
+};
+
+describe('assertLiveBackendConfig', () => {
+  it('passes silently when every in-cluster backend setting is real', () => {
+    expect(() => assertLiveBackendConfig(validLiveEnv)).not.toThrow();
+  });
+
+  it('throws when AGENT_RUNNER_IMAGE is unset', () => {
+    const { AGENT_RUNNER_IMAGE: _drop, ...rest } = validLiveEnv;
+    expect(() => assertLiveBackendConfig(rest)).toThrow(/AGENT_RUNNER_IMAGE/);
+  });
+
+  it('throws when AGENT_RUNNER_IMAGE is still the placeholder', () => {
+    expect(() =>
+      assertLiveBackendConfig({ ...validLiveEnv, AGENT_RUNNER_IMAGE: 'ghcr.io/CHANGEME/agentops-engine/agent-runner:CHANGEME' }),
+    ).toThrow(/AGENT_RUNNER_IMAGE/);
+  });
+
+  it('throws when LITELLM_API_KEY is unset', () => {
+    const { LITELLM_API_KEY: _drop, ...rest } = validLiveEnv;
+    expect(() => assertLiveBackendConfig(rest)).toThrow(/LITELLM_API_KEY/);
+  });
+
+  it('throws when CLAUDE_AUTH_SECRET_NAME is unset', () => {
+    const { CLAUDE_AUTH_SECRET_NAME: _drop, ...rest } = validLiveEnv;
+    expect(() => assertLiveBackendConfig(rest)).toThrow(/CLAUDE_AUTH_SECRET_NAME/);
+  });
+
+  it('throws when PI_AUTH_SECRET_NAME is unset', () => {
+    const { PI_AUTH_SECRET_NAME: _drop, ...rest } = validLiveEnv;
+    expect(() => assertLiveBackendConfig(rest)).toThrow(/PI_AUTH_SECRET_NAME/);
+  });
+
+  it('lists every missing setting at once, not just the first', () => {
+    expect(() => assertLiveBackendConfig({})).toThrow(
+      /AGENT_RUNNER_IMAGE.*LITELLM_API_KEY.*CLAUDE_AUTH_SECRET_NAME.*PI_AUTH_SECRET_NAME/s,
+    );
+  });
+});
 
 const registry = [
   { product: 'demo', repo: 'octocat/demo', trackerType: 'github' as const, tokenEnvVar: 'GITHUB_TOKEN__DEMO', token: 'fake-token' },

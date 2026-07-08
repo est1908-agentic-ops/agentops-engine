@@ -96,6 +96,18 @@ export function buildAgentJob(
   paths: ReturnType<typeof agentOpsArtifactPaths>,
 ): V1Job {
   const args = spec.buildArgs(req);
+  const image = req.image ?? spec.image;
+  // A "CHANGEME" placeholder means whoever wired this up (an operator's
+  // AGENT_RUNNER_IMAGE, or a product's own agentops.json) never got replaced
+  // with a real image -- letting that reach the cluster means an
+  // ImagePullBackOff that eats the activity's timeout before failing, instead
+  // of a clear error at the one point that actually knows the image is fake.
+  if (image.includes('CHANGEME')) {
+    throw new Error(
+      `refusing to build a Job with a placeholder image ("${image}") -- set a real image via the product's ` +
+        'agentops.json "image" field or the worker\'s AGENT_RUNNER_IMAGE env var.',
+    );
+  }
   const envFrom = [
     ...(opts.authSecretName ? [{ secretRef: { name: opts.authSecretName } }] : []),
     ...(opts.additionalSecretNames ?? []).map((name) => ({ secretRef: { name } })),
@@ -130,7 +142,7 @@ export function buildAgentJob(
           containers: [
             {
               name: 'agent',
-              image: req.image ?? spec.image,
+              image,
               workingDir: req.workspaceRef,
               command: ['/bin/sh', '-c', SHELL_REDIRECT, spec.binary, ...args],
               env: [

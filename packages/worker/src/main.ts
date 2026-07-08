@@ -117,7 +117,39 @@ function wrapWithRateWindow(backend: AgentBackend, envPrefix: string, name: stri
   return new RateWindowedBackend(backend, new RateWindowLimiter({ maxCalls, windowMs }), name);
 }
 
+// In-cluster tasks fail two ways when these are missing or still placeholders:
+// an ImagePullBackOff that eats the whole activity timeout before surfacing
+// anything (AGENT_RUNNER_IMAGE), or a real Job that starts but every call
+// 401s (LITELLM_API_KEY, *_AUTH_SECRET_NAME -- an unset secret name means
+// envFrom gets no entry at all, not an empty one). Both are worker-startup
+// misconfigurations, not per-task failures, so they belong here, checked
+// once, loud, before the worker ever claims a task -- not discovered
+// piecemeal days later as a string of confusing individual task failures.
+export function assertLiveBackendConfig(env: NodeJS.ProcessEnv): void {
+  const missing: string[] = [];
+  if (!env.AGENT_RUNNER_IMAGE || env.AGENT_RUNNER_IMAGE.includes('CHANGEME')) {
+    missing.push('AGENT_RUNNER_IMAGE (unset or still the placeholder image)');
+  }
+  if (!env.LITELLM_API_KEY) {
+    missing.push('LITELLM_API_KEY');
+  }
+  if (!env.CLAUDE_AUTH_SECRET_NAME) {
+    missing.push('CLAUDE_AUTH_SECRET_NAME');
+  }
+  if (!env.PI_AUTH_SECRET_NAME) {
+    missing.push('PI_AUTH_SECRET_NAME');
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `refusing to start in-cluster: missing or placeholder backend config:\n- ${missing.join('\n- ')}`,
+    );
+  }
+}
+
 export function buildBackends(inCluster: boolean): Record<string, AgentBackend> {
+  if (inCluster) {
+    assertLiveBackendConfig(process.env);
+  }
   const agentImage =
     process.env.AGENT_RUNNER_IMAGE ?? 'ghcr.io/CHANGEME/agentops-engine/agent-runner:CHANGEME';
   const claudeSpec = createClaudeCliSpec({ image: agentImage });
