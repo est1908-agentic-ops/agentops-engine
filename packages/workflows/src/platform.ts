@@ -16,7 +16,7 @@ const agentActivities = proxyActivities<Pick<PlatformActivities, 'runAgent'>>({
   retry: { maximumAttempts: 5 },
 });
 
-// This role isn't scoped to one product, so there's no ProductConfig to route
+// This role isn't scoped to one project, so there's no ProjectConfig to route
 // through -- fixed here at the same reasoning-heavy tier devCycle uses for
 // design/review. 'platform' (not 'pi') as the backend key: it's the pi CLI,
 // but a distinct worker backend entry with this role's own ServiceAccount/secrets
@@ -91,7 +91,7 @@ export async function platform(input: PlatformAgentInput): Promise<PlatformAgent
     const childTaskId = `${taskId}-fix-${index + 1}`;
     const taskInput: TaskInput = {
       taskId: childTaskId,
-      product: resolved.product,
+      project: resolved.project,
       repo: fix.repo,
       goal: fix.goal,
       config: resolved.config,
