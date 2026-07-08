@@ -22,7 +22,7 @@ async function main(): Promise<void> {
   const registry = loadProjectRegistry();
   console.log(
     registry.length > 0
-      ? `agentops gateway: ${registry.length} project(s) registered: ${registry.map((e) => `${e.product} (${e.repo})`).join(', ')}`
+      ? `agentops gateway: ${registry.length} project(s) registered: ${registry.map((e) => `${e.project} (${e.repo})`).join(', ')}`
       : 'agentops gateway: no PROJECT_REGISTRY_JSON set — every webhook will be acknowledged and ignored',
   );
 

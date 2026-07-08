@@ -1,6 +1,6 @@
 import type { Client } from '@temporalio/client';
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
-import type { ProductConfig } from '@agentops/contracts';
+import type { ProjectConfig } from '@agentops/contracts';
 import { devCycle } from '@agentops/workflows';
 import type { IssueLabeledEvent } from './parse-issue-labeled';
 
@@ -14,9 +14,9 @@ export interface StartDevCycleResult {
 export async function startDevCycleForIssue(
   client: Client,
   taskQueue: string,
-  product: string,
+  project: string,
   event: IssueLabeledEvent,
-  config: ProductConfig,
+  config: ProjectConfig,
 ): Promise<StartDevCycleResult> {
   // Deterministic per-issue workflow id. Temporal's default reuse policy lets
   // a NEW run start under the same id once the previous one has completed
@@ -24,12 +24,12 @@ export async function startDevCycleForIssue(
   // rejects starting one while the previous run is still open — which is
   // exactly the dedupe behavior a redelivered webhook needs.
   //
-  // Keyed by `product`, not `event.repo`: the registry (parseProjectRegistry)
-  // already guarantees product names are unique, whereas naively collapsing
+  // Keyed by `project`, not `event.repo`: the registry (parseProjectRegistry)
+  // already guarantees project names are unique, whereas naively collapsing
   // "owner/repo" into "owner-repo" is lossy and can collide across two
   // distinct registered repos (e.g. "foo-bar/baz" and "foo/bar-baz" both
   // become "foo-bar-baz"), which would silently swallow one project's events.
-  const taskId = `issue-${product}-${event.issueNumber}`;
+  const taskId = `issue-${project}-${event.issueNumber}`;
   try {
     await client.workflow.start(devCycle, {
       taskQueue,
@@ -37,7 +37,7 @@ export async function startDevCycleForIssue(
       args: [
         {
           taskId,
-          product,
+          project,
           repo: event.repo,
           issueRef: event.issueRef,
           goal: event.title,

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
-import type { ProductConfig } from '@agentops/contracts';
+import type { ProjectConfig } from '@agentops/contracts';
 import type { IssueLabeledEvent } from './parse-issue-labeled';
 import { startDevCycleForIssue } from './start-dev-cycle';
 
@@ -11,7 +11,7 @@ const event: IssueLabeledEvent = {
   title: 'Add a widget',
 };
 
-const config: ProductConfig = {
+const config: ProjectConfig = {
   stages: {},
   routing: {},
   brakes: { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 },
@@ -22,22 +22,22 @@ function fakeClient(start: (...args: unknown[]) => Promise<unknown>) {
 }
 
 describe('startDevCycleForIssue', () => {
-  it('starts devCycle with a deterministic workflow id derived from the product and issue', async () => {
+  it('starts devCycle with a deterministic workflow id derived from the project and issue', async () => {
     const start = vi.fn().mockResolvedValue(undefined);
     const client = fakeClient(start);
 
-    const result = await startDevCycleForIssue(client, 'agentops-devcycle', 'my-product', event, config);
+    const result = await startDevCycleForIssue(client, 'agentops-devcycle', 'my-project', event, config);
 
-    expect(result).toEqual({ taskId: 'issue-my-product-42', started: true });
+    expect(result).toEqual({ taskId: 'issue-my-project-42', started: true });
     expect(start).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
         taskQueue: 'agentops-devcycle',
-        workflowId: 'issue-my-product-42',
+        workflowId: 'issue-my-project-42',
         args: [
           {
-            taskId: 'issue-my-product-42',
-            product: 'my-product',
+            taskId: 'issue-my-project-42',
+            project: 'my-project',
             repo: 'octocat/hello-world',
             issueRef: 'octocat/hello-world#42',
             goal: 'Add a widget',
@@ -48,9 +48,9 @@ describe('startDevCycleForIssue', () => {
     );
   });
 
-  it('does not collide across two products whose repos would collapse to the same slug', async () => {
+  it('does not collide across two projects whose repos would collapse to the same slug', async () => {
     // "foo-bar/baz" and "foo/bar-baz" both naively collapse to "foo-bar-baz"
-    // if you replace "/" with "-" — keying by the (registry-unique) product
+    // if you replace "/" with "-" — keying by the (registry-unique) project
     // name instead of a lossy transform of event.repo avoids that collision.
     const start = vi.fn().mockResolvedValue(undefined);
     const client = fakeClient(start);
@@ -58,8 +58,8 @@ describe('startDevCycleForIssue', () => {
     const eventA: IssueLabeledEvent = { ...event, repo: 'foo-bar/baz', issueRef: 'foo-bar/baz#42' };
     const eventB: IssueLabeledEvent = { ...event, repo: 'foo/bar-baz', issueRef: 'foo/bar-baz#42' };
 
-    const resultA = await startDevCycleForIssue(client, 'agentops-devcycle', 'product-a', eventA, config);
-    const resultB = await startDevCycleForIssue(client, 'agentops-devcycle', 'product-b', eventB, config);
+    const resultA = await startDevCycleForIssue(client, 'agentops-devcycle', 'project-a', eventA, config);
+    const resultB = await startDevCycleForIssue(client, 'agentops-devcycle', 'project-b', eventB, config);
 
     expect(resultA.taskId).not.toEqual(resultB.taskId);
   });
@@ -68,16 +68,16 @@ describe('startDevCycleForIssue', () => {
     const start = vi.fn().mockRejectedValue(new WorkflowExecutionAlreadyStartedError('already started', 'wf-1', 'devCycle'));
     const client = fakeClient(start);
 
-    const result = await startDevCycleForIssue(client, 'agentops-devcycle', 'my-product', event, config);
+    const result = await startDevCycleForIssue(client, 'agentops-devcycle', 'my-project', event, config);
 
-    expect(result).toEqual({ taskId: 'issue-my-product-42', started: false });
+    expect(result).toEqual({ taskId: 'issue-my-project-42', started: false });
   });
 
   it('rethrows any other error', async () => {
     const start = vi.fn().mockRejectedValue(new Error('temporal unreachable'));
     const client = fakeClient(start);
 
-    await expect(startDevCycleForIssue(client, 'agentops-devcycle', 'my-product', event, config)).rejects.toThrow(
+    await expect(startDevCycleForIssue(client, 'agentops-devcycle', 'my-project', event, config)).rejects.toThrow(
       'temporal unreachable',
     );
   });
