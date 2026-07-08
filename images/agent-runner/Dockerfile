@@ -31,7 +31,16 @@ RUN npm install --global --ignore-scripts @earendil-works/pi-coding-agent@0.80.2
 COPY step-ca-root.crt /usr/local/share/ca-certificates/step-ca-root.crt
 RUN update-ca-certificates
 
-COPY --chown=1000:1000 skills/platform-ops /home/node/.claude/skills/platform-ops
+# Claude Code reads ~/.claude/skills/; pi reads ~/.agents/skills/ (and
+# ~/.pi/agent/skills/, .agents/skills/, .pi/skills/) — the two CLIs share no
+# discovery path, so every skill needed by both backends is copied to both
+# locations. See 2026-07-08-devcycle-stage-skills-design.md.
+COPY --chown=1000:1000 skills/platform-ops      /home/node/.claude/skills/platform-ops
+COPY --chown=1000:1000 skills/platform-ops      /home/node/.agents/skills/platform-ops
+COPY --chown=1000:1000 skills/design-brainstorm /home/node/.claude/skills/design-brainstorm
+COPY --chown=1000:1000 skills/design-brainstorm /home/node/.agents/skills/design-brainstorm
+COPY --chown=1000:1000 skills/plan-writer       /home/node/.claude/skills/plan-writer
+COPY --chown=1000:1000 skills/plan-writer       /home/node/.agents/skills/plan-writer
 
 # Numeric, not the name "node": kubelet can't verify a pod's runAsNonRoot
 # against a named image user without a matching explicit runAsUser in the
