@@ -1,13 +1,19 @@
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
 import { HomePage } from './pages/HomePage';
+import { ProjectsPage } from './pages/ProjectsPage';
 import { RunDetailPage } from './pages/RunDetailPage';
 
 export function App() {
   return (
     <BrowserRouter>
+      <nav className="top-nav">
+        <Link to="/">Console</Link>
+        <Link to="/projects">Projects</Link>
+      </nav>
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/runs/:workflowId" element={<RunDetailPage />} />
+        <Route path="/projects" element={<ProjectsPage />} />
       </Routes>
     </BrowserRouter>
   );
