@@ -62,7 +62,7 @@ RUN pnpm typecheck   # (or the image-specific build/typecheck commands)
 RUN chown -R node:node /app
 ```
 
-All 11 workspace packages' `package.json` files must be copied regardless of which image is being built — `pnpm install --frozen-lockfile` in a pnpm workspace validates the *entire* workspace graph against the lockfile, so a missing member fails the install even if that package is irrelevant to this image.
+All 12 workspace packages' `package.json` files must be copied regardless of which image is being built — `pnpm install --frozen-lockfile` in a pnpm workspace validates the *entire* workspace graph against the lockfile, so a missing member fails the install even if that package is irrelevant to this image.
 
 Each Dockerfile keeps its own image-specific build/typecheck commands after the full `COPY . .` (e.g. `control`'s `pnpm --filter @agentops/ui run build` + `pnpm --filter @agentops/control run typecheck`) — those inherently need the full source and aren't cacheable further.
 
