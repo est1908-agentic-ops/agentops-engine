@@ -3,7 +3,7 @@ import type { TaskInput } from '@agentops/contracts';
 import { devCycle } from '@agentops/workflows';
 import { buildTestEnv, waitForStatus, type TestEnv } from './helpers';
 
-describe('DevCycle e2e: product initCommands reach workspace preparation', () => {
+describe('DevCycle e2e: project initCommands reach workspace preparation', () => {
   let testEnv: TestEnv | undefined;
 
   afterEach(async () => {
@@ -21,7 +21,7 @@ describe('DevCycle e2e: product initCommands reach workspace preparation', () =>
 
     const input: TaskInput = {
       taskId: 'init-commands-task',
-      product: 'demo',
+      project: 'demo',
       repo: 'demo/repo',
       issueRef: 'issue-1',
       goal: 'Add a widget',

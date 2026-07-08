@@ -41,7 +41,7 @@ describe('platform e2e', () => {
     testEnv = await buildTestEnv({
       registry: [
         {
-          product: 'engine',
+          project: 'engine',
           repo: 'demo/repo',
           trackerType: 'github',
           tokenEnvVar: 'X',

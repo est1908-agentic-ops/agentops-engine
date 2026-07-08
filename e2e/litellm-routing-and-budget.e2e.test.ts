@@ -38,7 +38,7 @@ describe('DevCycle e2e: LiteLLM routing and budget enforcement (M5 gate)', () =>
     await testEnv?.env.teardown();
   });
 
-  it('routes two tasks to different backends per their ProductConfig', async () => {
+  it('routes two tasks to different backends per their ProjectConfig', async () => {
     const litellm = new LiteLlmBackend({
       baseUrl: 'http://litellm.platform.svc.cluster.local:4000',
       apiKey: 'sk-virtual-key',
@@ -58,15 +58,15 @@ describe('DevCycle e2e: LiteLLM routing and budget enforcement (M5 gate)', () =>
 
     const claudeInput: TaskInput = {
       taskId: 'claude-task',
-      product: 'product-a',
-      repo: 'org/product-a',
+      project: 'project-a',
+      repo: 'org/project-a',
       goal: 'Route through the CLI-style backend',
       config: baseConfig({ context: { backend: 'stub', model: 'stub' } }),
     };
     const litellmInput: TaskInput = {
       taskId: 'litellm-task',
-      product: 'product-b',
-      repo: 'org/product-b',
+      project: 'project-b',
+      repo: 'org/project-b',
       goal: 'Route through the LiteLLM-fronted backend',
       config: baseConfig({ context: { backend: 'litellm', model: 'zai-glm-4.6' } }),
     };
@@ -112,7 +112,7 @@ describe('DevCycle e2e: LiteLLM routing and budget enforcement (M5 gate)', () =>
 
     const input: TaskInput = {
       taskId: 'budget-brake-task',
-      product: 'demo',
+      project: 'demo',
       repo: 'demo/repo',
       goal: 'Trip a deliberately low LiteLLM virtual-key budget',
       config: baseConfig({ context: { backend: 'litellm', model: 'zai-glm-4.6' } }),

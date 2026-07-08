@@ -28,7 +28,7 @@ describe('DevCycle e2e: exhausted repair rounds open the PR anyway', () => {
 
     const input: TaskInput = {
       taskId: 'exhausted-rounds-task',
-      product: 'demo',
+      project: 'demo',
       repo: 'demo/repo',
       issueRef: 'issue-9',
       goal: 'Fix the hard bug',

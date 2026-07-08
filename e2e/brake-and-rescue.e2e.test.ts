@@ -22,7 +22,7 @@ describe('DevCycle e2e: brake + rescue', () => {
 
     const input: TaskInput = {
       taskId: 'brake-rescue-task',
-      product: 'demo',
+      project: 'demo',
       repo: 'demo/repo',
       goal: 'Trigger a token brake',
       config: {
