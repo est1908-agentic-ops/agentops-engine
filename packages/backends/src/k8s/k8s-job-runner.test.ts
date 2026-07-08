@@ -356,6 +356,68 @@ describe('K8sJobRunner', () => {
     });
   });
 
+  it('heartbeats with job-created/polling phase and the last-known Job status', async () => {
+    const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-heartbeat-'));
+    const req = { ...baseRequest, workspaceRef };
+    const paths = agentOpsArtifactPaths(req);
+    await mkdir(paths.dir, { recursive: true });
+
+    const batchApi = new FakeBatchApi();
+    const heartbeats: unknown[] = [];
+    const now = 1_000;
+    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
+      namespace: 'dev-agents',
+      workspacePvcName: 'workspace-tasks',
+      workspaceMountPath: '/workspace/tasks',
+      batchApi,
+      pollIntervalMs: 1,
+      now: () => now,
+      heartbeat: (details) => heartbeats.push(details),
+    });
+
+    const runPromise = runner.run(req);
+    const jobName = k8sJobName(req);
+
+    await vi.waitFor(() => expect(heartbeats.length).toBeGreaterThanOrEqual(2));
+    expect(heartbeats[0]).toEqual({
+      phase: 'job-created',
+      jobName,
+      taskId: 'task-1',
+      stage: 'implement',
+      elapsedMs: 0,
+      timeoutMs: 30_000,
+      jobStatus: undefined,
+    });
+    expect(heartbeats[1]).toEqual({
+      phase: 'polling',
+      jobName,
+      taskId: 'task-1',
+      stage: 'implement',
+      elapsedMs: 0,
+      timeoutMs: 30_000,
+      jobStatus: { active: 1 },
+    });
+
+    await writeFile(
+      paths.outFile,
+      JSON.stringify({
+        is_error: false,
+        result: 'done',
+        usage: { input_tokens: 3, output_tokens: 4 },
+        duration_ms: 50,
+      }),
+      'utf8',
+    );
+    batchApi.setJobStatus(jobName, { succeeded: 1 });
+
+    await expect(runPromise).resolves.toEqual({
+      output: 'done',
+      tokensIn: 3,
+      tokensOut: 4,
+      wallMs: 50,
+    });
+  });
+
   it('deletes the Job and rethrows when heartbeat fails (cancellation)', async () => {
     const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-cancel-'));
     const req = { ...baseRequest, workspaceRef };

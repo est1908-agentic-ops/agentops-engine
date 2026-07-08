@@ -26,7 +26,7 @@ export interface K8sJobRunnerOptions {
   podLabels?: Record<string, string>;
   runAsUser?: number;
   imagePullSecretName?: string;
-  heartbeat?: () => void;
+  heartbeat?: (details: unknown) => void;
   now?: () => number;
 }
 
@@ -168,7 +168,7 @@ export function buildAgentJob(
 
 export class K8sJobRunner implements AgentBackend {
   private readonly pollIntervalMs: number;
-  private readonly heartbeat: () => void;
+  private readonly heartbeat: (details: unknown) => void;
   private readonly now: () => number;
 
   constructor(
@@ -176,7 +176,7 @@ export class K8sJobRunner implements AgentBackend {
     private readonly opts: K8sJobRunnerOptions,
   ) {
     this.pollIntervalMs = opts.pollIntervalMs ?? 3000;
-    this.heartbeat = opts.heartbeat ?? (() => Context.current().heartbeat());
+    this.heartbeat = opts.heartbeat ?? ((details) => Context.current().heartbeat(details));
     this.now = opts.now ?? Date.now;
   }
 
@@ -203,9 +203,18 @@ export class K8sJobRunner implements AgentBackend {
     }
 
     const start = this.now();
+    let lastStatus: V1Job['status'];
     while (true) {
       try {
-        this.heartbeat();
+        this.heartbeat({
+          phase: lastStatus ? 'polling' : 'job-created',
+          jobName,
+          taskId: req.taskId,
+          stage: req.stage,
+          elapsedMs: this.now() - start,
+          timeoutMs: req.limits.timeoutMs,
+          jobStatus: lastStatus,
+        });
       } catch (err) {
         await this.opts.batchApi.deleteNamespacedJob(jobName, this.opts.namespace, {
           propagationPolicy: 'Background',
@@ -224,9 +233,9 @@ export class K8sJobRunner implements AgentBackend {
         jobName,
         this.opts.namespace,
       );
-      const status = statusJob.status;
+      lastStatus = statusJob.status;
 
-      if (status?.succeeded === 1 || status?.failed === 1) {
+      if (lastStatus?.succeeded === 1 || lastStatus?.failed === 1) {
         const elapsedMs = this.now() - start;
         const stdout = await readFile(paths.outFile, 'utf8').catch(() => '');
         const stderr = await readFile(paths.errFile, 'utf8').catch(() => '');
@@ -234,7 +243,7 @@ export class K8sJobRunner implements AgentBackend {
         if (this.spec.isAuthError(stderr)) {
           throw new ProcessCliAuthError(stderr.trim());
         }
-        if (stdout.trim().length === 0 && status.failed === 1) {
+        if (stdout.trim().length === 0 && lastStatus.failed === 1) {
           throw new ProcessCliProcessError(
             `${this.spec.binary} job failed with no output: ${stderr.trim()}`,
           );
