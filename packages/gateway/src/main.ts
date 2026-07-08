@@ -1,7 +1,8 @@
 import { Client, Connection } from '@temporalio/client';
-import { loadEnv, loadProjectRegistry, SpawnGitCommandRunner } from '@agentops/activities';
+import { loadEnv, loadProjectRegistry, PostgresManagedProjectStore, SpawnGitCommandRunner, type ManagedProjectRegistryDeps } from '@agentops/activities';
 import type { ResolvedProjectEntry } from '@agentops/contracts';
 import { createGithubPorts } from '@agentops/ports';
+import { Pool } from 'pg';
 import { createGatewayServer } from './create-gateway-server';
 
 loadEnv();
@@ -11,6 +12,22 @@ const TASK_QUEUE = 'agentops-devcycle';
 function buildScm(entry: ResolvedProjectEntry) {
   const git = new SpawnGitCommandRunner({ authToken: () => entry.token });
   return createGithubPorts(entry.token, git).scm;
+}
+
+function buildGatewayManagedProjectDeps(): ManagedProjectRegistryDeps | undefined {
+  const host = process.env.ENGINE_DB_HOST;
+  const privateKey = process.env.PROJECT_CREDENTIAL_PRIVATE_KEY;
+  if (!host || !privateKey) {
+    return undefined;
+  }
+  const pool = new Pool({
+    host,
+    port: process.env.ENGINE_DB_PORT ? Number(process.env.ENGINE_DB_PORT) : 5432,
+    database: process.env.ENGINE_DB_NAME ?? 'agentops_engine',
+    user: process.env.ENGINE_DB_USER ?? 'temporal',
+    password: process.env.ENGINE_DB_PASSWORD,
+  });
+  return { store: new PostgresManagedProjectStore(pool), privateKey };
 }
 
 async function main(): Promise<void> {
@@ -26,6 +43,12 @@ async function main(): Promise<void> {
       : 'agentops gateway: no PROJECT_REGISTRY_JSON set — every webhook will be acknowledged and ignored',
   );
 
+  const managedProjectDeps = buildGatewayManagedProjectDeps();
+  if (managedProjectDeps) {
+    await managedProjectDeps.store.ensureSchema();
+    console.log('agentops gateway: managed-project DB lookup ENABLED (ENGINE_DB_HOST set)');
+  }
+
   const connection = await Connection.connect({ address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233' });
   const client = new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE });
 
@@ -36,6 +59,7 @@ async function main(): Promise<void> {
     triggerLabel: process.env.TRIGGER_LABEL ?? 'agentops',
     registry,
     buildScm,
+    managedProjectDeps,
   });
 
   const port = Number(process.env.PORT ?? 3000);

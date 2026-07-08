@@ -8,6 +8,7 @@ export * from './agent-run';
 export * from './run-stats';
 export * from './pr-feedback';
 export * from './project-registry';
+export * from './managed-project';
 export * from './platform-agent';
 export * from './control-api';
 export { z } from 'zod';

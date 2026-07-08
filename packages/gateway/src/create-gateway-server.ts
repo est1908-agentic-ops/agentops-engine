@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Client } from '@temporalio/client';
-import { loadProjectConfig } from '@agentops/activities';
+import { loadProjectConfig, resolveManagedProjectEntry, type ManagedProjectRegistryDeps } from '@agentops/activities';
 import type { ResolvedProjectEntry } from '@agentops/contracts';
 import type { ScmPort } from '@agentops/ports';
 import { parseIssueLabeledEvent } from './parse-issue-labeled';
@@ -16,6 +16,9 @@ export interface GatewayDeps {
   // Injectable so tests don't need a live GitHub client — the real caller
   // (main.ts) builds a GithubScmPort from the entry's token.
   buildScm: (entry: ResolvedProjectEntry) => ScmPort;
+  // Undefined when ENGINE_DB_HOST/PROJECT_CREDENTIAL_PRIVATE_KEY aren't set —
+  // every lookup falls through to `registry` only, same as before this field existed.
+  managedProjectDeps?: ManagedProjectRegistryDeps;
 }
 
 function readRawBody(req: IncomingMessage): Promise<Buffer> {
@@ -69,7 +72,7 @@ async function handleRequest(deps: GatewayDeps, req: IncomingMessage, res: Serve
     return;
   }
 
-  const entry = deps.registry.find((candidate) => candidate.repo === event.repo);
+  const entry = await resolveManagedProjectEntry(deps.managedProjectDeps, deps.registry, event.repo);
   if (!entry) {
     console.warn(`gateway: no project registered for repo "${event.repo}" — ignoring labeled event`);
     res.writeHead(202).end('no project registered for this repo');

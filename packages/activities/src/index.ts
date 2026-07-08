@@ -9,3 +9,6 @@ export * from './workspace/spawn-git-command-runner';
 export * from './workspace/spawn-command-runner';
 export * from './workspace/workspace-manager';
 export * from './workspace/memory-workspace-manager';
+export * from './credential-crypto';
+export * from './postgres-managed-project-store';
+export * from './resolve-managed-projects';
