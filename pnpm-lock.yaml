@@ -162,6 +162,13 @@ importers:
       '@temporalio/client':
         specifier: ^1.11.0
         version: 1.19.0
+      pg:
+        specifier: ^8.22.0
+        version: 8.22.0
+    devDependencies:
+      '@types/pg':
+        specifier: ^8.20.0
+        version: 8.20.0
 
   packages/gateway:
     dependencies:
