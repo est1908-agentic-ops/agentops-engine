@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
@@ -39,7 +39,7 @@ jobs:
       - run: bash charts/engine/tests/run.sh
 
   build-images:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build
     permissions:
       contents: read
@@ -102,7 +102,7 @@ jobs:
             oci://gitactions.est1908.top/agentic-ops
 
   bump-platform:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build-images
     if: github.ref == 'refs/heads/main'
     steps:
