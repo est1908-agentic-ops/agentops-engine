@@ -335,6 +335,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     const prBody = exhausted
       ? `Repair attempts exhausted after ${state.implementAttempts} implement attempt(s). Opening PR with outstanding findings.\n${findingsSummary}`
       : `Automated PR for task ${input.taskId}.`;
+    await activities.pushBranch(input.repo, state.workspaceRef, state.branch, `${input.taskId}-${implementAttempt}`);
     const { prRef } = await activities.openPr({
       repo: input.repo,
       branch: state.branch,

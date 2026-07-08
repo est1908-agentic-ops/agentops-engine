@@ -97,7 +97,13 @@ export class GithubScmPort implements ScmPort {
   }
 
   async push(_repo: string, workspaceRef: string, branch: string, _contentHash: string): Promise<void> {
-    const result = await this.git.run(['push', 'origin', branch], { cwd: workspaceRef });
+    // --force: this branch is task-owned and disposable (ARCHITECTURE.md §1 -- only
+    // pushed commits count, worktrees aren't). prepareWorkspace always rebuilds it
+    // fresh off origin/<base> (see reclaimStaleWorktree), so a rerun of the same
+    // taskId produces a branch with different commits than any prior run's remote
+    // copy; a plain push would be rejected as a non-fast-forward. No human or other
+    // task ever pushes to agentops/<taskId>, so clobbering it here is safe.
+    const result = await this.git.run(['push', '--force', 'origin', branch], { cwd: workspaceRef });
     if (result.exitCode !== 0) {
       throw new Error(`GithubScmPort.push: git push failed: ${result.stderr}`);
     }
