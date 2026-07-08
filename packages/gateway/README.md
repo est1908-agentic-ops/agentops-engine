@@ -13,7 +13,7 @@ Small HTTP service: GitHub webhook receiver → `startWorkflow(devCycle)`. Desig
 |---|---|---|
 | `GITHUB_WEBHOOK_SECRET` | yes | HMAC secret configured on each registered repo's webhook (Settings → Webhooks) |
 | `TEMPORAL_ADDRESS` | no (default `localhost:7233`) | Temporal frontend to start workflows against |
-| `PROJECT_REGISTRY_JSON` + `GITHUB_TOKEN__<PRODUCT>` | no (empty registry → every webhook is acknowledged and ignored) | Same project registry the worker consumes |
+| `PROJECT_REGISTRY_JSON` + `GITHUB_TOKEN__<PROJECT>` | no (empty registry → every webhook is acknowledged and ignored) | Same project registry the worker consumes |
 | `TRIGGER_LABEL` | no (default `agentops`) | Which issue label starts a task |
 | `PORT` | no (default `3000`) | HTTP listen port |
 

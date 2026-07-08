@@ -47,7 +47,7 @@ describe('buildStartScmPort', () => {
         project: 'my-project',
         repo: 'octocat/demo',
         trackerType: 'github' as const,
-        tokenEnvVar: 'GITHUB_TOKEN__MY_PRODUCT',
+        tokenEnvVar: 'GITHUB_TOKEN__MY_PROJECT',
         token: 'fake-token',
       },
     ];
@@ -63,7 +63,7 @@ describe('buildStartScmPort', () => {
         project: 'my-project',
         repo: 'octocat/demo',
         trackerType: 'github' as const,
-        tokenEnvVar: 'GITHUB_TOKEN__MY_PRODUCT',
+        tokenEnvVar: 'GITHUB_TOKEN__MY_PROJECT',
         token: 'fake-token',
       },
     ];
@@ -77,7 +77,7 @@ describe('buildStartScmPort', () => {
         project: 'my-project',
         repo: 'octocat/demo',
         trackerType: 'github' as const,
-        tokenEnvVar: 'GITHUB_TOKEN__MY_PRODUCT',
+        tokenEnvVar: 'GITHUB_TOKEN__MY_PROJECT',
         token: 'fake-token',
       },
     ];

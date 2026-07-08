@@ -18,11 +18,11 @@ pnpm lint && pnpm typecheck && pnpm test && pnpm test:policies-coverage && pnpm 
 Requires a running Temporal dev server and `agentops.json` in the target repo. For a real (non-demo) run, register at least one project via a repo-root `.env` file — see [project-registry-design.md](docs/superpowers/specs/2026-07-06-project-registry-design.md):
 
 ```
-PROJECT_REGISTRY_JSON=[{"product":"my-product","repo":"owner/repo","trackerType":"github","tokenEnvVar":"GITHUB_TOKEN__MY_PRODUCT"}]
-GITHUB_TOKEN__MY_PRODUCT=ghp_xxx
+PROJECT_REGISTRY_JSON=[{"project":"my-project","repo":"owner/repo","trackerType":"github","tokenEnvVar":"GITHUB_TOKEN__MY_PROJECT"}]
+GITHUB_TOKEN__MY_PROJECT=ghp_xxx
 ```
 
-No `.env` at all → DEMO mode (in-memory ports + stub backend, no tokens spent). `--product` must match the registered product for the given `--repo` once a registry is configured.
+No `.env` at all → DEMO mode (in-memory ports + stub backend, no tokens spent). `--project` must match the registered project for the given `--repo` once a registry is configured.
 
 ```bash
 # terminal 1
@@ -33,7 +33,7 @@ pnpm worker
 
 # terminal 3
 pnpm engine start \
-  --issue owner/repo#42 --repo owner/repo --product my-product --goal "..."
+  --issue owner/repo#42 --repo owner/repo --project my-project --goal "..."
 ```
 
 ### Start via GitHub label
@@ -113,7 +113,7 @@ After `agentops-platform` bootstrap and ArgoCD sync (see that repo's `docs/BOOTS
 ```bash
 kubectl port-forward svc/temporal-frontend 7233:7233 -n temporal &
 TEMPORAL_ADDRESS=localhost:7233 TEMPORAL_NAMESPACE=dev-agents pnpm --filter @agentops/cli engine start \
-  --issue owner/repo#42 --repo owner/repo --product my-product --goal "..."
+  --issue owner/repo#42 --repo owner/repo --project my-project --goal "..."
 ```
 
 3. Watch agent invocations run as Jobs, not local processes:
