@@ -83,7 +83,11 @@ export class ProcessCliRunner implements AgentBackend {
             );
             return;
           }
-          resolve(this.spec.parseOutput(stdout, stderr, wallMs));
+          try {
+            resolve(this.spec.parseOutput(stdout, stderr, wallMs));
+          } catch (err) {
+            reject(err);
+          }
         });
       });
     });

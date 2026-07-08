@@ -34,6 +34,32 @@ describe('k8sJobName', () => {
 });
 
 describe('buildAgentJob', () => {
+  it('refuses to build a Job against a placeholder "CHANGEME" image', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+
+    expect(() =>
+      buildAgentJob(
+        baseRequest,
+        createClaudeCliSpec({ image: 'ghcr.io/CHANGEME/agentops-engine/agent-claude:CHANGEME' }),
+        { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+        paths,
+      ),
+    ).toThrow(/CHANGEME/);
+  });
+
+  it('refuses to build a Job when the product-supplied image (req.image) is still a placeholder', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+
+    expect(() =>
+      buildAgentJob(
+        { ...baseRequest, image: 'ghcr.io/CHANGEME/some-product:CHANGEME' },
+        createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+        { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+        paths,
+      ),
+    ).toThrow(/CHANGEME/);
+  });
+
   it('builds the expected Job shape with shell-safe positional args', () => {
     const paths = agentOpsArtifactPaths(baseRequest);
     const job = buildAgentJob(
@@ -63,8 +89,6 @@ describe('buildAgentJob', () => {
       'json',
       '--model',
       'claude-sonnet-5',
-      '--max-turns',
-      '30',
       '--dangerously-skip-permissions',
     ]);
     expect(container?.env).toEqual([
@@ -297,7 +321,7 @@ describe('K8sJobRunner', () => {
 
     const batchApi = new FakeBatchApi();
     let now = 1_000;
-    const runner = new K8sJobRunner(createClaudeCliSpec(), {
+    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
       namespace: 'dev-agents',
       workspacePvcName: 'workspace-tasks',
       workspaceMountPath: '/workspace/tasks',
@@ -338,7 +362,7 @@ describe('K8sJobRunner', () => {
     const batchApi = new FakeBatchApi();
     const cancelError = new Error('activity cancelled');
 
-    const runner = new K8sJobRunner(createClaudeCliSpec(), {
+    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
       namespace: 'dev-agents',
       workspacePvcName: 'workspace-tasks',
       workspaceMountPath: '/workspace/tasks',
@@ -370,9 +394,9 @@ describe('K8sJobRunner', () => {
     // Simulates a previous Temporal retry of this same activity call: its createNamespacedJob
     // already succeeded, but the runner never reached this point (e.g. the status read that follows
     // failed for an unrelated reason). The Job is still sitting in the cluster under this same name.
-    await batchApi.createNamespacedJob('dev-agents', buildAgentJob(req, createClaudeCliSpec(), opts, paths));
+    await batchApi.createNamespacedJob('dev-agents', buildAgentJob(req, createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), opts, paths));
 
-    const runner = new K8sJobRunner(createClaudeCliSpec(), {
+    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
       ...opts,
       batchApi,
       pollIntervalMs: 1,
@@ -407,7 +431,7 @@ describe('K8sJobRunner', () => {
     await mkdir(paths.dir, { recursive: true });
 
     const batchApi = new FakeBatchApi();
-    const runner = new K8sJobRunner(createClaudeCliSpec(), {
+    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
       namespace: 'dev-agents',
       workspacePvcName: 'workspace-tasks',
       workspaceMountPath: '/workspace/tasks',
