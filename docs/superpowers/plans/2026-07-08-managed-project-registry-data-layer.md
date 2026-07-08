@@ -1635,3 +1635,91 @@ git diff main --stat
 ```
 
 Skim the full diff once more: new files in `packages/contracts` and `packages/activities`, the `agent_run_stats`→`agentops_engine` rename in `packages/worker`/`charts/engine`, and the DB-first resolution changes in `packages/cli`/`packages/gateway`/`packages/worker`. Nothing in `packages/control` should appear — that's Plan 2.
+
+---
+
+### Task 10: Open the PR, pass CI, and resolve the Bugbot review
+
+**Files:** none (integration / review).
+
+> Sequential and partly asynchronous — CI and Bugbot run on the remote PR.
+> **HARD GATE: Do not mark this task complete until ALL Bugbot comments are
+> resolved (fixed or replied to) AND CI is green. Check with
+> `gh pr view --json reviews,comments` before claiming done.**
+>
+> Repo-specific note: per [[reference_bugbot_inactive_agentops]], Bugbot has
+> historically never responded on this repo's PRs despite retriggers — if
+> `gh pr comment --body "bugbot run"` produces no review after a reasonable
+> wait, don't block indefinitely on Step 5/6; note in the PR that Bugbot
+> didn't respond, consistent with prior PRs here, and proceed once CI is
+> green and a subagent code review (Step 3) is clean.
+>
+> Also note: merging to `main` on this repo auto-builds and pushes 3 Docker
+> images and auto-pushes a tag-bump commit directly to `agentops-platform`
+> main (no PR gate on that side — see `.github/workflows/ci.yaml`'s
+> `bump-platform` job), which ArgoCD then syncs into the live `dev-agents`
+> cluster. Since this PR adds a new required manual step of its own (the
+> `agentops-platform` database rename from Task 5, Step 6) that must land
+> *before* this merges — sequence that first, confirm the renamed database
+> exists live, then merge this PR, not the other way around.
+
+- [ ] **Step 1: Sync the latest `main`**
+
+```bash
+git fetch origin
+git merge origin/main
+pnpm lint && pnpm typecheck && pnpm test && pnpm test:policies-coverage && pnpm e2e && helm lint charts/engine && bash charts/engine/tests/run.sh
+```
+
+Resolve conflicts + commit first if any, then fix any fallout from the merge.
+
+- [ ] **Step 2: Push and open the PR**
+
+```bash
+git status --short && git rev-parse --abbrev-ref HEAD   # clean tree, on feature branch (not main)
+git push -u origin HEAD
+gh pr create --repo est1908-agentic-ops/agentops-engine --base main --fill \
+  --title "feat: DB-backed managed project registry (data layer)"
+```
+
+- [ ] **Step 3: Subagent code review**
+
+REQUIRED SUB-SKILL: `requesting-code-review`. Dispatch a code reviewer subagent over the diff (BASE_SHA = merge-base with `main`, HEAD_SHA = HEAD). Fix Critical and Important findings, commit, push, then proceed. Pay particular attention to any finding touching `credential-crypto.ts` or `postgres-managed-project-store.ts` — this PR's actual security property (control can encrypt but never decrypt) depends on those two files being correct.
+
+- [ ] **Step 4: Make every CI check pass**
+
+```bash
+gh pr checks --repo est1908-agentic-ops/agentops-engine --watch
+```
+
+On failure: `gh run view --repo est1908-agentic-ops/agentops-engine --log-failed`, reproduce locally, fix, commit, push, re-watch. Do not proceed while red.
+
+- [ ] **Step 5: Wait for the Bugbot review**
+
+```bash
+gh pr view --repo est1908-agentic-ops/agentops-engine --json reviews,comments
+gh pr comment --repo est1908-agentic-ops/agentops-engine --body "bugbot run"   # only if it hasn't reviewed yet
+```
+
+- [ ] **Step 6: Address each Bugbot comment**
+
+REQUIRED SUB-SKILL: `receiving-code-review`. Verify before acting — reply to false positives; TDD-fix real findings, commit each referencing the finding, push once.
+
+**Then mark each addressed thread resolved** (completion is gated on the unresolved-thread count, not just on having replied/fixed):
+
+```bash
+gh api graphql -f query='query($o:String!,$r:String!,$p:Int!){repository(owner:$o,name:$r){pullRequest(number:$p){reviewThreads(first:100){nodes{id isResolved path comments(first:1){nodes{body}}}}}}}' -F o=est1908-agentic-ops -F r=agentops-engine -F p=<number>
+gh api graphql -f query='mutation($id:ID!){resolveReviewThread(input:{threadId:$id}){thread{isResolved}}}' -F id=<thread-id>
+```
+
+**After pushing:** return to Step 4 (re-watch CI), then Step 5 (wait for re-review). Loop until Bugbot reports no unresolved comments — or, per the repo-specific note above, it's confirmed non-responsive again.
+
+- [ ] **Step 7: Final verification**
+
+```bash
+gh pr checks --repo est1908-agentic-ops/agentops-engine                          # all green
+gh pr view --repo est1908-agentic-ops/agentops-engine --json reviews,comments    # no comment left unaddressed
+pnpm lint && pnpm typecheck && pnpm test && pnpm test:policies-coverage && pnpm e2e && helm lint charts/engine && bash charts/engine/tests/run.sh   # suite green locally
+```
+
+Confirm no unresolved review threads remain, then mark this task complete. Do not merge as part of this task — the `agentops-platform` companion rename (Task 5, Step 6) needs to land first, and merging here also auto-deploys; leave that as a final, explicit human/operator decision.
