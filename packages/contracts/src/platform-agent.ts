@@ -6,6 +6,16 @@ export const ProposedFixSchema = z.object({
 });
 export type ProposedFix = z.infer<typeof ProposedFixSchema>;
 
+// A proposedFix the agent named for a repo that isn't a registered project --
+// e.g. a self-referential fix to the engine's own repo, or a hallucinated
+// slug. Not actionable (resolveRepoConfig has no SCM credentials for it), so
+// it's carried into the result instead of silently dropped or crashing the
+// whole platform run.
+export const SkippedFixSchema = ProposedFixSchema.extend({
+  reason: z.string().min(1),
+});
+export type SkippedFix = z.infer<typeof SkippedFixSchema>;
+
 export const PlatformActionSchema = z.object({
   type: z.enum(['terminate', 'signal']),
   workflowId: z.string().min(1),
@@ -42,5 +52,6 @@ export const PlatformAgentResultSchema = z.object({
       }),
     )
     .default([]),
+  skippedFixes: z.array(SkippedFixSchema).default([]),
 });
 export type PlatformAgentResult = z.output<typeof PlatformAgentResultSchema>;
