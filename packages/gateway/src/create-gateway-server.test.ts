@@ -193,3 +193,109 @@ describe('createGatewayServer with a managed-project registry', () => {
     expect(start).not.toHaveBeenCalled();
   });
 });
+
+describe('createGatewayServer config branch (DB config vs file fallback)', () => {
+  let server: ReturnType<typeof createGatewayServer>;
+  let port: number;
+  let start: ReturnType<typeof vi.fn>;
+
+  function listen(deps: GatewayDeps) {
+    server = createGatewayServer(deps);
+    return new Promise<void>((resolve) => {
+      server.listen(0, () => {
+        port = (server.address() as AddressInfo).port;
+        resolve();
+      });
+    });
+  }
+
+  afterEach(() => {
+    server?.close();
+  });
+
+  it('uses the DB config directly when the managed project has one (no repo file read)', async () => {
+    start = vi.fn().mockResolvedValue(undefined);
+    const keyPair = generateManagedProjectKeyPair();
+    const dbConfig = {
+      stages: {},
+      routing: {},
+      brakes: { maxImplementAttempts: 9, maxIterations: 9, maxTokens: 999_999, maxBabysitRounds: 9 },
+    };
+    // A MemoryScmPort that is NOT seeded -- if loadProjectConfig were called
+    // it would return defaults (maxTokens 200_000), not 999_999.
+    const scm = new MemoryScmPort();
+    const managedProjectDeps = {
+      store: {
+        async get(repo: string) {
+          return repo === 'octocat/hello-world'
+            ? { id: '1', project: 'my-project', repo, credentialSet: true, config: dbConfig, createdAt: '', updatedAt: '' }
+            : null;
+        },
+        async getEncryptedToken(repo: string) {
+          return repo === 'octocat/hello-world' ? encryptForManagedProject(keyPair.publicKey, 'db-token') : null;
+        },
+      } as never,
+      privateKey: keyPair.privateKey,
+    };
+    await listen({
+      client: { workflow: { start } } as never,
+      taskQueue: 'agentops-devcycle',
+      webhookSecret: SECRET,
+      triggerLabel: TRIGGER_LABEL,
+      registry: [],
+      buildScm: () => scm,
+      managedProjectDeps,
+    });
+
+    const body = JSON.stringify(labeledPayload());
+    const res = await post(port, '/webhooks/github', body, {
+      'content-type': 'application/json',
+      'x-github-event': 'issues',
+      'x-hub-signature-256': sign(body),
+    });
+
+    expect(res.status).toBe(202);
+    expect(start).toHaveBeenCalledTimes(1);
+    const [, options] = start.mock.calls[0];
+    expect(options.args[0].config.brakes.maxTokens).toBe(999_999);
+  });
+
+  it('falls back to loadProjectConfig when the managed project config is null', async () => {
+    start = vi.fn().mockResolvedValue(undefined);
+    const keyPair = generateManagedProjectKeyPair();
+    const scm = new MemoryScmPort();
+    scm.seedFile('octocat/hello-world', 'agentops.json', JSON.stringify({ fastVerifyCommands: ['pnpm lint'] }));
+    const managedProjectDeps = {
+      store: {
+        async get(repo: string) {
+          return repo === 'octocat/hello-world'
+            ? { id: '1', project: 'my-project', repo, credentialSet: true, config: null, createdAt: '', updatedAt: '' }
+            : null;
+        },
+        async getEncryptedToken(repo: string) {
+          return repo === 'octocat/hello-world' ? encryptForManagedProject(keyPair.publicKey, 'db-token') : null;
+        },
+      } as never,
+      privateKey: keyPair.privateKey,
+    };
+    await listen({
+      client: { workflow: { start } } as never,
+      taskQueue: 'agentops-devcycle',
+      webhookSecret: SECRET,
+      triggerLabel: TRIGGER_LABEL,
+      registry: [],
+      buildScm: () => scm,
+      managedProjectDeps,
+    });
+
+    const body = JSON.stringify(labeledPayload());
+    await post(port, '/webhooks/github', body, {
+      'content-type': 'application/json',
+      'x-github-event': 'issues',
+      'x-hub-signature-256': sign(body),
+    });
+
+    const [, options] = start.mock.calls[0];
+    expect(options.args[0].config.fastVerifyCommands).toEqual(['pnpm lint']);
+  });
+});

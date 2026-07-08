@@ -54,6 +54,13 @@ export class PostgresManagedProjectStore {
     return row ? rowToManagedProject(row) : null;
   }
 
+  /** Lookup by the unique `project` slug -- used by control's POST to 409 on a duplicate project name. */
+  async getByProject(project: string): Promise<ManagedProject | null> {
+    const { rows } = await this.db.query('SELECT * FROM managed_projects WHERE project = $1', [project]);
+    const row = rows[0] as ManagedProjectRow | undefined;
+    return row ? rowToManagedProject(row) : null;
+  }
+
   /** Raw encrypted blob, or null if unregistered. Decrypt with credential-crypto's decryptForManagedProject -- this class never touches a private key. */
   async getEncryptedToken(repo: string): Promise<string | null> {
     const row = await this.getRow(repo);

@@ -13,6 +13,10 @@
     "@agentops/activities": "workspace:*",
     "@agentops/contracts": "workspace:*",
     "@agentops/workflows": "workspace:*",
-    "@temporalio/client": "^1.11.0"
+    "@temporalio/client": "^1.11.0",
+    "pg": "^8.22.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.20.0"
   }
 }
