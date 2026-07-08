@@ -37,6 +37,13 @@ describe('PromptPack', () => {
     expect(rendered).toContain('design-brainstorm');
   });
 
+  it('renders plan.md with the unattended-mode instruction and skill pointer', () => {
+    const pack = new PromptPack();
+    const rendered = pack.render('plan.md', { taskId: 't1', goal: 'g' });
+    expect(rendered).toContain('There is no human here. Do not ask anything');
+    expect(rendered).toContain('plan-writer');
+  });
+
   it('throws a clear error for an unknown template ref', () => {
     const pack = new PromptPack();
     expect(() => pack.render('nonexistent.md', {})).toThrow(/nonexistent\.md/);
