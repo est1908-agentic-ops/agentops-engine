@@ -1,8 +1,8 @@
 import type { ScmPort } from '@agentops/ports';
-import { InvalidProductConfigError, parseProductConfig, type ProductConfig } from '@agentops/contracts';
+import { InvalidProjectConfigError, parseProjectConfig, type ProjectConfig } from '@agentops/contracts';
 
 // Checked in this order; first one present wins. `agentops.json` stays first for
-// backward compatibility with every product configured before the alternates existed.
+// backward compatibility with every project configured before the alternates existed.
 const CONFIG_CANDIDATE_PATHS = ['agentops.json', '.agentops.json', '.agentops/settings.json', '.agentops/agentops.json'];
 
 async function findConfigFile(scm: ScmPort, repo: string): Promise<{ path: string; raw: string } | null> {
@@ -15,18 +15,18 @@ async function findConfigFile(scm: ScmPort, repo: string): Promise<{ path: strin
   return null;
 }
 
-export async function loadProductConfig(scm: ScmPort, repo: string): Promise<ProductConfig> {
+export async function loadProjectConfig(scm: ScmPort, repo: string): Promise<ProjectConfig> {
   const found = await findConfigFile(scm, repo);
   if (found === null) {
-    return parseProductConfig({});
+    return parseProjectConfig({});
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(found.raw);
   } catch (err) {
-    throw new InvalidProductConfigError(`${repo}/${found.path} is not valid JSON: ${(err as Error).message}`);
+    throw new InvalidProjectConfigError(`${repo}/${found.path} is not valid JSON: ${(err as Error).message}`);
   }
 
-  return parseProductConfig(parsed);
+  return parseProjectConfig(parsed);
 }

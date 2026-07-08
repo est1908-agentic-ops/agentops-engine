@@ -9,7 +9,7 @@ export function loadProjectRegistry(env: NodeJS.ProcessEnv = process.env): Resol
   return registry.map((entry) => {
     const token = env[entry.tokenEnvVar];
     if (!token) {
-      throw new Error(`loadProjectRegistry: env var "${entry.tokenEnvVar}" for product "${entry.product}" is not set`);
+      throw new Error(`loadProjectRegistry: env var "${entry.tokenEnvVar}" for project "${entry.project}" is not set`);
     }
     return { ...entry, token };
   });
