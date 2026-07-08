@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { BackendRunRequest } from '@agentops/contracts';
 import { createPiCliSpec } from './pi-backend';
 import { ProcessCliAuthError, ProcessCliProcessError, ProcessCliTimeoutError, ProcessCliRunner } from '../process-cli-runner';
+import { ProviderRateLimitedError } from '../provider-rate-limit';
 
 const baseRequest: BackendRunRequest = {
   taskId: 't1',
@@ -119,6 +120,35 @@ describe('PiBackend', () => {
     const backend = new ProcessCliRunner(createPiCliSpec(), { spawn: spawnFn as never });
 
     await expect(backend.run(baseRequest)).rejects.toThrow(ProcessCliProcessError);
+  });
+
+  it('throws ProviderRateLimitedError (not ProcessCliProcessError) when the error message matches a provider rate-limit pattern', async () => {
+    const { child } = fakeChildProcess();
+    const errorMessage =
+      "429 Your account's current usage pattern does not comply with the Fair Usage Policy, and your request frequency has been limited.";
+    const rateLimitedJsonl = JSON.stringify({
+      type: 'message_end',
+      message: { role: 'assistant', content: [], stopReason: 'error', errorMessage },
+    });
+    const spawnFn = vi.fn(() => {
+      queueMicrotask(() => {
+        child.stdout.end(rateLimitedJsonl);
+        child.stderr.end('');
+        child.emit('close', 0);
+      });
+      return child;
+    });
+    const backend = new ProcessCliRunner(createPiCliSpec(), { spawn: spawnFn as never });
+
+    let error: unknown;
+    try {
+      await backend.run(baseRequest);
+    } catch (err) {
+      error = err;
+    }
+
+    expect(error).toBeInstanceOf(ProviderRateLimitedError);
+    expect(error).not.toBeInstanceOf(ProcessCliProcessError);
   });
 
   it('throws ProcessCliAuthError when stderr matches the auth-failure pattern', async () => {

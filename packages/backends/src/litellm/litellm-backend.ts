@@ -1,3 +1,4 @@
+import { Context } from '@temporalio/activity';
 import type { AgentRunResult, BackendRunRequest } from '@agentops/contracts';
 import type { AgentBackend } from '../agent-backend';
 
@@ -8,6 +9,7 @@ export interface LiteLlmBackendOptions {
   baseUrl: string;
   apiKey: string;
   fetchFn?: typeof fetch;
+  heartbeat?: (details: unknown) => void;
 }
 
 interface ChatCompletionResponse {
@@ -46,12 +48,15 @@ function extractMessage(bodyText: string): string | undefined {
 // not sent as a request parameter (claude/pi backends don't map it either).
 export class LiteLlmBackend implements AgentBackend {
   private readonly fetchFn: typeof fetch;
+  private readonly heartbeat: (details: unknown) => void;
 
   constructor(private readonly opts: LiteLlmBackendOptions) {
     this.fetchFn = opts.fetchFn ?? fetch;
+    this.heartbeat = opts.heartbeat ?? ((details) => Context.current().heartbeat(details));
   }
 
   async run(req: BackendRunRequest): Promise<AgentRunResult> {
+    this.heartbeat({ phase: 'started', taskId: req.taskId, stage: req.stage, backend: req.backend, model: req.model });
     const start = Date.now();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), req.limits.timeoutMs);

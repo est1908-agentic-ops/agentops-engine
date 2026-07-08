@@ -27,9 +27,24 @@ const baseRequest: BackendRunRequest = {
 
 describe('k8sJobName', () => {
   it('sanitizes task ids for Kubernetes names', () => {
-    expect(
-      k8sJobName({ ...baseRequest, taskId: 'Owner/Repo#42' }),
-    ).toBe('agentops-owner-repo-42-implement-1-1');
+    expect(k8sJobName({ ...baseRequest, taskId: 'Owner/Repo#42' })).toMatch(
+      /^agentops-owner-repo-42-implement-1-1-[0-9a-f]{8}$/,
+    );
+  });
+
+  it('stays deterministic for the same request (Temporal retries reuse the same Job)', () => {
+    expect(k8sJobName(baseRequest)).toBe(k8sJobName(baseRequest));
+  });
+
+  // A RateLimitFallbackBackend retry reruns the same call with a different
+  // model. If the Job name and artifact paths ignored the model, that retry
+  // would 409-reuse the primary model's already-finished Job and re-read its
+  // (rate-limited) output instead of actually running the fallback.
+  it('derives a distinct Job name and artifact paths per model', () => {
+    const primary = { ...baseRequest, model: 'zai/glm-5.2' };
+    const fallback = { ...baseRequest, model: 'openrouter/deepseek-v4-pro' };
+    expect(k8sJobName(primary)).not.toBe(k8sJobName(fallback));
+    expect(agentOpsArtifactPaths(primary).outFile).not.toBe(agentOpsArtifactPaths(fallback).outFile);
   });
 });
 
@@ -73,7 +88,7 @@ describe('buildAgentJob', () => {
       paths,
     );
 
-    expect(job.metadata?.name).toBe('agentops-task-1-implement-1-1');
+    expect(job.metadata?.name).toMatch(/^agentops-task-1-implement-1-1-[0-9a-f]{8}$/);
     expect(job.spec?.backoffLimit).toBe(0);
     expect(job.spec?.ttlSecondsAfterFinished).toBe(300);
     const container = job.spec?.template?.spec?.containers?.[0];
@@ -347,6 +362,68 @@ describe('K8sJobRunner', () => {
     );
     batchApi.setJobStatus(jobName, { succeeded: 1 });
     now += 10;
+
+    await expect(runPromise).resolves.toEqual({
+      output: 'done',
+      tokensIn: 3,
+      tokensOut: 4,
+      wallMs: 50,
+    });
+  });
+
+  it('heartbeats with job-created/polling phase and the last-known Job status', async () => {
+    const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-heartbeat-'));
+    const req = { ...baseRequest, workspaceRef };
+    const paths = agentOpsArtifactPaths(req);
+    await mkdir(paths.dir, { recursive: true });
+
+    const batchApi = new FakeBatchApi();
+    const heartbeats: unknown[] = [];
+    const now = 1_000;
+    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
+      namespace: 'dev-agents',
+      workspacePvcName: 'workspace-tasks',
+      workspaceMountPath: '/workspace/tasks',
+      batchApi,
+      pollIntervalMs: 1,
+      now: () => now,
+      heartbeat: (details) => heartbeats.push(details),
+    });
+
+    const runPromise = runner.run(req);
+    const jobName = k8sJobName(req);
+
+    await vi.waitFor(() => expect(heartbeats.length).toBeGreaterThanOrEqual(2));
+    expect(heartbeats[0]).toEqual({
+      phase: 'job-created',
+      jobName,
+      taskId: 'task-1',
+      stage: 'implement',
+      elapsedMs: 0,
+      timeoutMs: 30_000,
+      jobStatus: undefined,
+    });
+    expect(heartbeats[1]).toEqual({
+      phase: 'polling',
+      jobName,
+      taskId: 'task-1',
+      stage: 'implement',
+      elapsedMs: 0,
+      timeoutMs: 30_000,
+      jobStatus: { active: 1 },
+    });
+
+    await writeFile(
+      paths.outFile,
+      JSON.stringify({
+        is_error: false,
+        result: 'done',
+        usage: { input_tokens: 3, output_tokens: 4 },
+        duration_ms: 50,
+      }),
+      'utf8',
+    );
+    batchApi.setJobStatus(jobName, { succeeded: 1 });
 
     await expect(runPromise).resolves.toEqual({
       output: 'done',

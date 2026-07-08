@@ -1,6 +1,7 @@
 import type { AgentRunResult, BackendRunRequest } from '@agentops/contracts';
 import type { CliSpec } from '../cli-spec';
 import { ProcessCliProcessError } from '../process-cli-runner';
+import { isProviderRateLimitMessage, ProviderRateLimitedError } from '../provider-rate-limit';
 
 export interface PiCliSpecOptions {
   image?: string;
@@ -81,9 +82,12 @@ export function createPiCliSpec(opts: PiCliSpecOptions = {}): CliSpec {
       // up, and leaving it unchecked means that failure gets read as this
       // stage's real output instead.
       if (lastAssistantMessage?.stopReason === 'error' || lastAssistantMessage?.stopReason === 'aborted') {
-        throw new ProcessCliProcessError(
-          lastAssistantMessage.errorMessage || `pi turn ended with stopReason "${lastAssistantMessage.stopReason}"`,
-        );
+        const message =
+          lastAssistantMessage.errorMessage || `pi turn ended with stopReason "${lastAssistantMessage.stopReason}"`;
+        if (isProviderRateLimitMessage(message)) {
+          throw new ProviderRateLimitedError(message);
+        }
+        throw new ProcessCliProcessError(message);
       }
 
       const output = extractAssistantText(lastAssistantMessage);

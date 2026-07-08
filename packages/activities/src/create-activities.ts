@@ -24,6 +24,7 @@ import {
 } from './workspace/workspace-manager';
 import { loadProductConfig } from './load-product-config';
 import { ApplicationFailure } from '@temporalio/common';
+import { Context } from '@temporalio/activity';
 
 export interface ActivityDependencies {
   backends: Record<string, AgentBackend>;
@@ -34,6 +35,7 @@ export interface ActivityDependencies {
   workspaces: Workspaces;
   prompts: PromptPack;
   registry: ResolvedProjectEntry[];
+  heartbeat?: (details: unknown) => void;
 }
 
 function rethrowWorkspaceError(err: unknown): never {
@@ -44,6 +46,7 @@ function rethrowWorkspaceError(err: unknown): never {
 }
 
 export function createActivities(deps: ActivityDependencies) {
+  const heartbeat = deps.heartbeat ?? ((details: unknown) => Context.current().heartbeat(details));
   return {
     async runAgent(req: AgentRunRequest): Promise<AgentRunResult> {
       const backend = deps.backends[req.backend];
@@ -51,6 +54,15 @@ export function createActivities(deps: ActivityDependencies) {
         throw new Error(`createActivities.runAgent: unknown backend "${req.backend}"`);
       }
       const prompt = deps.prompts.render(req.promptRef, req.promptContext);
+      heartbeat({
+        phase: 'started',
+        taskId: req.taskId,
+        stage: req.stage,
+        attempt: req.attempt,
+        callIndex: req.callIndex,
+        backend: req.backend,
+        model: req.model,
+      });
       try {
         const result = await backend.run({
           taskId: req.taskId,
