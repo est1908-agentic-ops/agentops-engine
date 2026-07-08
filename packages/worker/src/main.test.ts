@@ -52,7 +52,7 @@ describe('assertLiveBackendConfig', () => {
 });
 
 const registry = [
-  { product: 'demo', repo: 'octocat/demo', trackerType: 'github' as const, tokenEnvVar: 'GITHUB_TOKEN__DEMO', token: 'fake-token' },
+  { project: 'demo', repo: 'octocat/demo', trackerType: 'github' as const, tokenEnvVar: 'GITHUB_TOKEN__DEMO', token: 'fake-token' },
 ];
 
 describe('buildActivityDependencies', () => {
