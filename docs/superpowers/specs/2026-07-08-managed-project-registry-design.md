@@ -83,6 +83,24 @@ function resolveToken(row: ManagedProjectRow, privateKey: Buffer): string;
 
 There's no migration tool anywhere in this codebase (no Flyway/Prisma/Drizzle/node-pg-migrate, no migrations directory) — every existing Postgres table, and this one, is created via an idempotent `CREATE TABLE IF NOT EXISTS` executed by the application at startup. This is a known limitation, not a choice specific to this design: adding a column later means hand-writing an `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` alongside the existing `CREATE TABLE`, since nothing tracks applied schema versions. Introducing a real migration framework is out of scope here — flag it separately if the number of Postgres-backed tables grows enough to justify one.
 
+### 4.2 Database rename: `agent_run_stats` → `agentops_engine`
+
+`managed_projects` will live in the *same* Postgres database `agent_run_stats` already uses (one shared Postgres instance, separate databases per §1 of this doc's research — reusing it avoids repeating the manual `CREATE DATABASE` provisioning step described below). But naming that database after one table inside it was already a minor wart, and adding a second, unrelated table (credentials + config, not telemetry) makes it a real mismatch — ARCHITECTURE.md §5.9 also earmarks this same database for `heal_cases` and `repo_memory` down the line, so it's only going to hold more than "stats" over time.
+
+**Rename the database to `agentops_engine`** — names the owner (this engine), not one tenant table inside it, mirroring how Temporal's own databases are named after Temporal (`temporal`, `temporal_visibility`), not after one of Temporal's tables. Table names stay specific (`agent_run_stats`, `managed_projects`, later `heal_cases`/`repo_memory`).
+
+Also rename the now-misleading env vars and chart values, since `control` will read the same connection info for a table that has nothing to do with "agent stats":
+
+| Old | New |
+|---|---|
+| `AGENT_STATS_DB_HOST/PORT/NAME/USER/PASSWORD` (`packages/worker/src/main.ts`) | `ENGINE_DB_HOST/PORT/NAME/USER/PASSWORD` |
+| `agentStatsDb` (`charts/engine/values.yaml`, `templates/deployment.yaml`) | `engineDb` |
+| `agentStatsDb` (`agentops-platform`'s `clusters/ops/engine/values.yaml`) | `engineDb` |
+
+**Scope in `agentops-platform`:** `clusters/ops/platform/postgres/initdb-configmap.yaml`'s `20-agent-run-stats.sql` block creates `agent_run_stats`, not `agentops_engine` — update it to create the new name. `DEPLOY.md` Phase 9 needs the same terminology update.
+
+**One real operational step, not just a git change:** the `agent_run_stats` database already exists live with real data in it (however little). `initdb` scripts only run against an empty data directory (the exact hazard DEPLOY.md Phase 9 already documents for this same database's original creation), so this rename does **not** happen automatically on redeploy. It needs an explicit, manual step against the live instance before (or as part of) shipping this — e.g. `ALTER DATABASE agent_run_stats RENAME TO agentops_engine;` via `kubectl exec`, run once, documented in `DEPLOY.md` as a required manual prerequisite the same way the original `CREATE DATABASE agent_run_stats` step is documented today. Not something to script from a local session against a live shared cluster.
+
 ## 5. Encryption: asymmetric, `control` is encrypt-only
 
 Confirmed in this session: the DB stores encrypted tokens, decryption happens only at point of use, and the public API has no way to decrypt. Mechanism — hybrid public-key encryption using **Node's built-in `crypto` only** (X25519 key agreement + HKDF + AES-256-GCM), no new dependency:
