@@ -1,7 +1,7 @@
 import { z, ZodError } from 'zod';
 
 export const ProjectRegistryEntrySchema = z.object({
-  product: z.string().min(1),
+  project: z.string().min(1),
   repo: z.string().min(1),
   trackerType: z.literal('github'),
   tokenEnvVar: z.string().min(1),
@@ -54,9 +54,9 @@ export function parseProjectRegistry(raw: unknown): ProjectRegistry {
     throw err;
   }
 
-  const duplicateProduct = findDuplicate(registry.map((entry) => entry.product));
-  if (duplicateProduct) {
-    throw new InvalidProjectRegistryError(`duplicate product "${duplicateProduct}" in project registry`);
+  const duplicateProject = findDuplicate(registry.map((entry) => entry.project));
+  if (duplicateProject) {
+    throw new InvalidProjectRegistryError(`duplicate project "${duplicateProject}" in project registry`);
   }
   const duplicateRepo = findDuplicate(registry.map((entry) => entry.repo));
   if (duplicateRepo) {

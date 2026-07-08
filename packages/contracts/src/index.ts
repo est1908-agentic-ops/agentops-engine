@@ -1,6 +1,6 @@
 export * from './stage';
 export * from './model';
-export * from './product-config';
+export * from './project-config';
 export * from './task-input';
 export * from './stage-result';
 export * from './verdict';

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { InvalidProductConfigError, parseProductConfig, ProductConfigSchema } from './product-config';
+import { InvalidProjectConfigError, parseProjectConfig, ProjectConfigSchema } from './project-config';
 
 const validConfig = {
   fastVerifyCommands: ['pnpm lint'],
@@ -9,15 +9,15 @@ const validConfig = {
   brakes: { maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 },
 };
 
-describe('ProductConfigSchema', () => {
+describe('ProjectConfigSchema', () => {
   it('parses a minimal valid config', () => {
-    const parsed = ProductConfigSchema.parse(validConfig);
+    const parsed = ProjectConfigSchema.parse(validConfig);
     expect(parsed.brakes.maxImplementAttempts).toBe(3);
     expect(parsed.escalation).toBeUndefined();
   });
 
   it('accepts an optional escalation model', () => {
-    const parsed = ProductConfigSchema.parse({
+    const parsed = ProjectConfigSchema.parse({
       ...validConfig,
       escalation: { backend: 'claude', model: 'opus' },
     });
@@ -26,12 +26,12 @@ describe('ProductConfigSchema', () => {
 
   it('rejects a config missing brakes', () => {
     const { brakes: _brakes, ...withoutBrakes } = validConfig;
-    expect(() => ProductConfigSchema.parse(withoutBrakes)).toThrow();
+    expect(() => ProjectConfigSchema.parse(withoutBrakes)).toThrow();
   });
 
   it('accepts a config with no verify commands configured at all', () => {
     expect(() =>
-      ProductConfigSchema.parse({
+      ProjectConfigSchema.parse({
         stages: {},
         routing: {},
         brakes: { maxIterations: 1, maxTokens: 1, maxBabysitRounds: 1 },
@@ -41,7 +41,7 @@ describe('ProductConfigSchema', () => {
 
   it('still validates fastVerifyCommands/fullVerifyCommands as string arrays when present', () => {
     expect(() =>
-      ProductConfigSchema.parse({
+      ProjectConfigSchema.parse({
         fastVerifyCommands: ['pnpm lint'],
         fullVerifyCommands: 'not-an-array',
         stages: {},
@@ -52,7 +52,7 @@ describe('ProductConfigSchema', () => {
   });
 
   it('accepts an optional image and services array', () => {
-    const parsed = ProductConfigSchema.parse({
+    const parsed = ProjectConfigSchema.parse({
       ...validConfig,
       image: 'ghcr.io/example/agentops:latest',
       services: [
@@ -76,7 +76,7 @@ describe('ProductConfigSchema', () => {
 
   it('rejects a service missing a readiness check', () => {
     expect(() =>
-      ProductConfigSchema.parse({
+      ProjectConfigSchema.parse({
         ...validConfig,
         services: [{ name: 'postgres', image: 'pgvector/pgvector:pg18' }],
       }),
@@ -84,18 +84,18 @@ describe('ProductConfigSchema', () => {
   });
 
   it('accepts an optional initCommands string array', () => {
-    const parsed = ProductConfigSchema.parse({ ...validConfig, initCommands: ['pnpm install'] });
+    const parsed = ProjectConfigSchema.parse({ ...validConfig, initCommands: ['pnpm install'] });
     expect(parsed.initCommands).toEqual(['pnpm install']);
   });
 
   it('rejects initCommands when not a string array', () => {
-    expect(() => ProductConfigSchema.parse({ ...validConfig, initCommands: 'pnpm install' })).toThrow();
+    expect(() => ProjectConfigSchema.parse({ ...validConfig, initCommands: 'pnpm install' })).toThrow();
   });
 });
 
-describe('parseProductConfig', () => {
+describe('parseProjectConfig', () => {
   it('fully defaults an empty config', () => {
-    const config = parseProductConfig({});
+    const config = parseProjectConfig({});
     expect(config.fastVerifyCommands).toBeUndefined();
     expect(config.fullVerifyCommands).toBeUndefined();
     expect(config.routing.implement).toEqual({ backend: 'claude', model: 'claude-sonnet-5', effort: 'high' });
@@ -104,45 +104,45 @@ describe('parseProductConfig', () => {
   });
 
   it('passes verify commands through untouched when supplied', () => {
-    const config = parseProductConfig({ fastVerifyCommands: ['pnpm lint'], fullVerifyCommands: ['pnpm test'] });
+    const config = parseProjectConfig({ fastVerifyCommands: ['pnpm lint'], fullVerifyCommands: ['pnpm test'] });
     expect(config.fastVerifyCommands).toEqual(['pnpm lint']);
     expect(config.fullVerifyCommands).toEqual(['pnpm test']);
   });
 
   it('deep-merges a partial routing override, keeping other stages at default', () => {
-    const config = parseProductConfig({ routing: { implement: { backend: 'pi', model: 'pi-default' } } });
+    const config = parseProjectConfig({ routing: { implement: { backend: 'pi', model: 'pi-default' } } });
     expect(config.routing.implement).toEqual({ backend: 'pi', model: 'pi-default' });
     expect(config.routing.context).toEqual({ backend: 'claude', model: 'claude-sonnet-5', effort: 'medium' });
   });
 
   it('deep-merges a partial brakes override, keeping other brake numbers at default', () => {
-    const config = parseProductConfig({ brakes: { maxTokens: 50_000 } });
+    const config = parseProjectConfig({ brakes: { maxTokens: 50_000 } });
     expect(config.brakes.maxTokens).toBe(50_000);
     expect(config.brakes.maxIterations).toBe(6);
   });
 
-  it('throws InvalidProductConfigError when a field has the wrong type', () => {
-    expect(() => parseProductConfig({ brakes: { maxTokens: 'not-a-number' } })).toThrow(InvalidProductConfigError);
+  it('throws InvalidProjectConfigError when a field has the wrong type', () => {
+    expect(() => parseProjectConfig({ brakes: { maxTokens: 'not-a-number' } })).toThrow(InvalidProjectConfigError);
   });
 
-  it('throws InvalidProductConfigError when raw is not an object', () => {
-    expect(() => parseProductConfig('not-an-object')).toThrow(InvalidProductConfigError);
-    expect(() => parseProductConfig(null)).toThrow(InvalidProductConfigError);
-    expect(() => parseProductConfig([])).toThrow(InvalidProductConfigError);
+  it('throws InvalidProjectConfigError when raw is not an object', () => {
+    expect(() => parseProjectConfig('not-an-object')).toThrow(InvalidProjectConfigError);
+    expect(() => parseProjectConfig(null)).toThrow(InvalidProjectConfigError);
+    expect(() => parseProjectConfig([])).toThrow(InvalidProjectConfigError);
   });
 
   it('never deep-merges fastVerifyCommands/fullVerifyCommands — they replace wholesale or stay absent', () => {
-    const config = parseProductConfig({ fastVerifyCommands: ['only-this'] });
+    const config = parseProjectConfig({ fastVerifyCommands: ['only-this'] });
     expect(config.fastVerifyCommands).toEqual(['only-this']);
     expect(config.fullVerifyCommands).toBeUndefined();
   });
 
   it('leaves image and services undefined when not configured, and passes them through untouched when supplied', () => {
-    const empty = parseProductConfig({});
+    const empty = parseProjectConfig({});
     expect(empty.image).toBeUndefined();
     expect(empty.services).toBeUndefined();
 
-    const configured = parseProductConfig({
+    const configured = parseProjectConfig({
       image: 'ghcr.io/example/agentops:latest',
       services: [{ name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } }],
     });
@@ -153,10 +153,10 @@ describe('parseProductConfig', () => {
   });
 
   it('leaves initCommands undefined when not configured, and passes it through untouched when supplied', () => {
-    const empty = parseProductConfig({});
+    const empty = parseProjectConfig({});
     expect(empty.initCommands).toBeUndefined();
 
-    const configured = parseProductConfig({ initCommands: ['pnpm install', 'pnpm worktree-setup'] });
+    const configured = parseProjectConfig({ initCommands: ['pnpm install', 'pnpm worktree-setup'] });
     expect(configured.initCommands).toEqual(['pnpm install', 'pnpm worktree-setup']);
   });
 });
