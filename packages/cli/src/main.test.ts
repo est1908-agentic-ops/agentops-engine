@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { encryptForManagedProject, generateManagedProjectKeyPair, loadProjectConfig } from '@agentops/activities';
+import { encryptForManagedProject, generateManagedProjectKeyPair, loadProjectConfig, type PostgresManagedProjectStore } from '@agentops/activities';
 import { GithubScmPort, MemoryScmPort } from '@agentops/ports';
 import { buildStartScmPort, buildStartScmPortWithManagedProjects, parseFlags, seedDemoAgentopsConfig } from './main';
 
@@ -98,7 +98,7 @@ describe('buildStartScmPortWithManagedProjects', () => {
       async getEncryptedToken(repo: string) {
         return repo === 'acme/web' ? encryptForManagedProject(publicKey, 'db-token') : null;
       },
-    } as any;
+    } as unknown as PostgresManagedProjectStore;
 
     const scm = await buildStartScmPortWithManagedProjects({ store, privateKey }, [], 'acme-web', 'acme/web');
 
@@ -107,7 +107,7 @@ describe('buildStartScmPortWithManagedProjects', () => {
 
   it('falls back to the static registry when the repo is not DB-managed', async () => {
     const registry = [{ project: 'legacy', repo: 'acme/legacy', trackerType: 'github' as const, tokenEnvVar: 'X', token: 'static-token' }];
-    const store = { async get() { return null; }, async getEncryptedToken() { return null; } } as any;
+    const store = { async get() { return null; }, async getEncryptedToken() { return null; } } as unknown as PostgresManagedProjectStore;
 
     const scm = await buildStartScmPortWithManagedProjects({ store, privateKey: 'unused' }, registry, 'legacy', 'acme/legacy');
 
@@ -115,7 +115,7 @@ describe('buildStartScmPortWithManagedProjects', () => {
   });
 
   it('throws when neither the DB nor the static registry has the repo', async () => {
-    const store = { async get() { return null; }, async getEncryptedToken() { return null; } } as any;
+    const store = { async get() { return null; }, async getEncryptedToken() { return null; } } as unknown as PostgresManagedProjectStore;
     await expect(buildStartScmPortWithManagedProjects({ store, privateKey: 'unused' }, [], 'nope', 'acme/nope')).rejects.toThrow(
       /no project registered/,
     );
