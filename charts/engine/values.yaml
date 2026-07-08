@@ -102,6 +102,15 @@ projects: {}
 claudeAuthSecretName: claude-credentials
 piAuthSecretName: pi-credentials
 
+# Empty by default -- same "chart ships no cluster assumption" pattern as
+# otelExporterOtlpEndpoint above. Unset means RateLimitFallbackBackend is a
+# passthrough no-op (packages/worker/src/main.ts's wrapWithRateLimitFallback),
+# same "off by default" convention as the PI_RATE_WINDOW_* vars. See
+# docs/superpowers/specs/2026-07-08-provider-rate-limit-fallback-design.md's
+# "open questions" -- deliberately left operator-set with no chart default
+# rather than a guessed value.
+piRateLimitFallbackModel: ""
+
 # The worker's LiteLLM backend (packages/worker/src/main.ts) calls the
 # in-cluster LiteLLM proxy directly over HTTP using its master key as a
 # bearer token -- unlike claude/pi above, this is the secret's *value*, not

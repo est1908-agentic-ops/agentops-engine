@@ -52,6 +52,10 @@ spec:
               value: {{ .Values.claudeAuthSecretName | quote }}
             - name: PI_AUTH_SECRET_NAME
               value: {{ .Values.piAuthSecretName | quote }}
+            {{- if .Values.piRateLimitFallbackModel }}
+            - name: PI_RATE_LIMIT_FALLBACK_MODEL
+              value: {{ .Values.piRateLimitFallbackModel | quote }}
+            {{- end }}
             - name: LITELLM_API_KEY
               valueFrom:
                 secretKeyRef:
