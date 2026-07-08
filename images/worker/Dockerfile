@@ -18,8 +18,22 @@ RUN apt-get update \
 RUN npm install --global pnpm@9.15.9
 
 WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY packages/activities/package.json ./packages/activities/
+COPY packages/backends/package.json  ./packages/backends/
+COPY packages/cli/package.json       ./packages/cli/
+COPY packages/contracts/package.json ./packages/contracts/
+COPY packages/control/package.json   ./packages/control/
+COPY packages/gateway/package.json   ./packages/gateway/
+COPY packages/policies/package.json  ./packages/policies/
+COPY packages/ports/package.json     ./packages/ports/
+COPY packages/prompts/package.json   ./packages/prompts/
+COPY packages/ui/package.json        ./packages/ui/
+COPY packages/worker/package.json    ./packages/worker/
+COPY packages/workflows/package.json ./packages/workflows/
+RUN --mount=type=cache,target=/pnpm-store,sharing=locked \
+    pnpm install --frozen-lockfile --store-dir /pnpm-store
 COPY . .
-RUN pnpm install --frozen-lockfile
 RUN pnpm typecheck
 RUN chown -R node:node /app
 
