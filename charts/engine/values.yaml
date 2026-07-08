@@ -87,16 +87,16 @@ workspace:
   taskSize: 10Gi
   cacheSize: 20Gi
 
-# One entry per product. agentops-platform supplies the real list as a values
+# One entry per project. agentops-platform supplies the real list as a values
 # override (see docs/superpowers/specs/2026-07-06-project-registry-design.md) —
 # this repo ships no real repo names, matching ARCHITECTURE.md §5.8 (the engine
-# is product-agnostic). Each entry renders one GITHUB_TOKEN__<PRODUCT> env var
+# is project-agnostic). Each entry renders one GITHUB_TOKEN__<PROJECT> env var
 # sourced from githubTokenSecretName, plus one row in PROJECT_REGISTRY_JSON.
 #
 # projects:
-#   product-a:
-#     repo: flair-hr/product-a
-#     githubTokenSecretName: github-token-product-a
+#   project-a:
+#     repo: flair-hr/project-a
+#     githubTokenSecretName: github-token-project-a
 projects: {}
 
 claudeAuthSecretName: claude-credentials
