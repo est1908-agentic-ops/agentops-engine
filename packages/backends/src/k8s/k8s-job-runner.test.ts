@@ -6,12 +6,33 @@ import type { BackendRunRequest } from '@agentops/contracts';
 import { createClaudeCliSpec } from '../claude/claude-backend';
 import { ProcessCliAuthError } from '../process-cli-runner';
 import { FakeBatchApi } from './fake-batch-api';
+import type { V1Job } from './k8s-types';
 import {
   agentOpsArtifactPaths,
   buildAgentJob,
   K8sJobRunner,
   k8sJobName,
 } from './k8s-job-runner';
+
+// Simulates the readNamespacedJobStatus K8s API call hanging (e.g. an
+// unreachable API server) for the first `hangsLeft` polls before behaving
+// normally -- reproduces the issue-broccoli-94 incident, where a hung status
+// read froze the whole poll loop until Temporal's 15s heartbeat timeout fired
+// identically on every one of 5 retries (see
+// project_k8s_job_poll_no_timeout memory / the design doc's non-goals).
+class HangThenRealBatchApi extends FakeBatchApi {
+  constructor(private hangsLeft: number) {
+    super();
+  }
+
+  override async readNamespacedJobStatus(name: string, namespace: string): Promise<{ body: V1Job }> {
+    if (this.hangsLeft > 0) {
+      this.hangsLeft--;
+      return new Promise<{ body: V1Job }>(() => {});
+    }
+    return super.readNamespacedJobStatus(name, namespace);
+  }
+}
 
 const baseRequest: BackendRunRequest = {
   taskId: 'task-1',
@@ -431,6 +452,52 @@ describe('K8sJobRunner', () => {
       tokensOut: 4,
       wallMs: 50,
     });
+  });
+
+  it('retries the status poll after a client-side timeout instead of freezing the whole activity', async () => {
+    const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-poll-timeout-'));
+    const req = { ...baseRequest, workspaceRef };
+    const paths = agentOpsArtifactPaths(req);
+    await mkdir(paths.dir, { recursive: true });
+
+    const batchApi = new HangThenRealBatchApi(2);
+    const heartbeats: unknown[] = [];
+    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
+      namespace: 'dev-agents',
+      workspacePvcName: 'workspace-tasks',
+      workspaceMountPath: '/workspace/tasks',
+      batchApi,
+      pollIntervalMs: 1,
+      statusPollTimeoutMs: 5,
+      heartbeat: (details) => heartbeats.push(details),
+    });
+
+    const runPromise = runner.run(req);
+    await vi.waitFor(() => expect(batchApi.creates).toHaveLength(1));
+
+    await writeFile(
+      paths.outFile,
+      JSON.stringify({
+        is_error: false,
+        result: 'done',
+        usage: { input_tokens: 3, output_tokens: 4 },
+        duration_ms: 50,
+      }),
+      'utf8',
+    );
+    batchApi.setJobStatus(k8sJobName(req), { succeeded: 1 });
+
+    // Proves the loop survived two hung status reads: it still resolved
+    // instead of hanging until an outer heartbeat timeout, and it kept
+    // heartbeating throughout (a bare Promise.race with no cancellation
+    // would leave the loop stuck awaiting the first hung call forever).
+    await expect(runPromise).resolves.toEqual({
+      output: 'done',
+      tokensIn: 3,
+      tokensOut: 4,
+      wallMs: 50,
+    });
+    expect(heartbeats.length).toBeGreaterThanOrEqual(4);
   });
 
   it('deletes the Job and rethrows when heartbeat fails (cancellation)', async () => {

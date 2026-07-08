@@ -21,6 +21,7 @@ export interface K8sJobRunnerOptions {
   workspaceMountPath: string;
   batchApi: BatchV1ApiLike;
   pollIntervalMs?: number;
+  statusPollTimeoutMs?: number;
   authSecretName?: string;
   additionalSecretNames?: string[];
   serviceAccountName?: string;
@@ -29,6 +30,32 @@ export interface K8sJobRunnerOptions {
   imagePullSecretName?: string;
   heartbeat?: (details: unknown) => void;
   now?: () => number;
+}
+
+// readNamespacedJobStatus has no client-side timeout of its own (the
+// generated K8s client doesn't expose an AbortSignal through this call
+// shape) -- if the API server call itself hangs, the poll loop below freezes
+// inside the `await`, never reaching its own req.limits.timeoutMs check or
+// the next heartbeat, so Temporal's heartbeatTimeout becomes the only
+// backstop (and fires identically on every retry, since the underlying hang
+// recurs). Racing the call against this timeout turns that into a normal,
+// retryable "no status this tick" instead -- see issue-broccoli-94.
+class StatusPollTimeoutError extends Error {}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new StatusPollTimeoutError(message)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
 }
 
 const SHELL_REDIRECT =
@@ -183,6 +210,7 @@ export function buildAgentJob(
 
 export class K8sJobRunner implements AgentBackend {
   private readonly pollIntervalMs: number;
+  private readonly statusPollTimeoutMs: number;
   private readonly heartbeat: (details: unknown) => void;
   private readonly now: () => number;
 
@@ -191,6 +219,7 @@ export class K8sJobRunner implements AgentBackend {
     private readonly opts: K8sJobRunnerOptions,
   ) {
     this.pollIntervalMs = opts.pollIntervalMs ?? 3000;
+    this.statusPollTimeoutMs = opts.statusPollTimeoutMs ?? 10_000;
     this.heartbeat = opts.heartbeat ?? ((details) => Context.current().heartbeat(details));
     this.now = opts.now ?? Date.now;
   }
@@ -244,10 +273,29 @@ export class K8sJobRunner implements AgentBackend {
         throw new ProcessCliTimeoutError(`${this.spec.binary} timed out after ${req.limits.timeoutMs}ms`);
       }
 
-      const { body: statusJob } = await this.opts.batchApi.readNamespacedJobStatus(
-        jobName,
-        this.opts.namespace,
-      );
+      let statusJob: V1Job;
+      try {
+        ({ body: statusJob } = await withTimeout(
+          this.opts.batchApi.readNamespacedJobStatus(jobName, this.opts.namespace),
+          this.statusPollTimeoutMs,
+          `readNamespacedJobStatus timed out after ${this.statusPollTimeoutMs}ms for job ${jobName}`,
+        ));
+      } catch (err) {
+        if (!(err instanceof StatusPollTimeoutError)) {
+          throw err;
+        }
+        console.warn(
+          JSON.stringify({
+            event: 'k8s-status-poll-timeout',
+            jobName,
+            taskId: req.taskId,
+            stage: req.stage,
+            statusPollTimeoutMs: this.statusPollTimeoutMs,
+          }),
+        );
+        await sleep(this.pollIntervalMs);
+        continue;
+      }
       lastStatus = statusJob.status;
 
       if (lastStatus?.succeeded === 1 || lastStatus?.failed === 1) {
