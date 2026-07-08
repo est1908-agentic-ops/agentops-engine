@@ -1,0 +1,26 @@
+# CI: Switch to Self-Hosted Runners — Design
+
+Status: draft · 2026-07-08 · Owner: Artem
+
+## Context
+
+`.github/workflows/ci.yaml` runs all three jobs (`build`, `build-images`, `bump-platform`) on GitHub-hosted `ubuntu-latest` runners today. Artem has a self-hosted runner pool registered at the `est1908-agentic-ops` org level with the generic `self-hosted` label (repo-level API shows 0 runners, and org-level runner listing needs `admin:org` scope this session doesn't have — confirmed verbally rather than via API).
+
+## Goal
+
+Point all CI jobs at the self-hosted pool instead of GitHub-hosted runners.
+
+## Non-goals
+
+- Provisioning or registering the runner itself — assumed already done.
+- Concurrency controls (`concurrency:` group / cancel-in-progress) — declined; the persistent-runner queuing characteristic predates this change and isn't being addressed here.
+- OS/arch-specific labels or a dedicated runner group — one generic pool, one generic label.
+- Any hardening for untrusted-fork PRs — the repo is private, so `pull_request` runs already only come from trusted collaborators.
+
+## Design
+
+In `.github/workflows/ci.yaml`, change `runs-on: ubuntu-latest` to `runs-on: self-hosted` on all three jobs (`build` line 10, `build-images` line 42, `bump-platform` line 105). No other lines change — same steps, same actions, same secrets.
+
+## Risk
+
+If the org-level runner isn't actually reachable (unverified this session), the next push/PR will show jobs stuck in "Waiting for a runner" instead of failing fast. First real CI run after merge is the verification step.
