@@ -81,7 +81,17 @@ function resolveToken(row: ManagedProjectRow, privateKey: Buffer): string;
 
 ### 4.1 On schema evolution
 
-There's no migration tool anywhere in this codebase (no Flyway/Prisma/Drizzle/node-pg-migrate, no migrations directory) — every existing Postgres table, and this one, is created via an idempotent `CREATE TABLE IF NOT EXISTS` executed by the application at startup. This is a known limitation, not a choice specific to this design: adding a column later means hand-writing an `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` alongside the existing `CREATE TABLE`, since nothing tracks applied schema versions. Introducing a real migration framework is out of scope here — flag it separately if the number of Postgres-backed tables grows enough to justify one.
+There's no migration tool anywhere in this codebase (no Flyway/Prisma/Drizzle/node-pg-migrate, no migrations directory) — every existing Postgres table, and this one, is created via an idempotent `CREATE TABLE IF NOT EXISTS` executed by the application at startup. That covers *creating* a table, but "how do we alter it later" needs an actual answer, not just "we don't have one yet":
+
+**Policy, until it stops being enough:**
+
+1. **Additive changes** (a new nullable column, a new index) get appended to the same `ensureSchema()`, run unconditionally on every startup right after the `CREATE TABLE`:
+   ```sql
+   ALTER TABLE managed_projects ADD COLUMN IF NOT EXISTS example_field TEXT;
+   ```
+   One line per historical change, each with an inline comment naming when/why — git blame plus that comment *is* the migration history, in lieu of dated migration files. Safe under concurrent execution: `worker` and `control` both run multiple replicas, and Postgres serializes `IF NOT EXISTS` DDL fine across pods hitting it at their own boot time during a rolling deploy.
+2. **Rollout ordering constraint that comes free with "additive only":** new code must tolerate a just-added column being absent/NULL until every replica has restarted, since `ensureSchema()` runs per-pod at its own boot — old and new replicas coexist briefly mid-rollout. Never ship code in the same change that *requires* a column that same change adds.
+3. **The trigger for a real migration tool:** the first time a change isn't purely additive — renaming/dropping a column, changing a type, a data backfill, anything needing to run exactly once rather than idempotently. That's the point to introduce `node-pg-migrate` (plain SQL migration files, no ORM, no code-gen — matches this codebase's zero-framework style in `gateway`/`control` and works directly against the `pg` package already in use) with a real applied-migrations tracking table. Not before — bringing in that machinery for a change `ADD COLUMN IF NOT EXISTS` already handles safely would be pure overhead for two tables that have never needed it.
 
 ### 4.2 Database rename: `agent_run_stats` → `agentops_engine`
 
