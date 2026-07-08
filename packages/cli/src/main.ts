@@ -1,6 +1,15 @@
 import { randomUUID } from 'node:crypto';
 import { Client, Connection } from '@temporalio/client';
-import { loadEnv, loadProjectConfig, loadProjectRegistry, SpawnGitCommandRunner } from '@agentops/activities';
+import { Pool } from 'pg';
+import {
+  loadEnv,
+  loadProjectConfig,
+  loadProjectRegistry,
+  PostgresManagedProjectStore,
+  resolveManagedProjectEntry,
+  SpawnGitCommandRunner,
+  type ManagedProjectRegistryDeps,
+} from '@agentops/activities';
 
 loadEnv();
 import type { ResolvedProjectEntry, TaskInput } from '@agentops/contracts';
@@ -74,6 +83,50 @@ export function buildStartScmPort(registry: ResolvedProjectEntry[], project: str
   return createGithubPorts(entry.token, git).scm;
 }
 
+/**
+ * DB-first variant of buildStartScmPort: tries the managed-project registry
+ * before the static one. `managedProjectDeps` is undefined when
+ * ENGINE_DB_HOST/PROJECT_CREDENTIAL_PRIVATE_KEY aren't set -- falls straight
+ * through to today's behavior in that case.
+ */
+export async function buildStartScmPortWithManagedProjects(
+  managedProjectDeps: ManagedProjectRegistryDeps | undefined,
+  registry: ResolvedProjectEntry[],
+  project: string,
+  repo: string,
+): Promise<ScmPort> {
+  if (registry.length === 0 && !managedProjectDeps) {
+    const scm = new MemoryScmPort();
+    seedDemoAgentopsConfig(scm, repo);
+    return scm;
+  }
+  const entry = await resolveManagedProjectEntry(managedProjectDeps, registry, repo);
+  if (!entry) {
+    throw new Error(`no project registered for repo "${repo}" — check the project registry`);
+  }
+  if (entry.project !== project) {
+    throw new Error(`repo "${repo}" is registered under project "${entry.project}", not "${project}" — check --project`);
+  }
+  const git = new SpawnGitCommandRunner({ authToken: () => entry.token });
+  return createGithubPorts(entry.token, git).scm;
+}
+
+function buildCliManagedProjectDeps(): ManagedProjectRegistryDeps | undefined {
+  const host = process.env.ENGINE_DB_HOST;
+  const privateKey = process.env.PROJECT_CREDENTIAL_PRIVATE_KEY;
+  if (!host || !privateKey) {
+    return undefined;
+  }
+  const pool = new Pool({
+    host,
+    port: process.env.ENGINE_DB_PORT ? Number(process.env.ENGINE_DB_PORT) : 5432,
+    database: process.env.ENGINE_DB_NAME ?? 'agentops_engine',
+    user: process.env.ENGINE_DB_USER ?? 'temporal',
+    password: process.env.ENGINE_DB_PASSWORD,
+  });
+  return { store: new PostgresManagedProjectStore(pool), privateKey };
+}
+
 async function getClient(): Promise<Client> {
   const connection = await Connection.connect({ address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233' });
   return new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE });
@@ -81,7 +134,7 @@ async function getClient(): Promise<Client> {
 
 async function cmdStart(taskId: string, goal: string, project: string, repo: string, issueRef?: string): Promise<void> {
   const client = await getClient();
-  const scm = buildStartScmPort(loadProjectRegistry(), project, repo);
+  const scm = await buildStartScmPortWithManagedProjects(buildCliManagedProjectDeps(), loadProjectRegistry(), project, repo);
   const config = await loadProjectConfig(scm, repo);
   const input: TaskInput = { taskId, project, repo, issueRef, goal, config };
   const handle = await client.workflow.start(devCycle, { taskQueue: TASK_QUEUE, workflowId: taskId, args: [input] });
