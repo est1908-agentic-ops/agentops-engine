@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { BackendRunRequest } from '@agentops/contracts';
-import { LiteLlmBackend, LiteLlmBudgetExceededError, LiteLlmRequestError } from './litellm-backend';
+import { LiteLlmBackend, LiteLlmBudgetExceededError, LiteLlmRequestError, type LiteLlmBackendOptions } from './litellm-backend';
 
 const baseRequest: BackendRunRequest = {
   taskId: 't1',
@@ -22,6 +22,15 @@ function fakeResponse(status: number, body: unknown): Response {
   } as unknown as Response;
 }
 
+function makeBackend(opts: Partial<LiteLlmBackendOptions>): LiteLlmBackend {
+  return new LiteLlmBackend({
+    baseUrl: 'http://litellm.platform.svc.cluster.local:4000',
+    apiKey: 'sk-virtual-key',
+    heartbeat: () => {},
+    ...opts,
+  });
+}
+
 describe('LiteLlmBackend', () => {
   it('posts an OpenAI-compatible chat completion request with the virtual key as bearer auth', async () => {
     const calls: { url: string; init: RequestInit }[] = [];
@@ -32,11 +41,7 @@ describe('LiteLlmBackend', () => {
         usage: { prompt_tokens: 42, completion_tokens: 7 },
       });
     });
-    const backend = new LiteLlmBackend({
-      baseUrl: 'http://litellm.platform.svc.cluster.local:4000',
-      apiKey: 'sk-virtual-key',
-      fetchFn: fetchFn as unknown as typeof fetch,
-    });
+    const backend = makeBackend({ fetchFn: fetchFn as unknown as typeof fetch });
 
     const result = await backend.run(baseRequest);
 
@@ -50,26 +55,39 @@ describe('LiteLlmBackend', () => {
     expect(result).toEqual({ output: 'the issue is about X', tokensIn: 42, tokensOut: 7, wallMs: expect.any(Number) });
   });
 
+  it('heartbeats once before making the request', async () => {
+    const fetchFn = vi.fn(async () =>
+      fakeResponse(200, {
+        choices: [{ message: { content: 'ok' } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1 },
+      }),
+    );
+    const heartbeat = vi.fn();
+    const backend = makeBackend({ fetchFn: fetchFn as unknown as typeof fetch, heartbeat });
+
+    await backend.run(baseRequest);
+
+    expect(heartbeat).toHaveBeenCalledWith({
+      phase: 'started',
+      taskId: 't1',
+      stage: 'context',
+      backend: 'litellm',
+      model: 'zai-glm-4.6',
+    });
+  });
+
   it('throws LiteLlmBudgetExceededError on a 429 whose body identifies BudgetExceededError', async () => {
     const fetchFn = vi.fn(async () =>
       fakeResponse(429, { error: { message: 'Budget has been exceeded! Current cost: 1.20, Max budget: 1.00', error_class: 'BudgetExceededError' } }),
     );
-    const backend = new LiteLlmBackend({
-      baseUrl: 'http://litellm.platform.svc.cluster.local:4000',
-      apiKey: 'sk-virtual-key',
-      fetchFn: fetchFn as unknown as typeof fetch,
-    });
+    const backend = makeBackend({ fetchFn: fetchFn as unknown as typeof fetch });
 
     await expect(backend.run(baseRequest)).rejects.toThrow(LiteLlmBudgetExceededError);
   });
 
   it('throws the generic LiteLlmRequestError (not budget-exceeded) on a plain 429 rate limit', async () => {
     const fetchFn = vi.fn(async () => fakeResponse(429, { error: { message: 'rate limit exceeded, try again later' } }));
-    const backend = new LiteLlmBackend({
-      baseUrl: 'http://litellm.platform.svc.cluster.local:4000',
-      apiKey: 'sk-virtual-key',
-      fetchFn: fetchFn as unknown as typeof fetch,
-    });
+    const backend = makeBackend({ fetchFn: fetchFn as unknown as typeof fetch });
 
     await expect(backend.run(baseRequest)).rejects.toThrow(LiteLlmRequestError);
     await expect(backend.run(baseRequest)).rejects.not.toThrow(LiteLlmBudgetExceededError);
@@ -77,11 +95,7 @@ describe('LiteLlmBackend', () => {
 
   it('throws LiteLlmRequestError on a non-429 error status', async () => {
     const fetchFn = vi.fn(async () => fakeResponse(500, { error: { message: 'internal error' } }));
-    const backend = new LiteLlmBackend({
-      baseUrl: 'http://litellm.platform.svc.cluster.local:4000',
-      apiKey: 'sk-virtual-key',
-      fetchFn: fetchFn as unknown as typeof fetch,
-    });
+    const backend = makeBackend({ fetchFn: fetchFn as unknown as typeof fetch });
 
     await expect(backend.run(baseRequest)).rejects.toThrow(LiteLlmRequestError);
   });
@@ -90,22 +104,14 @@ describe('LiteLlmBackend', () => {
     const fetchFn = vi.fn(async () => {
       throw new Error('ECONNREFUSED');
     });
-    const backend = new LiteLlmBackend({
-      baseUrl: 'http://litellm.platform.svc.cluster.local:4000',
-      apiKey: 'sk-virtual-key',
-      fetchFn: fetchFn as unknown as typeof fetch,
-    });
+    const backend = makeBackend({ fetchFn: fetchFn as unknown as typeof fetch });
 
     await expect(backend.run(baseRequest)).rejects.toThrow(LiteLlmRequestError);
   });
 
   it('throws LiteLlmRequestError when the response body has no choices[0].message.content', async () => {
     const fetchFn = vi.fn(async () => fakeResponse(200, { choices: [] }));
-    const backend = new LiteLlmBackend({
-      baseUrl: 'http://litellm.platform.svc.cluster.local:4000',
-      apiKey: 'sk-virtual-key',
-      fetchFn: fetchFn as unknown as typeof fetch,
-    });
+    const backend = makeBackend({ fetchFn: fetchFn as unknown as typeof fetch });
 
     await expect(backend.run(baseRequest)).rejects.toThrow(LiteLlmRequestError);
   });
@@ -116,11 +122,7 @@ describe('LiteLlmBackend', () => {
         (init.signal as AbortSignal).addEventListener('abort', () => reject(new Error('aborted')));
       });
     });
-    const backend = new LiteLlmBackend({
-      baseUrl: 'http://litellm.platform.svc.cluster.local:4000',
-      apiKey: 'sk-virtual-key',
-      fetchFn: fetchFn as unknown as typeof fetch,
-    });
+    const backend = makeBackend({ fetchFn: fetchFn as unknown as typeof fetch });
 
     await expect(backend.run({ ...baseRequest, limits: { maxTokens: 1000, timeoutMs: 10 } })).rejects.toThrow(
       LiteLlmRequestError,

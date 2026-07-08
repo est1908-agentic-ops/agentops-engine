@@ -7,7 +7,7 @@ function fakeClient(): GithubClient {
   return {
     rest: {
       issues: { get: vi.fn(), createComment: vi.fn(), addLabels: vi.fn() },
-      pulls: { create: vi.fn(), get: vi.fn() },
+      pulls: { create: vi.fn(), get: vi.fn(), list: vi.fn() },
       repos: { get: vi.fn(), getContent: vi.fn() },
       checks: { listForRef: vi.fn() },
     },
@@ -51,6 +51,58 @@ describe('GithubScmPort — openPr', () => {
     });
     expect(result).toEqual({ prRef: 'octocat/hello-world#7', url: 'https://github.com/octocat/hello-world/pull/7' });
   });
+
+  it('reuses the existing open PR when create 422s because one already exists for the branch (idempotent retry)', async () => {
+    const client = fakeClient();
+    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { default_branch: 'main' } });
+    (client.rest.pulls.create as ReturnType<typeof vi.fn>).mockRejectedValue({
+      status: 422,
+      message: 'A pull request already exists for octocat:agentops/t1.',
+    });
+    (client.rest.pulls.list as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: [{ number: 7, html_url: 'https://github.com/octocat/hello-world/pull/7' }],
+    });
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
+
+    const result = await scm.openPr({ repo: 'octocat/hello-world', branch: 'agentops/t1', title: 'T', body: 'B' });
+
+    expect(client.rest.pulls.list).toHaveBeenCalledWith({
+      owner: 'octocat',
+      repo: 'hello-world',
+      head: 'octocat:agentops/t1',
+      state: 'open',
+    });
+    expect(result).toEqual({ prRef: 'octocat/hello-world#7', url: 'https://github.com/octocat/hello-world/pull/7' });
+  });
+
+  it('rethrows the 422 if create conflicts but no matching open PR is found', async () => {
+    const client = fakeClient();
+    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { default_branch: 'main' } });
+    const conflict = { status: 422, message: 'Validation failed' };
+    (client.rest.pulls.create as ReturnType<typeof vi.fn>).mockRejectedValue(conflict);
+    (client.rest.pulls.list as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [] });
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
+
+    await expect(
+      scm.openPr({ repo: 'octocat/hello-world', branch: 'agentops/t1', title: 'T', body: 'B' }),
+    ).rejects.toBe(conflict);
+  });
+
+  it('rethrows non-422 errors from create without attempting a PR lookup', async () => {
+    const client = fakeClient();
+    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { default_branch: 'main' } });
+    const serverError = { status: 500 };
+    (client.rest.pulls.create as ReturnType<typeof vi.fn>).mockRejectedValue(serverError);
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
+
+    await expect(
+      scm.openPr({ repo: 'octocat/hello-world', branch: 'agentops/t1', title: 'T', body: 'B' }),
+    ).rejects.toBe(serverError);
+    expect(client.rest.pulls.list).not.toHaveBeenCalled();
+  });
 });
 
 describe('GithubScmPort — readFile', () => {
@@ -92,14 +144,14 @@ describe('GithubScmPort — readFile', () => {
 });
 
 describe('GithubScmPort — push', () => {
-  it('runs git push origin <branch> in the given workspace, with no token handling here', async () => {
+  it('force-pushes origin <branch> in the given workspace, with no token handling here', async () => {
     const client = fakeClient();
     const { git, calls } = fakeGit();
     const scm = new GithubScmPort(client, git);
 
     await scm.push('octocat/hello-world', '/tmp/workspace', 'agentops/t1', 'hash-1');
 
-    expect(calls).toEqual([{ args: ['push', 'origin', 'agentops/t1'], cwd: '/tmp/workspace' }]);
+    expect(calls).toEqual([{ args: ['push', '--force', 'origin', 'agentops/t1'], cwd: '/tmp/workspace' }]);
   });
 
   it('throws if the push fails', async () => {

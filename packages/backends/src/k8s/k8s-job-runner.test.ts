@@ -6,12 +6,33 @@ import type { BackendRunRequest } from '@agentops/contracts';
 import { createClaudeCliSpec } from '../claude/claude-backend';
 import { ProcessCliAuthError } from '../process-cli-runner';
 import { FakeBatchApi } from './fake-batch-api';
+import type { V1Job } from './k8s-types';
 import {
   agentOpsArtifactPaths,
   buildAgentJob,
   K8sJobRunner,
   k8sJobName,
 } from './k8s-job-runner';
+
+// Simulates the readNamespacedJobStatus K8s API call hanging (e.g. an
+// unreachable API server) for the first `hangsLeft` polls before behaving
+// normally -- reproduces the issue-broccoli-94 incident, where a hung status
+// read froze the whole poll loop until Temporal's 15s heartbeat timeout fired
+// identically on every one of 5 retries (see
+// project_k8s_job_poll_no_timeout memory / the design doc's non-goals).
+class HangThenRealBatchApi extends FakeBatchApi {
+  constructor(private hangsLeft: number) {
+    super();
+  }
+
+  override async readNamespacedJobStatus(name: string, namespace: string): Promise<{ body: V1Job }> {
+    if (this.hangsLeft > 0) {
+      this.hangsLeft--;
+      return new Promise<{ body: V1Job }>(() => {});
+    }
+    return super.readNamespacedJobStatus(name, namespace);
+  }
+}
 
 const baseRequest: BackendRunRequest = {
   taskId: 'task-1',
@@ -27,13 +48,54 @@ const baseRequest: BackendRunRequest = {
 
 describe('k8sJobName', () => {
   it('sanitizes task ids for Kubernetes names', () => {
-    expect(
-      k8sJobName({ ...baseRequest, taskId: 'Owner/Repo#42' }),
-    ).toBe('agentops-owner-repo-42-implement-1-1');
+    expect(k8sJobName({ ...baseRequest, taskId: 'Owner/Repo#42' })).toMatch(
+      /^agentops-owner-repo-42-implement-1-1-[0-9a-f]{8}$/,
+    );
+  });
+
+  it('stays deterministic for the same request (Temporal retries reuse the same Job)', () => {
+    expect(k8sJobName(baseRequest)).toBe(k8sJobName(baseRequest));
+  });
+
+  // A RateLimitFallbackBackend retry reruns the same call with a different
+  // model. If the Job name and artifact paths ignored the model, that retry
+  // would 409-reuse the primary model's already-finished Job and re-read its
+  // (rate-limited) output instead of actually running the fallback.
+  it('derives a distinct Job name and artifact paths per model', () => {
+    const primary = { ...baseRequest, model: 'zai/glm-5.2' };
+    const fallback = { ...baseRequest, model: 'openrouter/deepseek-v4-pro' };
+    expect(k8sJobName(primary)).not.toBe(k8sJobName(fallback));
+    expect(agentOpsArtifactPaths(primary).outFile).not.toBe(agentOpsArtifactPaths(fallback).outFile);
   });
 });
 
 describe('buildAgentJob', () => {
+  it('refuses to build a Job against a placeholder "CHANGEME" image', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+
+    expect(() =>
+      buildAgentJob(
+        baseRequest,
+        createClaudeCliSpec({ image: 'ghcr.io/CHANGEME/agentops-engine/agent-claude:CHANGEME' }),
+        { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+        paths,
+      ),
+    ).toThrow(/CHANGEME/);
+  });
+
+  it('refuses to build a Job when the product-supplied image (req.image) is still a placeholder', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+
+    expect(() =>
+      buildAgentJob(
+        { ...baseRequest, image: 'ghcr.io/CHANGEME/some-product:CHANGEME' },
+        createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+        { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+        paths,
+      ),
+    ).toThrow(/CHANGEME/);
+  });
+
   it('builds the expected Job shape with shell-safe positional args', () => {
     const paths = agentOpsArtifactPaths(baseRequest);
     const job = buildAgentJob(
@@ -47,7 +109,7 @@ describe('buildAgentJob', () => {
       paths,
     );
 
-    expect(job.metadata?.name).toBe('agentops-task-1-implement-1-1');
+    expect(job.metadata?.name).toMatch(/^agentops-task-1-implement-1-1-[0-9a-f]{8}$/);
     expect(job.spec?.backoffLimit).toBe(0);
     expect(job.spec?.ttlSecondsAfterFinished).toBe(300);
     const container = job.spec?.template?.spec?.containers?.[0];
@@ -63,8 +125,6 @@ describe('buildAgentJob', () => {
       'json',
       '--model',
       'claude-sonnet-5',
-      '--max-turns',
-      '30',
       '--dangerously-skip-permissions',
     ]);
     expect(container?.env).toEqual([
@@ -207,6 +267,85 @@ describe('buildAgentJob', () => {
       },
     ]);
   });
+
+  it('sets serviceAccountName when provided', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      baseRequest,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+        serviceAccountName: 'engine-platform-agent',
+      },
+      paths,
+    );
+
+    expect(job.spec?.template?.spec?.serviceAccountName).toBe('engine-platform-agent');
+  });
+
+  it('omits serviceAccountName when not provided (devCycle Jobs are unaffected)', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      baseRequest,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+      paths,
+    );
+
+    expect(job.spec?.template?.spec?.serviceAccountName).toBeUndefined();
+  });
+
+  it('appends additionalSecretNames to envFrom alongside authSecretName', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      baseRequest,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+        authSecretName: 'claude-credentials',
+        additionalSecretNames: ['platform-agent-credentials'],
+      },
+      paths,
+    );
+
+    expect(job.spec?.template?.spec?.containers?.[0].envFrom).toEqual([
+      { secretRef: { name: 'claude-credentials' } },
+      { secretRef: { name: 'platform-agent-credentials' } },
+    ]);
+  });
+
+  it('sets pod template labels when podLabels is provided', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      baseRequest,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+        podLabels: { 'agentops/role': 'platform-agent' },
+      },
+      paths,
+    );
+
+    expect(job.spec?.template?.metadata?.labels).toEqual({ 'agentops/role': 'platform-agent' });
+  });
+
+  it('omits pod template labels when podLabels is not provided', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      baseRequest,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+      paths,
+    );
+
+    expect(job.spec?.template?.metadata?.labels).toBeUndefined();
+  });
 });
 
 describe('K8sJobRunner', () => {
@@ -218,7 +357,7 @@ describe('K8sJobRunner', () => {
 
     const batchApi = new FakeBatchApi();
     let now = 1_000;
-    const runner = new K8sJobRunner(createClaudeCliSpec(), {
+    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
       namespace: 'dev-agents',
       workspacePvcName: 'workspace-tasks',
       workspaceMountPath: '/workspace/tasks',
@@ -253,13 +392,121 @@ describe('K8sJobRunner', () => {
     });
   });
 
+  it('heartbeats with job-created/polling phase and the last-known Job status', async () => {
+    const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-heartbeat-'));
+    const req = { ...baseRequest, workspaceRef };
+    const paths = agentOpsArtifactPaths(req);
+    await mkdir(paths.dir, { recursive: true });
+
+    const batchApi = new FakeBatchApi();
+    const heartbeats: unknown[] = [];
+    const now = 1_000;
+    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
+      namespace: 'dev-agents',
+      workspacePvcName: 'workspace-tasks',
+      workspaceMountPath: '/workspace/tasks',
+      batchApi,
+      pollIntervalMs: 1,
+      now: () => now,
+      heartbeat: (details) => heartbeats.push(details),
+    });
+
+    const runPromise = runner.run(req);
+    const jobName = k8sJobName(req);
+
+    await vi.waitFor(() => expect(heartbeats.length).toBeGreaterThanOrEqual(2));
+    expect(heartbeats[0]).toEqual({
+      phase: 'job-created',
+      jobName,
+      taskId: 'task-1',
+      stage: 'implement',
+      elapsedMs: 0,
+      timeoutMs: 30_000,
+      jobStatus: undefined,
+    });
+    expect(heartbeats[1]).toEqual({
+      phase: 'polling',
+      jobName,
+      taskId: 'task-1',
+      stage: 'implement',
+      elapsedMs: 0,
+      timeoutMs: 30_000,
+      jobStatus: { active: 1 },
+    });
+
+    await writeFile(
+      paths.outFile,
+      JSON.stringify({
+        is_error: false,
+        result: 'done',
+        usage: { input_tokens: 3, output_tokens: 4 },
+        duration_ms: 50,
+      }),
+      'utf8',
+    );
+    batchApi.setJobStatus(jobName, { succeeded: 1 });
+
+    await expect(runPromise).resolves.toEqual({
+      output: 'done',
+      tokensIn: 3,
+      tokensOut: 4,
+      wallMs: 50,
+    });
+  });
+
+  it('retries the status poll after a client-side timeout instead of freezing the whole activity', async () => {
+    const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-poll-timeout-'));
+    const req = { ...baseRequest, workspaceRef };
+    const paths = agentOpsArtifactPaths(req);
+    await mkdir(paths.dir, { recursive: true });
+
+    const batchApi = new HangThenRealBatchApi(2);
+    const heartbeats: unknown[] = [];
+    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
+      namespace: 'dev-agents',
+      workspacePvcName: 'workspace-tasks',
+      workspaceMountPath: '/workspace/tasks',
+      batchApi,
+      pollIntervalMs: 1,
+      statusPollTimeoutMs: 5,
+      heartbeat: (details) => heartbeats.push(details),
+    });
+
+    const runPromise = runner.run(req);
+    await vi.waitFor(() => expect(batchApi.creates).toHaveLength(1));
+
+    await writeFile(
+      paths.outFile,
+      JSON.stringify({
+        is_error: false,
+        result: 'done',
+        usage: { input_tokens: 3, output_tokens: 4 },
+        duration_ms: 50,
+      }),
+      'utf8',
+    );
+    batchApi.setJobStatus(k8sJobName(req), { succeeded: 1 });
+
+    // Proves the loop survived two hung status reads: it still resolved
+    // instead of hanging until an outer heartbeat timeout, and it kept
+    // heartbeating throughout (a bare Promise.race with no cancellation
+    // would leave the loop stuck awaiting the first hung call forever).
+    await expect(runPromise).resolves.toEqual({
+      output: 'done',
+      tokensIn: 3,
+      tokensOut: 4,
+      wallMs: 50,
+    });
+    expect(heartbeats.length).toBeGreaterThanOrEqual(4);
+  });
+
   it('deletes the Job and rethrows when heartbeat fails (cancellation)', async () => {
     const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-cancel-'));
     const req = { ...baseRequest, workspaceRef };
     const batchApi = new FakeBatchApi();
     const cancelError = new Error('activity cancelled');
 
-    const runner = new K8sJobRunner(createClaudeCliSpec(), {
+    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
       namespace: 'dev-agents',
       workspacePvcName: 'workspace-tasks',
       workspaceMountPath: '/workspace/tasks',
@@ -280,6 +527,47 @@ describe('K8sJobRunner', () => {
     ]);
   });
 
+  it('reuses an already-existing Job instead of failing when create is retried after a prior attempt succeeded', async () => {
+    const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-conflict-'));
+    const req = { ...baseRequest, workspaceRef };
+    const paths = agentOpsArtifactPaths(req);
+    await mkdir(paths.dir, { recursive: true });
+
+    const batchApi = new FakeBatchApi();
+    const opts = { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' };
+    // Simulates a previous Temporal retry of this same activity call: its createNamespacedJob
+    // already succeeded, but the runner never reached this point (e.g. the status read that follows
+    // failed for an unrelated reason). The Job is still sitting in the cluster under this same name.
+    await batchApi.createNamespacedJob('dev-agents', buildAgentJob(req, createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), opts, paths));
+
+    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
+      ...opts,
+      batchApi,
+      pollIntervalMs: 1,
+      heartbeat: () => {},
+    });
+
+    const runPromise = runner.run(req);
+    await writeFile(
+      paths.outFile,
+      JSON.stringify({
+        is_error: false,
+        result: 'done',
+        usage: { input_tokens: 3, output_tokens: 4 },
+        duration_ms: 50,
+      }),
+      'utf8',
+    );
+    batchApi.setJobStatus(k8sJobName(req), { succeeded: 1 });
+
+    await expect(runPromise).resolves.toEqual({
+      output: 'done',
+      tokensIn: 3,
+      tokensOut: 4,
+      wallMs: 50,
+    });
+  });
+
   it('throws ProcessCliAuthError when stderr matches the auth pattern', async () => {
     const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-auth-'));
     const req = { ...baseRequest, workspaceRef };
@@ -287,7 +575,7 @@ describe('K8sJobRunner', () => {
     await mkdir(paths.dir, { recursive: true });
 
     const batchApi = new FakeBatchApi();
-    const runner = new K8sJobRunner(createClaudeCliSpec(), {
+    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
       namespace: 'dev-agents',
       workspacePvcName: 'workspace-tasks',
       workspaceMountPath: '/workspace/tasks',

@@ -5,6 +5,8 @@ export * from './process-cli-runner';
 export * from './claude/claude-backend';
 export * from './pi/pi-backend';
 export * from './litellm/litellm-backend';
+export * from './provider-rate-limit';
+export * from './rate-limit-fallback/rate-limit-fallback-backend';
 export * from './rate-window/rate-window-limiter';
 export * from './rate-window/rate-windowed-backend';
 export * from './k8s/batch-api-from-client';

@@ -2,6 +2,7 @@ const { defineConfig } = require('eslint/config');
 const js = require('@eslint/js');
 const tseslint = require('typescript-eslint');
 const importPlugin = require('eslint-plugin-import');
+const reactHooks = require('eslint-plugin-react-hooks');
 
 module.exports = defineConfig(
   { ignores: ['**/dist/**', '**/node_modules/**'] },
@@ -43,6 +44,13 @@ module.exports = defineConfig(
           ],
         },
       ],
+    },
+  },
+  {
+    files: ['packages/ui/src/**/*.{ts,tsx}'],
+    plugins: { 'react-hooks': reactHooks },
+    rules: {
+      ...reactHooks.configs.recommended.rules,
     },
   },
   {

@@ -4,6 +4,7 @@ export * from './stats-store';
 export * from './postgres-stats-store';
 export * from './stage-result-store';
 export * from './create-activities';
+export * from './load-product-config';
 export * from './workspace/spawn-git-command-runner';
 export * from './workspace/spawn-command-runner';
 export * from './workspace/workspace-manager';

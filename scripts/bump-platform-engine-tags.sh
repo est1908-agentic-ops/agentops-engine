@@ -27,6 +27,7 @@ text = values.read_text()
 text = re.sub(r"^(  workerTag:\s*).*$", rf'\g<1>"{sha}"', text, flags=re.M)
 text = re.sub(r"^(  agentRunnerTag:\s*).*$", rf'\g<1>"{sha}"', text, flags=re.M)
 text = re.sub(r"^(  gatewayTag:\s*).*$", rf'\g<1>"{sha}"', text, flags=re.M)
+text = re.sub(r"^(  controlTag:\s*).*$", rf'\g<1>"{sha}"', text, flags=re.M)
 values.write_text(text)
 
 app = root / "application.yaml"

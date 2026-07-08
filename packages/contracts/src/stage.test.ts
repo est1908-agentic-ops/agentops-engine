@@ -21,6 +21,10 @@ describe('StageSchema', () => {
     }
   });
 
+  it('accepts "platform" as a valid stage', () => {
+    expect(StageSchema.parse('platform')).toBe('platform');
+  });
+
   it('rejects an invented stage name', () => {
     expect(() => StageSchema.parse('deploy')).toThrow();
   });

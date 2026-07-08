@@ -1,10 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { context, trace } from '@opentelemetry/api';
 import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import type { AgentBackend } from '@agentops/backends';
-import type { BackendRunRequest } from '@agentops/contracts';
-import { LiteLlmBudgetExceededError, RateWindowExceededError, StubBackend } from '@agentops/backends';
+import type { BackendRunRequest, ResolvedProjectEntry } from '@agentops/contracts';
+import {
+  LiteLlmBudgetExceededError,
+  RateWindowExceededError,
+  StubBackend,
+} from '@agentops/backends';
 import { MemoryTrackerPort, MemoryScmPort } from '@agentops/ports';
 import { PromptPack } from '@agentops/prompts';
 import { ApplicationFailure } from '@temporalio/common';
@@ -23,6 +27,8 @@ function buildDeps() {
     stageResults: new InMemoryStageResultStore(),
     workspaces: new MemoryWorkspaceManager() as Workspaces,
     prompts: new PromptPack(),
+    registry: [] as ResolvedProjectEntry[],
+    heartbeat: () => {},
   };
 }
 
@@ -46,7 +52,9 @@ describe('createActivities', () => {
       backend: 'recording',
       model: 'stub-v1',
       image: 'ghcr.io/example/agentops:latest',
-      services: [{ name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } }],
+      services: [
+        { name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } },
+      ],
       promptRef: 'full_verify.md',
       promptContext: { taskId: 't1', goal: 'g', verifyCommands: '' },
       workspaceRef: 'demo/repo',
@@ -76,6 +84,30 @@ describe('createActivities', () => {
       limits: { maxTokens: 1000, timeoutMs: 60_000 },
     });
     expect(result.output).toBe('diff');
+  });
+
+  it('runAgent heartbeats once before dispatching to the backend', async () => {
+    const heartbeats: unknown[] = [];
+    const deps = { ...buildDeps(), heartbeat: (details: unknown) => heartbeats.push(details) };
+    (deps.backends.stub as StubBackend).scriptResponse('implement', 1, { output: 'diff' });
+    const activities = createActivities(deps);
+
+    await activities.runAgent({
+      taskId: 't1',
+      stage: 'implement',
+      attempt: 1,
+      callIndex: 1,
+      backend: 'stub',
+      model: 'stub-v1',
+      promptRef: 'implement.md',
+      promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' },
+      workspaceRef: 'demo/repo',
+      limits: { maxTokens: 1000, timeoutMs: 60_000 },
+    });
+
+    expect(heartbeats).toEqual([
+      { phase: 'started', taskId: 't1', stage: 'implement', attempt: 1, callIndex: 1, backend: 'stub', model: 'stub-v1' },
+    ]);
   });
 
   it('runAgent throws for an unregistered backend', async () => {
@@ -253,11 +285,17 @@ describe('createActivities — workspace lifecycle', () => {
           return { workspaceRef: 'ref', branch: 'b', baseBranch: 'main' };
         },
         cleanup: async () => {},
+        prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
+        cleanupScratch: async () => {},
       } as Workspaces,
     };
     const activities = createActivities(deps);
 
-    await activities.prepareWorkspace({ taskId: 't1', repo: 'owner/repo', initCommands: ['pnpm install'] });
+    await activities.prepareWorkspace({
+      taskId: 't1',
+      repo: 'owner/repo',
+      initCommands: ['pnpm install'],
+    });
 
     expect(captured).toEqual([['pnpm install']]);
   });
@@ -324,10 +362,14 @@ describe('createActivities — workspace error translation', () => {
         throw new WorkspaceError('git clone failed for owner/repo: spawn git ENOENT', true);
       },
       cleanup: async () => {},
+      prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
+      cleanupScratch: async () => {},
     };
     const activities = createActivities(deps);
 
-    const err: unknown = await activities.prepareWorkspace({ taskId: 't1', repo: 'owner/repo' }).catch((e) => e);
+    const err: unknown = await activities
+      .prepareWorkspace({ taskId: 't1', repo: 'owner/repo' })
+      .catch((e) => e);
 
     expect(err).toBeInstanceOf(ApplicationFailure);
     expect((err as ApplicationFailure).nonRetryable).toBe(true);
@@ -340,10 +382,14 @@ describe('createActivities — workspace error translation', () => {
         throw new WorkspaceError('git fetch failed for owner/repo: network unreachable', false);
       },
       cleanup: async () => {},
+      prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
+      cleanupScratch: async () => {},
     };
     const activities = createActivities(deps);
 
-    await expect(activities.prepareWorkspace({ taskId: 't1', repo: 'owner/repo' })).rejects.toThrow(WorkspaceError);
+    await expect(activities.prepareWorkspace({ taskId: 't1', repo: 'owner/repo' })).rejects.toThrow(
+      WorkspaceError,
+    );
   });
 
   it('converts a non-retryable WorkspaceError from cleanupWorkspace too', async () => {
@@ -353,6 +399,8 @@ describe('createActivities — workspace error translation', () => {
       cleanup: async () => {
         throw new WorkspaceError('git worktree remove failed: spawn git ENOENT', true);
       },
+      prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
+      cleanupScratch: async () => {},
     };
     const activities = createActivities(deps);
 
@@ -383,7 +431,9 @@ describe('createActivities — backend error translation', () => {
     const deps = buildDeps();
     deps.backends.litellm = {
       run: async () => {
-        throw new LiteLlmBudgetExceededError('Budget has been exceeded! Current cost: 1.20, Max budget: 1.00');
+        throw new LiteLlmBudgetExceededError(
+          'Budget has been exceeded! Current cost: 1.20, Max budget: 1.00',
+        );
       },
     };
     const activities = createActivities(deps);
@@ -399,7 +449,10 @@ describe('createActivities — backend error translation', () => {
     const deps = buildDeps();
     deps.backends.claude = {
       run: async () => {
-        throw new RateWindowExceededError('claude subscription rate window exhausted, retry in 4200ms', 4200);
+        throw new RateWindowExceededError(
+          'claude subscription rate window exhausted, retry in 4200ms',
+          4200,
+        );
       },
     };
     const activities = createActivities(deps);
@@ -410,5 +463,62 @@ describe('createActivities — backend error translation', () => {
     expect((err as ApplicationFailure).type).toBe('RateWindowExceededError');
     expect((err as ApplicationFailure).nonRetryable).toBe(false);
     expect((err as ApplicationFailure).nextRetryDelay).toBe(4200);
+  });
+});
+
+describe('createActivities — resolveRepoConfig', () => {
+  it("resolves product from the registry and loads that repo's ProductConfig", async () => {
+    const deps = buildDeps();
+    deps.scm.seedFile(
+      'flair-hr/agentops-engine',
+      'agentops.json',
+      JSON.stringify({ fastVerifyCommands: ['pnpm lint'] }),
+    );
+    deps.registry = [
+      {
+        product: 'engine',
+        repo: 'flair-hr/agentops-engine',
+        trackerType: 'github',
+        tokenEnvVar: 'X',
+        token: 'fake',
+      },
+    ];
+    const activities = createActivities(deps);
+
+    const { registered, product, config } = await activities.resolveRepoConfig(
+      'flair-hr/agentops-engine',
+    );
+
+    expect(registered).toBe(true);
+    expect(product).toBe('engine');
+    expect(config.fastVerifyCommands).toEqual(['pnpm lint']);
+  });
+
+  it('reports unregistered instead of touching the SCM when the repo is not in the registry', async () => {
+    const deps = buildDeps();
+    const readFileSpy = vi.spyOn(deps.scm, 'readFile');
+    const activities = createActivities(deps);
+
+    const { registered, product } = await activities.resolveRepoConfig('flair-hr/some-other-repo');
+
+    expect(registered).toBe(false);
+    expect(product).toBe('default');
+    // No registry entry means no SCM credentials scoped to this repo either --
+    // the real (non-fake) ScmPort throws for any repo it isn't configured
+    // for, so resolveRepoConfig must never reach it for an unregistered repo.
+    expect(readFileSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('createActivities — scratch workspace lifecycle', () => {
+  it('prepareScratchWorkspace and cleanupScratchWorkspace delegate to the workspaces dependency', async () => {
+    const deps = buildDeps();
+    const activities = createActivities(deps);
+
+    const { workspaceRef } = await activities.prepareScratchWorkspace('platform-task-1');
+    expect((deps.workspaces as MemoryWorkspaceManager).isScratchPrepared(workspaceRef)).toBe(true);
+
+    await activities.cleanupScratchWorkspace(workspaceRef);
+    expect((deps.workspaces as MemoryWorkspaceManager).isScratchCleanedUp(workspaceRef)).toBe(true);
   });
 });

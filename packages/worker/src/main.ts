@@ -23,6 +23,7 @@ import {
   K8sJobRunner,
   LiteLlmBackend,
   ProcessCliRunner,
+  RateLimitFallbackBackend,
   RateWindowedBackend,
   RateWindowLimiter,
   StubBackend,
@@ -41,7 +42,7 @@ import {
   type TrackerPort,
 } from '@agentops/ports';
 import { PromptPack } from '@agentops/prompts';
-import type { DevCycleActivities } from '@agentops/workflows';
+import type { DevCycleActivities, PlatformActivities } from '@agentops/workflows';
 import { createWorker } from './create-worker';
 import { setupTracing } from './tracing';
 
@@ -51,7 +52,7 @@ export interface ActivityWiring {
   workspaces: Workspaces;
 }
 
-export function buildActivityDependencies(registry: ResolvedProjectEntry[]): ActivityWiring {
+export function buildActivityDependencies(registry: ResolvedProjectEntry[], workspacesDir?: string): ActivityWiring {
   if (registry.length === 0) {
     return { scm: new MemoryScmPort(), tracker: new MemoryTrackerPort(), workspaces: new MemoryWorkspaceManager() };
   }
@@ -61,18 +62,40 @@ export function buildActivityDependencies(registry: ResolvedProjectEntry[]): Act
     return { repo: entry.repo, scm, tracker, git };
   });
   const { scm, tracker, resolveGit } = createProjectScopedPorts(entries);
-  return { scm, tracker, workspaces: new WorkspaceManager({ resolveGit, cloneUrl: githubCloneUrl }) };
+  return { scm, tracker, workspaces: new WorkspaceManager({ resolveGit, cloneUrl: githubCloneUrl, workspacesDir }) };
+}
+
+// The workspace-tasks PVC is mounted at this path in both the engine-worker
+// pod (see charts/engine/templates/deployment.yaml) and every K8s Job pod it
+// launches (K8sJobRunnerOptions.workspaceMountPath below). WorkspaceManager
+// must create task workspaces under this same path -- otherwise a
+// workspaceRef it hands to K8sJobRunner points at a directory that only
+// exists on the engine-worker pod's own filesystem, and the Job container's
+// workingDir doesn't exist.
+export function workspaceMountPath(): string {
+  return process.env.WORKSPACE_MOUNT_PATH ?? '/workspace/tasks';
+}
+
+// Only in-cluster runAgent calls go through K8sJobRunner (see buildBackends
+// below) -- local/dev mode spawns the CLI in-process via ProcessCliRunner, so
+// there's no separate Job pod to line up with and the WorkspaceManager
+// default (home dir) is fine.
+export function resolveWorkspacesDir(inCluster: boolean): string | undefined {
+  return inCluster ? workspaceMountPath() : undefined;
 }
 
 export function buildJobRunnerOptions(
   batchApi: BatchV1ApiLike,
-  authSecretName: string | undefined,
+  opts: { authSecretName?: string; serviceAccountName?: string; additionalSecretNames?: string[]; podLabels?: Record<string, string> } = {},
 ): K8sJobRunnerOptions {
   return {
     namespace: process.env.AGENT_NAMESPACE ?? 'dev-agents',
     workspacePvcName: process.env.WORKSPACE_PVC_NAME ?? 'workspace-tasks',
-    workspaceMountPath: process.env.WORKSPACE_MOUNT_PATH ?? '/workspace/tasks',
-    authSecretName,
+    workspaceMountPath: workspaceMountPath(),
+    authSecretName: opts.authSecretName,
+    additionalSecretNames: opts.additionalSecretNames,
+    serviceAccountName: opts.serviceAccountName,
+    podLabels: opts.podLabels,
     runAsUser: process.env.AGENT_RUNNER_UID ? Number(process.env.AGENT_RUNNER_UID) : undefined,
     imagePullSecretName: process.env.IMAGE_PULL_SECRET_NAME,
     batchApi,
@@ -95,7 +118,52 @@ function wrapWithRateWindow(backend: AgentBackend, envPrefix: string, name: stri
   return new RateWindowedBackend(backend, new RateWindowLimiter({ maxCalls, windowMs }), name);
 }
 
+// Reacts to a real provider-side rate limit (ProviderRateLimitedError),
+// unlike wrapWithRateWindow's proactive local quota check -- see
+// docs/superpowers/specs/2026-07-08-provider-rate-limit-fallback-design.md.
+// Unset env var (the default) means no fallback, same "off by default"
+// convention as the rate window.
+function wrapWithRateLimitFallback(backend: AgentBackend, envPrefix: string, name: string): AgentBackend {
+  const fallbackModel = process.env[`${envPrefix}_RATE_LIMIT_FALLBACK_MODEL`];
+  if (!fallbackModel) {
+    return backend;
+  }
+  return new RateLimitFallbackBackend(backend, fallbackModel, name);
+}
+
+// In-cluster tasks fail two ways when these are missing or still placeholders:
+// an ImagePullBackOff that eats the whole activity timeout before surfacing
+// anything (AGENT_RUNNER_IMAGE), or a real Job that starts but every call
+// 401s (LITELLM_API_KEY, *_AUTH_SECRET_NAME -- an unset secret name means
+// envFrom gets no entry at all, not an empty one). Both are worker-startup
+// misconfigurations, not per-task failures, so they belong here, checked
+// once, loud, before the worker ever claims a task -- not discovered
+// piecemeal days later as a string of confusing individual task failures.
+export function assertLiveBackendConfig(env: NodeJS.ProcessEnv): void {
+  const missing: string[] = [];
+  if (!env.AGENT_RUNNER_IMAGE || env.AGENT_RUNNER_IMAGE.includes('CHANGEME')) {
+    missing.push('AGENT_RUNNER_IMAGE (unset or still the placeholder image)');
+  }
+  if (!env.LITELLM_API_KEY) {
+    missing.push('LITELLM_API_KEY');
+  }
+  if (!env.CLAUDE_AUTH_SECRET_NAME) {
+    missing.push('CLAUDE_AUTH_SECRET_NAME');
+  }
+  if (!env.PI_AUTH_SECRET_NAME) {
+    missing.push('PI_AUTH_SECRET_NAME');
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `refusing to start in-cluster: missing or placeholder backend config:\n- ${missing.join('\n- ')}`,
+    );
+  }
+}
+
 export function buildBackends(inCluster: boolean): Record<string, AgentBackend> {
+  if (inCluster) {
+    assertLiveBackendConfig(process.env);
+  }
   const agentImage =
     process.env.AGENT_RUNNER_IMAGE ?? 'ghcr.io/CHANGEME/agentops-engine/agent-runner:CHANGEME';
   const claudeSpec = createClaudeCliSpec({ image: agentImage });
@@ -112,7 +180,12 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
     return {
       stub: new StubBackend(),
       claude: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), 'CLAUDE', 'claude'),
-      pi: wrapWithRateWindow(new ProcessCliRunner(piSpec), 'PI', 'pi'),
+      pi: wrapWithRateLimitFallback(wrapWithRateWindow(new ProcessCliRunner(piSpec), 'PI', 'pi'), 'PI', 'pi'),
+      platform: wrapWithRateLimitFallback(
+        wrapWithRateWindow(new ProcessCliRunner(piSpec), 'PI', 'platform'),
+        'PI',
+        'platform',
+      ),
       litellm,
     };
   }
@@ -127,14 +200,35 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
     // and pi's (provider-dependent, see images/agent-runner/Dockerfile) are not
     // guaranteed to be the same shape, so they were never safe to share.
     claude: wrapWithRateWindow(
-      new K8sJobRunner(claudeSpec, buildJobRunnerOptions(batchApi, process.env.CLAUDE_AUTH_SECRET_NAME)),
+      new K8sJobRunner(claudeSpec, buildJobRunnerOptions(batchApi, { authSecretName: process.env.CLAUDE_AUTH_SECRET_NAME })),
       'CLAUDE',
       'claude',
     ),
-    pi: wrapWithRateWindow(
-      new K8sJobRunner(piSpec, buildJobRunnerOptions(batchApi, process.env.PI_AUTH_SECRET_NAME)),
+    pi: wrapWithRateLimitFallback(
+      wrapWithRateWindow(
+        new K8sJobRunner(piSpec, buildJobRunnerOptions(batchApi, { authSecretName: process.env.PI_AUTH_SECRET_NAME })),
+        'PI',
+        'pi',
+      ),
       'PI',
       'pi',
+    ),
+    platform: wrapWithRateLimitFallback(
+      wrapWithRateWindow(
+        new K8sJobRunner(
+          piSpec,
+          buildJobRunnerOptions(batchApi, {
+            authSecretName: process.env.PI_AUTH_SECRET_NAME,
+            serviceAccountName: process.env.PLATFORM_AGENT_SERVICE_ACCOUNT,
+            additionalSecretNames: process.env.PLATFORM_AGENT_SECRET_NAME ? [process.env.PLATFORM_AGENT_SECRET_NAME] : undefined,
+            podLabels: { 'agentops/role': 'platform-agent' },
+          }),
+        ),
+        'PI',
+        'platform',
+      ),
+      'PI',
+      'platform',
     ),
     litellm,
   };
@@ -164,7 +258,7 @@ async function main(): Promise<void> {
 
   const registry = loadProjectRegistry();
   const inCluster = Boolean(process.env.KUBERNETES_SERVICE_HOST);
-  const { scm, tracker, workspaces } = buildActivityDependencies(registry);
+  const { scm, tracker, workspaces } = buildActivityDependencies(registry, resolveWorkspacesDir(inCluster));
   console.log(
     registry.length > 0
       ? `agentops worker: LIVE mode — ${registry.length} project(s) registered: ${registry
@@ -185,7 +279,7 @@ async function main(): Promise<void> {
       : 'agentops worker: agent_run_stats in-memory only (AGENT_STATS_DB_HOST not set)',
   );
 
-  const activities: DevCycleActivities = createActivities({
+  const activities: DevCycleActivities & PlatformActivities = createActivities({
     backends: buildBackends(inCluster),
     tracker,
     scm,
@@ -193,6 +287,7 @@ async function main(): Promise<void> {
     stageResults: new InMemoryStageResultStore(),
     workspaces,
     prompts: new PromptPack(),
+    registry,
   });
 
   const tracing = setupTracing();
