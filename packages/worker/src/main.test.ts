@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MemoryWorkspaceManager, WorkspaceManager } from '@agentops/activities';
 import { MemoryScmPort, MemoryTrackerPort } from '@agentops/ports';
-import { assertLiveBackendConfig, buildActivityDependencies, resolveWorkspacesDir } from './main';
+import { assertLiveBackendConfig, buildActivityDependencies, mergeStaticAndManagedRegistries, resolveWorkspacesDir } from './main';
 
 const validLiveEnv: NodeJS.ProcessEnv = {
   AGENT_RUNNER_IMAGE: 'gitactions.est1908.top/agentic-ops/agent-runner:abc123',
@@ -113,5 +113,27 @@ describe('resolveWorkspacesDir', () => {
 
   it('resolves to undefined outside the cluster, so WorkspaceManager keeps its home-dir default', () => {
     expect(resolveWorkspacesDir(false)).toBeUndefined();
+  });
+});
+
+describe('mergeStaticAndManagedRegistries', () => {
+  it('returns the static registry unchanged when there are no managed projects', () => {
+    const staticEntry = { project: 'legacy', repo: 'acme/legacy', trackerType: 'github' as const, tokenEnvVar: 'X', token: 'static' };
+    expect(mergeStaticAndManagedRegistries([staticEntry], [])).toEqual([staticEntry]);
+  });
+
+  it('includes managed projects alongside distinct static entries', () => {
+    const staticEntry = { project: 'legacy', repo: 'acme/legacy', trackerType: 'github' as const, tokenEnvVar: 'X', token: 'static' };
+    const managedEntry = { project: 'acme-web', repo: 'acme/web', trackerType: 'github' as const, tokenEnvVar: 'Y', token: 'db' };
+    const merged = mergeStaticAndManagedRegistries([staticEntry], [managedEntry]);
+    expect(merged).toHaveLength(2);
+    expect(merged).toEqual(expect.arrayContaining([staticEntry, managedEntry]));
+  });
+
+  it('lets a managed project win over a static entry for the same repo', () => {
+    const staticEntry = { project: 'old-name', repo: 'acme/web', trackerType: 'github' as const, tokenEnvVar: 'X', token: 'static' };
+    const managedEntry = { project: 'acme-web', repo: 'acme/web', trackerType: 'github' as const, tokenEnvVar: 'Y', token: 'db' };
+    const merged = mergeStaticAndManagedRegistries([staticEntry], [managedEntry]);
+    expect(merged).toEqual([managedEntry]);
   });
 });

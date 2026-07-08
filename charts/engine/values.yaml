@@ -28,16 +28,26 @@ temporalUiBaseUrl: ""
 otelExporterOtlpEndpoint: ""
 
 # Host empty by default -- same "chart ships no cluster assumption" pattern as
-# otelExporterOtlpEndpoint above. agentops-platform's values override sets the
-# real host once the agent_run_stats database exists there (M4 sub-project 3).
+# otelExporterOtlpEndpoint above. agentops-platform's values override sets
+# the real host once the agentops_engine database exists there.
 # Password comes from the same postgres-credentials secret Temporal already
 # uses (shared Postgres instance, separate database, per ARCHITECTURE.md §5.2).
-agentStatsDb:
+# Named after the engine, not "agent_run_stats" -- it also holds
+# managed_projects (see docs/superpowers/specs/2026-07-08-managed-project-registry-design.md).
+engineDb:
   host: ""
   port: "5432"
-  name: agent_run_stats
+  name: agentops_engine
   user: temporal
   passwordSecretName: postgres-credentials
+
+# Base64 PKCS8 DER private key for decrypting managed-project credentials
+# (docs/superpowers/specs/2026-07-08-managed-project-registry-design.md §5).
+# Empty by default -- unset means the worker/gateway/cli fall through to the
+# static PROJECT_REGISTRY_JSON registry only, same "off by default" pattern
+# as engineDb.host above. Generate with credential-crypto's
+# generateManagedProjectKeyPair() and store the private half SOPS-encrypted.
+projectCredentialPrivateKeySecretName: ""
 
 taskQueue: agentops-devcycle
 

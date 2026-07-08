@@ -73,20 +73,27 @@ spec:
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: {{ .Values.otelExporterOtlpEndpoint | quote }}
             {{- end }}
-            {{- if .Values.agentStatsDb.host }}
-            - name: AGENT_STATS_DB_HOST
-              value: {{ .Values.agentStatsDb.host | quote }}
-            - name: AGENT_STATS_DB_PORT
-              value: {{ .Values.agentStatsDb.port | quote }}
-            - name: AGENT_STATS_DB_NAME
-              value: {{ .Values.agentStatsDb.name | quote }}
-            - name: AGENT_STATS_DB_USER
-              value: {{ .Values.agentStatsDb.user | quote }}
-            - name: AGENT_STATS_DB_PASSWORD
+            {{- if .Values.engineDb.host }}
+            - name: ENGINE_DB_HOST
+              value: {{ .Values.engineDb.host | quote }}
+            - name: ENGINE_DB_PORT
+              value: {{ .Values.engineDb.port | quote }}
+            - name: ENGINE_DB_NAME
+              value: {{ .Values.engineDb.name | quote }}
+            - name: ENGINE_DB_USER
+              value: {{ .Values.engineDb.user | quote }}
+            - name: ENGINE_DB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: {{ .Values.agentStatsDb.passwordSecretName }}
+                  name: {{ .Values.engineDb.passwordSecretName }}
                   key: password
+            {{- if .Values.projectCredentialPrivateKeySecretName }}
+            - name: PROJECT_CREDENTIAL_PRIVATE_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.projectCredentialPrivateKeySecretName }}
+                  key: privateKey
+            {{- end }}
             {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}

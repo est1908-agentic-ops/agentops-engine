@@ -6,11 +6,14 @@ import {
   InMemoryStageResultStore,
   InMemoryStatsStore,
   loadEnv,
+  loadManagedProjectRegistry,
   loadProjectRegistry,
   MemoryWorkspaceManager,
+  PostgresManagedProjectStore,
   PostgresStatsStore,
   SpawnGitCommandRunner,
   WorkspaceManager,
+  type ManagedProjectRegistryDeps,
   type StatsStore,
   type Workspaces,
 } from '@agentops/activities';
@@ -63,6 +66,28 @@ export function buildActivityDependencies(registry: ResolvedProjectEntry[], work
   });
   const { scm, tracker, resolveGit } = createProjectScopedPorts(entries);
   return { scm, tracker, workspaces: new WorkspaceManager({ resolveGit, cloneUrl: githubCloneUrl, workspacesDir }) };
+}
+
+/**
+ * DB-registered projects take precedence over a static entry for the same
+ * repo (docs/superpowers/specs/2026-07-08-managed-project-registry-design.md
+ * §6) -- filter the static list down to repos the managed registry doesn't
+ * already cover, then put managed entries first for readability in logs.
+ */
+export function mergeStaticAndManagedRegistries(
+  staticRegistry: ResolvedProjectEntry[],
+  managedRegistry: ResolvedProjectEntry[],
+): ResolvedProjectEntry[] {
+  const managedRepos = new Set(managedRegistry.map((entry) => entry.repo));
+  return [...managedRegistry, ...staticRegistry.filter((entry) => !managedRepos.has(entry.repo))];
+}
+
+function buildManagedProjectDeps(pool: Pool | undefined): ManagedProjectRegistryDeps | undefined {
+  const privateKey = process.env.PROJECT_CREDENTIAL_PRIVATE_KEY;
+  if (!pool || !privateKey) {
+    return undefined;
+  }
+  return { store: new PostgresManagedProjectStore(pool), privateKey };
 }
 
 // The workspace-tasks PVC is mounted at this path in both the engine-worker
@@ -235,16 +260,16 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
 }
 
 export async function buildStatsStore(): Promise<StatsStore> {
-  const host = process.env.AGENT_STATS_DB_HOST;
+  const host = process.env.ENGINE_DB_HOST;
   if (!host) {
     return new InMemoryStatsStore();
   }
   const pool = new Pool({
     host,
-    port: process.env.AGENT_STATS_DB_PORT ? Number(process.env.AGENT_STATS_DB_PORT) : 5432,
-    database: process.env.AGENT_STATS_DB_NAME ?? 'agent_run_stats',
-    user: process.env.AGENT_STATS_DB_USER ?? 'temporal',
-    password: process.env.AGENT_STATS_DB_PASSWORD,
+    port: process.env.ENGINE_DB_PORT ? Number(process.env.ENGINE_DB_PORT) : 5432,
+    database: process.env.ENGINE_DB_NAME ?? 'agentops_engine',
+    user: process.env.ENGINE_DB_USER ?? 'temporal',
+    password: process.env.ENGINE_DB_PASSWORD,
   });
   const store = new PostgresStatsStore(pool);
   await store.ensureSchema();
@@ -256,7 +281,22 @@ async function main(): Promise<void> {
     address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233',
   });
 
-  const registry = loadProjectRegistry();
+  const staticRegistry = loadProjectRegistry();
+  const enginePool = process.env.ENGINE_DB_HOST
+    ? new Pool({
+        host: process.env.ENGINE_DB_HOST,
+        port: process.env.ENGINE_DB_PORT ? Number(process.env.ENGINE_DB_PORT) : 5432,
+        database: process.env.ENGINE_DB_NAME ?? 'agentops_engine',
+        user: process.env.ENGINE_DB_USER ?? 'temporal',
+        password: process.env.ENGINE_DB_PASSWORD,
+      })
+    : undefined;
+  const managedProjectDeps = buildManagedProjectDeps(enginePool);
+  if (managedProjectDeps) {
+    await managedProjectDeps.store.ensureSchema();
+  }
+  const managedRegistry = managedProjectDeps ? await loadManagedProjectRegistry(managedProjectDeps) : [];
+  const registry = mergeStaticAndManagedRegistries(staticRegistry, managedRegistry);
   const inCluster = Boolean(process.env.KUBERNETES_SERVICE_HOST);
   const { scm, tracker, workspaces } = buildActivityDependencies(registry, resolveWorkspacesDir(inCluster));
   console.log(
@@ -275,8 +315,8 @@ async function main(): Promise<void> {
   const stats = await buildStatsStore();
   console.log(
     stats instanceof PostgresStatsStore
-      ? 'agentops worker: agent_run_stats persisted to Postgres (AGENT_STATS_DB_HOST set)'
-      : 'agentops worker: agent_run_stats in-memory only (AGENT_STATS_DB_HOST not set)',
+      ? 'agentops worker: agent_run_stats persisted to Postgres (ENGINE_DB_HOST set)'
+      : 'agentops worker: agent_run_stats in-memory only (ENGINE_DB_HOST not set)',
   );
 
   const activities: DevCycleActivities & PlatformActivities = createActivities({
