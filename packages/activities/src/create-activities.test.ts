@@ -24,6 +24,7 @@ function buildDeps() {
     workspaces: new MemoryWorkspaceManager() as Workspaces,
     prompts: new PromptPack(),
     registry: [] as ResolvedProjectEntry[],
+    heartbeat: () => {},
   };
 }
 
@@ -77,6 +78,30 @@ describe('createActivities', () => {
       limits: { maxTokens: 1000, timeoutMs: 60_000 },
     });
     expect(result.output).toBe('diff');
+  });
+
+  it('runAgent heartbeats once before dispatching to the backend', async () => {
+    const heartbeats: unknown[] = [];
+    const deps = { ...buildDeps(), heartbeat: (details: unknown) => heartbeats.push(details) };
+    (deps.backends.stub as StubBackend).scriptResponse('implement', 1, { output: 'diff' });
+    const activities = createActivities(deps);
+
+    await activities.runAgent({
+      taskId: 't1',
+      stage: 'implement',
+      attempt: 1,
+      callIndex: 1,
+      backend: 'stub',
+      model: 'stub-v1',
+      promptRef: 'implement.md',
+      promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' },
+      workspaceRef: 'demo/repo',
+      limits: { maxTokens: 1000, timeoutMs: 60_000 },
+    });
+
+    expect(heartbeats).toEqual([
+      { phase: 'started', taskId: 't1', stage: 'implement', attempt: 1, callIndex: 1, backend: 'stub', model: 'stub-v1' },
+    ]);
   });
 
   it('runAgent throws for an unregistered backend', async () => {
