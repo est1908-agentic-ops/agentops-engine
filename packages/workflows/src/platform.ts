@@ -77,10 +77,25 @@ export async function platform(input: PlatformAgentInput): Promise<PlatformAgent
   }
 
   const childWorkflows: PlatformAgentResult['childWorkflows'] = [];
+  const skippedFixes: PlatformAgentResult['skippedFixes'] = [];
   for (const [index, fix] of payload.proposedFixes.entries()) {
-    const { product, config } = await activities.resolveRepoConfig(fix.repo);
+    const resolved = await activities.resolveRepoConfig(fix.repo);
+    if (!resolved.registered) {
+      // The agent is allowed to propose fixes for any repo, including its own
+      // (see platform.md), but resolveRepoConfig has no SCM credentials for a
+      // repo outside the project registry. Report it instead of crashing the
+      // whole run over one unactionable suggestion.
+      skippedFixes.push({ ...fix, reason: `no project registered for repo "${fix.repo}"` });
+      continue;
+    }
     const childTaskId = `${taskId}-fix-${index + 1}`;
-    const taskInput: TaskInput = { taskId: childTaskId, product, repo: fix.repo, goal: fix.goal, config };
+    const taskInput: TaskInput = {
+      taskId: childTaskId,
+      product: resolved.product,
+      repo: fix.repo,
+      goal: fix.goal,
+      config: resolved.config,
+    };
     await executeChild(devCycle, { workflowId: childTaskId, args: [taskInput] });
     childWorkflows.push({ workflowId: childTaskId, repo: fix.repo, goal: fix.goal });
   }
@@ -89,5 +104,6 @@ export async function platform(input: PlatformAgentInput): Promise<PlatformAgent
     summary: payload.summary,
     actionsTaken: payload.actionsTaken,
     childWorkflows,
+    skippedFixes,
   });
 }

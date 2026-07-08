@@ -15,10 +15,13 @@ describe('platform e2e', () => {
     const { env, worker, stub, taskQueue } = testEnv;
 
     stub.scriptResponse('platform', 1, {
-      output: 'Nothing looks wrong.\nPLATFORM_RESULT: {"summary": "all quiet", "actionsTaken": [], "proposedFixes": []}',
+      output:
+        'Nothing looks wrong.\nPLATFORM_RESULT: {"summary": "all quiet", "actionsTaken": [], "proposedFixes": []}',
     });
 
-    const input: PlatformAgentInput = { prompt: 'check the last workflow failures, do you see anything strange?' };
+    const input: PlatformAgentInput = {
+      prompt: 'check the last workflow failures, do you see anything strange?',
+    };
 
     const result = await worker.runUntil(async () => {
       const handle = await env.client.workflow.start(platform, {
@@ -36,7 +39,15 @@ describe('platform e2e', () => {
 
   it('starts a child devCycle for a proposed fix and it runs to done', async () => {
     testEnv = await buildTestEnv({
-      registry: [{ product: 'engine', repo: 'demo/repo', trackerType: 'github', tokenEnvVar: 'X', token: 'fake' }],
+      registry: [
+        {
+          product: 'engine',
+          repo: 'demo/repo',
+          trackerType: 'github',
+          tokenEnvVar: 'X',
+          token: 'fake',
+        },
+      ],
     });
     const { env, worker, stub, scm, taskQueue } = testEnv;
 
@@ -68,7 +79,9 @@ describe('platform e2e', () => {
     stub.scriptResponse('review', 1, { output: 'VERDICT: PASS' });
     scm.scriptFeedback('pr-1', [{ ciStatus: 'green', unresolvedThreads: 0, comments: [] }]);
 
-    const input: PlatformAgentInput = { prompt: 'investigate the last workflow failures and fix them' };
+    const input: PlatformAgentInput = {
+      prompt: 'investigate the last workflow failures and fix them',
+    };
 
     const result = await worker.runUntil(async () => {
       const handle = await env.client.workflow.start(platform, {
@@ -78,7 +91,9 @@ describe('platform e2e', () => {
       });
       const platformResult = await handle.result();
 
-      const childHandle = env.client.workflow.getHandle(platformResult.childWorkflows[0].workflowId);
+      const childHandle = env.client.workflow.getHandle(
+        platformResult.childWorkflows[0].workflowId,
+      );
       await waitForStatus(childHandle as never, ['done', 'blocked', 'failed'], 30_000);
 
       return platformResult;
@@ -87,9 +102,44 @@ describe('platform e2e', () => {
     expect(result.summary).toBe('found one bug');
     expect(result.childWorkflows).toHaveLength(1);
     expect(result.childWorkflows[0].repo).toBe('demo/repo');
-    const childState = await env.client.workflow.getHandle(result.childWorkflows[0].workflowId).result();
+    const childState = await env.client.workflow
+      .getHandle(result.childWorkflows[0].workflowId)
+      .result();
     expect(childState.status).toBe('done');
     expect(scm.getOpenedPrs()).toHaveLength(1);
+  });
+
+  it('skips a proposed fix for an unregistered repo instead of failing the whole run', async () => {
+    testEnv = await buildTestEnv();
+    const { env, worker, stub, taskQueue } = testEnv;
+
+    stub.scriptResponse('platform', 1, {
+      output:
+        'Found a rate-limit bug in the engine itself.\nPLATFORM_RESULT: {"summary": "found one bug", "actionsTaken": [], "proposedFixes": [{"repo": "agentic-ops/agent-runner", "goal": "add retry backoff"}]}',
+    });
+
+    const input: PlatformAgentInput = {
+      prompt: 'check the last workflow failures, do you see anything strange?',
+    };
+
+    const result = await worker.runUntil(async () => {
+      const handle = await env.client.workflow.start(platform, {
+        taskQueue,
+        workflowId: 'platform-unregistered-repo',
+        args: [input],
+      });
+      return handle.result();
+    });
+
+    expect(result.summary).toBe('found one bug');
+    expect(result.childWorkflows).toEqual([]);
+    expect(result.skippedFixes).toEqual([
+      {
+        repo: 'agentic-ops/agent-runner',
+        goal: 'add retry backoff',
+        reason: expect.stringContaining('agentic-ops/agent-runner'),
+      },
+    ]);
   });
 
   it('retries once on unparseable output before giving up', async () => {
