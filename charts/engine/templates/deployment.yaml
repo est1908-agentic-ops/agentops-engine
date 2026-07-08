@@ -52,6 +52,11 @@ spec:
               value: {{ .Values.claudeAuthSecretName | quote }}
             - name: PI_AUTH_SECRET_NAME
               value: {{ .Values.piAuthSecretName | quote }}
+            - name: LITELLM_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.litellmApiKeySecretName }}
+                  key: {{ .Values.litellmApiKeySecretKey }}
             - name: PLATFORM_AGENT_SERVICE_ACCOUNT
               value: {{ printf "%s-platform-agent" .Release.Name | quote }}
             {{- if .Values.platformAgentSecretName }}
