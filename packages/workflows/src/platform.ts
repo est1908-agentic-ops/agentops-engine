@@ -18,10 +18,13 @@ const agentActivities = proxyActivities<Pick<PlatformActivities, 'runAgent'>>({
 
 // This role isn't scoped to one project, so there's no ProjectConfig to route
 // through -- fixed here at the same reasoning-heavy tier devCycle uses for
-// design/review. Shares the 'claude' backend devCycle stages use (no
-// dedicated ServiceAccount/secret for this role) -- see
-// docs/superpowers/specs/2026-07-09-routing-defaults-rebalance-design.md.
-const PLATFORM_MODEL = { backend: 'claude', model: 'claude-sonnet-5', effort: 'high' as const };
+// design/review. 'platform' (not 'claude') as the backend key: it's the same
+// claude CLI/model/credential (see packages/worker/src/main.ts buildBackends),
+// but a distinct worker backend entry carrying this role's own
+// ServiceAccount/secrets/pod-label -- keep routing through this key rather
+// than switching to 'claude' directly, or the role silently loses cluster
+// access again (see docs/superpowers/specs/2026-07-09-routing-defaults-rebalance-design.md).
+const PLATFORM_MODEL = { backend: 'platform', model: 'claude-sonnet-5', effort: 'high' as const };
 const PLATFORM_MAX_TOKENS = 400_000;
 const PLATFORM_TIMEOUT_MS = 1_800_000;
 const MAX_RESULT_CALLS = 2;

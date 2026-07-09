@@ -206,11 +206,8 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
       stub: new StubBackend(),
       claude: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), 'CLAUDE', 'claude'),
       pi: wrapWithRateLimitFallback(wrapWithRateWindow(new ProcessCliRunner(piSpec), 'PI', 'pi'), 'PI', 'pi'),
-      platform: wrapWithRateLimitFallback(
-        wrapWithRateWindow(new ProcessCliRunner(piSpec), 'PI', 'platform'),
-        'PI',
-        'platform',
-      ),
+      // Same CLI/model as claude (see the in-cluster branch below for why).
+      platform: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), 'CLAUDE', 'platform'),
       litellm,
     };
   }
@@ -238,21 +235,25 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
       'PI',
       'pi',
     ),
-    platform: wrapWithRateLimitFallback(
-      wrapWithRateWindow(
-        new K8sJobRunner(
-          piSpec,
-          buildJobRunnerOptions(batchApi, {
-            authSecretName: process.env.PI_AUTH_SECRET_NAME,
-            serviceAccountName: process.env.PLATFORM_AGENT_SERVICE_ACCOUNT,
-            additionalSecretNames: process.env.PLATFORM_AGENT_SECRET_NAME ? [process.env.PLATFORM_AGENT_SECRET_NAME] : undefined,
-            podLabels: { 'agentops/role': 'platform-agent' },
-          }),
-        ),
-        'PI',
-        'platform',
+    // Same CLI/model/credential as claude (they share one Anthropic
+    // subscription window, deliberately -- see
+    // docs/superpowers/specs/2026-07-09-routing-defaults-rebalance-design.md),
+    // plus this role's own K8s identity: a dedicated ServiceAccount (read-only
+    // cluster RBAC), an extra secret (Temporal/Grafana credentials, once
+    // agentops-platform supplies platformAgentSecretName), and a pod label the
+    // platform-agent NetworkPolicy selects on. No rate-limit fallback wrapper --
+    // that's for z.ai's 429s, not relevant on Anthropic.
+    platform: wrapWithRateWindow(
+      new K8sJobRunner(
+        claudeSpec,
+        buildJobRunnerOptions(batchApi, {
+          authSecretName: process.env.CLAUDE_AUTH_SECRET_NAME,
+          serviceAccountName: process.env.PLATFORM_AGENT_SERVICE_ACCOUNT,
+          additionalSecretNames: process.env.PLATFORM_AGENT_SECRET_NAME ? [process.env.PLATFORM_AGENT_SECRET_NAME] : undefined,
+          podLabels: { 'agentops/role': 'platform-agent' },
+        }),
       ),
-      'PI',
+      'CLAUDE',
       'platform',
     ),
     litellm,
