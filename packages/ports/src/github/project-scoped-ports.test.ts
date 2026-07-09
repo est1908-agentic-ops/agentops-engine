@@ -42,6 +42,17 @@ describe('createProjectScopedPorts', () => {
     expect(entryA.scm.openPr).not.toHaveBeenCalled();
   });
 
+  it('resolves an entry registered with a full URL via a short-form lookup', async () => {
+    // Managed projects registered through the CRUD can be stored as a full URL;
+    // the runtime looks them up by the short owner/repo form.
+    const entry = buildEntry('https://github.com/broccoli-hr/broccoli');
+    const { scm, resolveGit } = createProjectScopedPorts([entry]);
+
+    await scm.openPr({ repo: 'broccoli-hr/broccoli', branch: 'b', title: 't', body: 'b' });
+    expect(() => resolveGit('broccoli-hr/broccoli')).not.toThrow();
+    expect(entry.scm.openPr).toHaveBeenCalledTimes(1);
+  });
+
   it('routes getPrFeedback/getIssue/comment/label by the repo parsed from the ref', async () => {
     const entryA = buildEntry('owner/repo-a');
     const entryB = buildEntry('owner/repo-b');

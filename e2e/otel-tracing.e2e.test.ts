@@ -69,6 +69,9 @@ describe('DevCycle e2e: OTel instrumentation', () => {
     });
 
     await tracing.forceFlush();
+    // Small delay to ensure BatchSpanProcessor finishes exporting spans,
+    // especially on slower CI runners where timing-dependent batching might lag.
+    await new Promise((resolve) => setTimeout(resolve, 50));
     const spans = exporter.getFinishedSpans();
 
     // Span names are "<SpanName>:<workflow/activity type>", e.g.
