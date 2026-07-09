@@ -23,7 +23,8 @@ pnpm --filter @agentops/ui build
 
 Output goes to `packages/ui/dist`, which `packages/control` serves directly
 in production (see `packages/control/src/main.ts` and
-`images/control/Dockerfile`) — there is no separate ui deployment.
+`images/engine/Dockerfile`'s `control` target) — there is no separate ui
+deployment.
 
 ## Routes
 

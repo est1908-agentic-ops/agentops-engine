@@ -56,7 +56,7 @@ COPY packages/ui/package.json        ./packages/ui/
 COPY packages/worker/package.json    ./packages/worker/
 COPY packages/workflows/package.json ./packages/workflows/
 RUN --mount=type=cache,target=/pnpm-store,sharing=locked \
-    pnpm install --frozen-lockfile --store-dir /pnpm-store
+    pnpm install --frozen-lockfile --store-dir /pnpm-store --package-import-method copy
 COPY . .
 RUN pnpm typecheck   # (or the image-specific build/typecheck commands)
 RUN chown -R node:node /app

@@ -29,7 +29,7 @@ One Dockerfile with a shared `base` stage for the pnpm-workspace install, feedin
 
 ```dockerfile
 # syntax=docker/dockerfile:1
-FROM node:22-slim AS base
+FROM node:22-slim AS deps
 
 # Baked-in pnpm, not `corepack enable` alone: corepack lazily downloads
 # pnpm into the *current user's* cache on first invocation. Building as
@@ -55,9 +55,17 @@ COPY packages/worker/package.json    ./packages/worker/
 COPY packages/workflows/package.json ./packages/workflows/
 RUN --mount=type=cache,target=/pnpm-store,sharing=locked \
     pnpm install --frozen-lockfile --store-dir /pnpm-store --package-import-method copy
+
+FROM deps AS base
 COPY . .
 
-FROM base AS worker
+# worker forks from `deps` (before the source COPY), not `base`, so this
+# apt-get's cache key only depends on the manifest/lockfile chain, not on
+# source changes. Forking from `base` instead would inherit COPY . .'s
+# ever-changing digest, busting this layer (and its network apt-get call)
+# on virtually every commit — it's cache-stable in the pre-consolidation
+# worker-only Dockerfile precisely because it ran before any COPY at all.
+FROM deps AS worker
 # prepareWorkspace and GithubScmPort.push shell out to `git` from inside
 # this container (packages/activities/src/workspace, packages/ports/src/github)
 # — without it, git clone fails with `spawn git ENOENT` and (pre-fix) retries
@@ -65,6 +73,7 @@ FROM base AS worker
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
+COPY . .
 RUN chown -R node:node /app
 # Numeric, not the name "node": kubelet can't verify a pod's runAsNonRoot
 # against a named image user without a matching explicit runAsUser in the
@@ -85,6 +94,8 @@ CMD ["pnpm", "--filter", "@agentops/control", "run", "start"]
 ```
 
 `images/worker/Dockerfile`, `images/gateway/Dockerfile`, `images/control/Dockerfile` are deleted.
+
+**Why `deps`/`base` are split, not one stage:** an earlier version of this design had `worker` fork directly from a single `base` stage that already included `COPY . .`. Code review caught that this silently regressed `worker`'s `apt-get` layer — cache-stable forever in the pre-consolidation file because it ran before any `COPY` at all — into something invalidated on virtually every commit, since it would inherit `COPY . .`'s ever-changing digest. Splitting `deps` (manifest install, no source) from `base` (`deps` + full source) lets `worker` fork from `deps` and keep `apt-get` cache-stable, at the cost of one duplicated `COPY . .` line — a fair trade since that line is dirt cheap to (re-)run, unlike the `apt-get` network call it would otherwise gate.
 
 ### 2. CI wiring
 
