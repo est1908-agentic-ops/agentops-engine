@@ -217,6 +217,9 @@ export function ProjectsPage() {
               <td>{project.config ? 'custom' : 'file'}</td>
               <td>{formatTimestamp(project.updatedAt)}</td>
               <td className="row-actions">
+                <Link className="link-button" to={`/?target=${encodeURIComponent(project.repo)}`}>
+                  Run
+                </Link>
                 <button
                   type="button"
                   className="link-button"
