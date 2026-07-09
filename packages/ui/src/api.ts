@@ -1,14 +1,50 @@
 import {
+  ManagedProjectListResponseSchema,
+  ManagedProjectSchema,
   RepoListResponseSchema,
   RunDetailSchema,
   RunListItemSchema,
   StartRunResponseSchema,
   z,
+  type ManagedProject,
   type RunDetail,
   type RunListItem,
   type StartRunRequest,
   type StartRunResponse,
 } from '@agentops/contracts';
+
+// The managed-project CRUD routes are bearer-token-gated (CONTROL_CRUD_TOKEN).
+// The browser holds the operator's copy of that token in localStorage and
+// sends it as an Authorization header; it never leaves the operator's
+// browser into the served app bundle. Issue #4 (Traefik basic-auth on the
+// control ingress) is still required before the ingress goes public.
+const CRUD_TOKEN_STORAGE_KEY = 'agentops.controlCrudToken';
+
+export function getCrudToken(): string {
+  return localStorage.getItem(CRUD_TOKEN_STORAGE_KEY) ?? '';
+}
+
+export function setCrudToken(token: string): void {
+  if (token) {
+    localStorage.setItem(CRUD_TOKEN_STORAGE_KEY, token);
+  } else {
+    localStorage.removeItem(CRUD_TOKEN_STORAGE_KEY);
+  }
+}
+
+function crudHeaders(hasBody: boolean): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const token = getCrudToken();
+  if (token) {
+    // X-Control-Crud-Token (not Authorization) to avoid colliding with Traefik
+    // basic-auth on the control ingress (design §7 / issue #4).
+    headers['x-control-crud-token'] = token;
+  }
+  if (hasBody) {
+    headers['content-type'] = 'application/json';
+  }
+  return headers;
+}
 
 async function parseJsonResponse<S extends z.ZodTypeAny>(res: Response, schema: S): Promise<z.output<S>> {
   const body: unknown = await res.json();
@@ -18,6 +54,21 @@ async function parseJsonResponse<S extends z.ZodTypeAny>(res: Response, schema: 
     throw new Error(message);
   }
   return schema.parse(body);
+}
+
+async function parseEmptyResponse(res: Response): Promise<void> {
+  if (!res.ok) {
+    let message = res.statusText;
+    try {
+      const body: unknown = await res.json();
+      if (typeof body === 'object' && body !== null && 'error' in body) {
+        message = String((body as { error: unknown }).error);
+      }
+    } catch {
+      // 204 No Content has no body -- keep the statusText message.
+    }
+    throw new Error(message);
+  }
 }
 
 export async function startRun(input: StartRunRequest): Promise<StartRunResponse> {
@@ -57,4 +108,73 @@ export function siblingTemporalUrl(temporalUrl: string, targetWorkflowId: string
     return temporalUrl;
   }
   return `${match[1]}${encodeURIComponent(targetWorkflowId)}`;
+}
+
+// --- managed-project CRUD (design §7) ---
+
+export interface CreateProjectInput {
+  project: string;
+  repo: string;
+  token: string;
+  configJson?: string;
+}
+
+export interface UpdateProjectInput {
+  token?: string;
+  configJson?: string;
+}
+
+function parseConfigJson(configJson: string | undefined): unknown {
+  if (configJson === undefined) {
+    return undefined;
+  }
+  const trimmed = configJson.trim();
+  if (trimmed === 'null') {
+    return null;
+  }
+  return JSON.parse(trimmed);
+}
+
+export async function listProjects(): Promise<ManagedProject[]> {
+  const res = await fetch('/api/projects', { headers: crudHeaders(false) });
+  return parseJsonResponse(res, ManagedProjectListResponseSchema);
+}
+
+export async function getProject(repo: string): Promise<ManagedProject> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(repo)}`, { headers: crudHeaders(false) });
+  return parseJsonResponse(res, ManagedProjectSchema);
+}
+
+export async function createProject(input: CreateProjectInput): Promise<ManagedProject> {
+  const res = await fetch('/api/projects', {
+    method: 'POST',
+    headers: crudHeaders(true),
+    body: JSON.stringify({
+      project: input.project,
+      repo: input.repo,
+      token: input.token,
+      config: parseConfigJson(input.configJson),
+    }),
+  });
+  return parseJsonResponse(res, ManagedProjectSchema);
+}
+
+export async function updateProject(repo: string, input: UpdateProjectInput): Promise<ManagedProject> {
+  const payload: Record<string, unknown> = {};
+  if (input.token !== undefined) payload.token = input.token;
+  if (input.configJson !== undefined) payload.config = parseConfigJson(input.configJson);
+  const res = await fetch(`/api/projects/${encodeURIComponent(repo)}`, {
+    method: 'PUT',
+    headers: crudHeaders(true),
+    body: JSON.stringify(payload),
+  });
+  return parseJsonResponse(res, ManagedProjectSchema);
+}
+
+export async function deleteProject(repo: string): Promise<void> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(repo)}`, {
+    method: 'DELETE',
+    headers: crudHeaders(false),
+  });
+  await parseEmptyResponse(res);
 }

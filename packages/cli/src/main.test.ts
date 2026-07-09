@@ -1,7 +1,16 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encryptForManagedProject, generateManagedProjectKeyPair, loadProjectConfig, type PostgresManagedProjectStore } from '@agentops/activities';
 import { GithubScmPort, MemoryScmPort } from '@agentops/ports';
-import { buildStartScmPort, buildStartScmPortWithManagedProjects, parseFlags, seedDemoAgentopsConfig } from './main';
+import {
+  buildControlRequest,
+  buildStartScmPort,
+  buildStartScmPortWithManagedProjects,
+  cmdProject,
+  controlBaseUrl,
+  controlCrudHeaders,
+  parseFlags,
+  seedDemoAgentopsConfig,
+} from './main';
 
 describe('seedDemoAgentopsConfig', () => {
   it('produces a config that keeps every stage on the stub backend', async () => {
@@ -119,5 +128,97 @@ describe('buildStartScmPortWithManagedProjects', () => {
     await expect(buildStartScmPortWithManagedProjects({ store, privateKey: 'unused' }, [], 'nope', 'acme/nope')).rejects.toThrow(
       /no project registered/,
     );
+  });
+});
+
+describe('engine project (control HTTP client)', () => {
+  const originalFetch = globalThis.fetch;
+  let originalEnv: NodeJS.ProcessEnv;
+
+  beforeEach(() => {
+    originalEnv = { ...process.env };
+    process.env.CONTROL_BASE_URL = 'http://control.test:3001';
+    process.env.CONTROL_CRUD_TOKEN = 'tok';
+  });
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    process.env = originalEnv;
+    vi.restoreAllMocks();
+  });
+
+  it('controlBaseUrl/headers read env, with safe defaults', () => {
+    delete process.env.CONTROL_BASE_URL;
+    delete process.env.CONTROL_CRUD_TOKEN;
+    expect(controlBaseUrl()).toBe('http://localhost:3001');
+    expect(controlCrudHeaders(false)).toEqual({});
+  });
+
+  it('buildControlRequest composes URL, method, auth header, and JSON body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await buildControlRequest('POST', '/api/projects', { project: 'acme-web', repo: 'acme/web', token: 'ghp_x' });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://control.test:3001/api/projects');
+    expect(init.method).toBe('POST');
+    expect((init.headers as Record<string, string>)['x-control-crud-token']).toBe('tok');
+    expect((init.headers as Record<string, string>)['content-type']).toBe('application/json');
+    expect(init.body).toBe(JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_x' }));
+  });
+
+  it('add POSTs the project and prints the result', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ project: 'acme-web', repo: 'acme/web' }), { status: 201 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await cmdProject(['add', '--project', 'acme-web', '--repo', 'acme/web', '--token', 'ghp_x']);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://control.test:3001/api/projects');
+    expect(init.method).toBe('POST');
+  });
+
+  it('list GETs /api/projects', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('[]', { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await cmdProject(['list']);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://control.test:3001/api/projects');
+    expect(init.method).toBe('GET');
+  });
+
+  it('show URL-encodes the repo in the path', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await cmdProject(['show', '--repo', 'acme/web']);
+    const [url] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://control.test:3001/api/projects/acme%2Fweb');
+  });
+
+  it('update PUTs and URL-encodes the repo', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await cmdProject(['update', '--repo', 'acme/web', '--token', 'ghp_new']);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://control.test:3001/api/projects/acme%2Fweb');
+    expect(init.method).toBe('PUT');
+    expect(JSON.parse(init.body)).toEqual({ token: 'ghp_new' });
+  });
+
+  it('update --config null clears config; --config <json> sets it', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await cmdProject(['update', '--repo', 'acme/web', '--config', 'null']);
+    expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({ config: null });
+  });
+
+  it('remove DELETEs and URL-encodes the repo', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await cmdProject(['remove', '--repo', 'acme/web']);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('http://control.test:3001/api/projects/acme%2Fweb');
+    expect(init.method).toBe('DELETE');
+  });
+
+  it('rejects an unknown project subcommand', async () => {
+    await expect(cmdProject(['bogus'])).rejects.toThrow(/add\|list\|show\|update\|remove/);
   });
 });

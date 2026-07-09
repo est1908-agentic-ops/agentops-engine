@@ -49,7 +49,7 @@ export async function buildTestEnv(opts: BuildTestEnvOptions = {}): Promise<Test
   const workspaces = new MemoryWorkspaceManager();
 
   const activities: DevCycleActivities & PlatformActivities = createActivities({
-    backends: { stub, platform: stub, ...opts.extraBackends },
+    backends: { stub, claude: stub, ...opts.extraBackends },
     tracker,
     scm,
     stats,

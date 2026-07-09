@@ -11,4 +11,5 @@ export * from './project-registry';
 export * from './managed-project';
 export * from './platform-agent';
 export * from './control-api';
+export * from './control-projects-api';
 export { z } from 'zod';

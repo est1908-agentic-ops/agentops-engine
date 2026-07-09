@@ -24,6 +24,11 @@ function createFakeDb(): Queryable {
       if (normalized.startsWith('CREATE TABLE')) {
         return { rows: [] };
       }
+      if (normalized.startsWith('SELECT * FROM managed_projects WHERE project')) {
+        const [project] = params as [string];
+        const found = rows.filter((r) => r.project === project);
+        return { rows: found };
+      }
       if (normalized.startsWith('SELECT * FROM managed_projects WHERE repo')) {
         const [repo] = params as [string];
         const found = rows.filter((r) => r.repo === repo);
@@ -140,5 +145,14 @@ describe('PostgresManagedProjectStore', () => {
     await store.remove('acme/web');
 
     expect(await store.get('acme/web')).toBeNull();
+  });
+
+  it('looks up a project by its project slug', async () => {
+    const store = new PostgresManagedProjectStore(createFakeDb());
+    const { publicKey } = generateManagedProjectKeyPair();
+    await store.upsert({ project: 'acme-web', repo: 'acme/web', token: 't1' }, publicKey);
+
+    expect((await store.getByProject('acme-web'))?.repo).toBe('acme/web');
+    expect(await store.getByProject('nope')).toBeNull();
   });
 });

@@ -3,10 +3,10 @@ import { Client, Connection } from '@temporalio/client';
 import { Pool } from 'pg';
 import {
   loadEnv,
-  loadProjectConfig,
   loadProjectRegistry,
   PostgresManagedProjectStore,
   resolveManagedProjectEntry,
+  resolveProjectConfig,
   SpawnGitCommandRunner,
   type ManagedProjectRegistryDeps,
 } from '@agentops/activities';
@@ -134,8 +134,9 @@ async function getClient(): Promise<Client> {
 
 async function cmdStart(taskId: string, goal: string, project: string, repo: string, issueRef?: string): Promise<void> {
   const client = await getClient();
-  const scm = await buildStartScmPortWithManagedProjects(buildCliManagedProjectDeps(), loadProjectRegistry(), project, repo);
-  const config = await loadProjectConfig(scm, repo);
+  const managedProjectDeps = buildCliManagedProjectDeps();
+  const scm = await buildStartScmPortWithManagedProjects(managedProjectDeps, loadProjectRegistry(), project, repo);
+  const config = await resolveProjectConfig(managedProjectDeps, scm, repo);
   const input: TaskInput = { taskId, project, repo, issueRef, goal, config };
   const handle = await client.workflow.start(devCycle, { taskQueue: TASK_QUEUE, workflowId: taskId, args: [input] });
   console.log(`started ${handle.workflowId}`);
@@ -165,6 +166,123 @@ async function cmdState(taskId: string): Promise<void> {
   console.log(JSON.stringify(state, null, 2));
 }
 
+export function controlBaseUrl(): string {
+  return process.env.CONTROL_BASE_URL ?? 'http://localhost:3001';
+}
+
+export function controlCrudHeaders(hasBody: boolean): Record<string, string> {
+  const headers: Record<string, string> = {};
+  const token = process.env.CONTROL_CRUD_TOKEN;
+  if (token) {
+    // X-Control-Crud-Token (not Authorization) to avoid colliding with Traefik
+    // basic-auth on the control ingress (design §7 / issue #4).
+    headers['x-control-crud-token'] = token;
+  }
+  if (hasBody) {
+    headers['content-type'] = 'application/json';
+  }
+  return headers;
+}
+
+export async function buildControlRequest(method: string, path: string, body?: unknown): Promise<{ status: number; body: unknown }> {
+  const res = await fetch(`${controlBaseUrl()}${path}`, {
+    method,
+    headers: controlCrudHeaders(body !== undefined),
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let parsed: unknown = text;
+  if (text) {
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = text; // keep raw text if it isn't JSON (e.g. a 204 empty body)
+    }
+  }
+  return { status: res.status, body: parsed };
+}
+
+function parseConfigArg(configJson: string | undefined): unknown {
+  if (configJson === undefined) {
+    return undefined;
+  }
+  return configJson === 'null' ? null : JSON.parse(configJson);
+}
+
+async function cmdProjectAdd(flags: Record<string, string>): Promise<void> {
+  const { project, repo, token, config: configJson } = flags;
+  if (!project || !repo || !token) {
+    throw new Error('usage: engine project add --project <name> --repo <owner/repo> --token <token> [--config <json>]');
+  }
+  const { status, body } = await buildControlRequest('POST', '/api/projects', { project, repo, token, config: parseConfigArg(configJson) });
+  console.log(`status ${status}`);
+  console.log(JSON.stringify(body, null, 2));
+}
+
+async function cmdProjectList(): Promise<void> {
+  const { status, body } = await buildControlRequest('GET', '/api/projects');
+  console.log(`status ${status}`);
+  console.log(JSON.stringify(body, null, 2));
+}
+
+async function cmdProjectShow(flags: Record<string, string>): Promise<void> {
+  const { repo } = flags;
+  if (!repo) {
+    throw new Error('usage: engine project show --repo <owner/repo>');
+  }
+  const { status, body } = await buildControlRequest('GET', `/api/projects/${encodeURIComponent(repo)}`);
+  console.log(`status ${status}`);
+  console.log(JSON.stringify(body, null, 2));
+}
+
+async function cmdProjectUpdate(flags: Record<string, string>): Promise<void> {
+  const { repo, token, config: configJson } = flags;
+  if (!repo) {
+    throw new Error('usage: engine project update --repo <owner/repo> [--token <token>] [--config <json>|null]');
+  }
+  if (token === undefined && configJson === undefined) {
+    throw new Error('usage: engine project update needs at least one of --token or --config');
+  }
+  const payload: Record<string, unknown> = {};
+  if (token !== undefined) payload.token = token;
+  if (configJson !== undefined) payload.config = parseConfigArg(configJson);
+  const { status, body } = await buildControlRequest('PUT', `/api/projects/${encodeURIComponent(repo)}`, payload);
+  console.log(`status ${status}`);
+  console.log(JSON.stringify(body, null, 2));
+}
+
+async function cmdProjectRemove(flags: Record<string, string>): Promise<void> {
+  const { repo } = flags;
+  if (!repo) {
+    throw new Error('usage: engine project remove --repo <owner/repo>');
+  }
+  const { status, body } = await buildControlRequest('DELETE', `/api/projects/${encodeURIComponent(repo)}`);
+  console.log(`status ${status}`);
+  if (body) {
+    console.log(JSON.stringify(body, null, 2));
+  }
+}
+
+export async function cmdProject(args: string[]): Promise<void> {
+  const [subcommand, ...rest] = args;
+  if (subcommand === 'add') {
+    return cmdProjectAdd(parseFlags(rest));
+  }
+  if (subcommand === 'list') {
+    return cmdProjectList();
+  }
+  if (subcommand === 'show') {
+    return cmdProjectShow(parseFlags(rest));
+  }
+  if (subcommand === 'update') {
+    return cmdProjectUpdate(parseFlags(rest));
+  }
+  if (subcommand === 'remove') {
+    return cmdProjectRemove(parseFlags(rest));
+  }
+  throw new Error('usage: engine project <add|list|show|update|remove> ...');
+}
+
 async function main(): Promise<void> {
   const [, , command, ...rest] = process.argv;
   if (command === 'start') {
@@ -189,8 +307,10 @@ async function main(): Promise<void> {
       throw new Error('usage: cli state <taskId>');
     }
     await cmdState(taskId);
+  } else if (command === 'project') {
+    await cmdProject(rest);
   } else {
-    console.error('usage: cli <start|signal|state> ...');
+    console.error('usage: cli <start|signal|state|project> ...');
     process.exit(1);
   }
 }

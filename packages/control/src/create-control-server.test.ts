@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { generateManagedProjectKeyPair } from '@agentops/activities';
+import type { ManagedProject, UpsertManagedProjectRequest } from '@agentops/contracts';
 import { createControlServer, type ControlDeps } from './create-control-server';
 
 function makeExecution(overrides: Record<string, unknown> = {}) {
@@ -250,5 +252,264 @@ describe('createControlServer', () => {
       expect(res.headers.get('content-type')).toContain('text/html');
       expect(await res.text()).toBe('<html>console</html>');
     });
+  });
+});
+
+// --- managed-project CRUD test helpers + suite ---
+
+async function putJson(port: number, path: string, payload: unknown, headers: Record<string, string> = {}) {
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: JSON.stringify(payload),
+  });
+  const body: unknown = await res.json().catch(() => undefined);
+  return { status: res.status, body };
+}
+
+async function deleteJson(port: number, path: string, headers: Record<string, string> = {}) {
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, { method: 'DELETE', headers });
+  const body: unknown = await res.json().catch(() => undefined);
+  return { status: res.status, body };
+}
+
+async function getJsonWithHeaders(port: number, path: string, headers: Record<string, string>) {
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, { headers });
+  const body: unknown = await res.json().catch(() => undefined);
+  return { status: res.status, body };
+}
+
+function createFakeStore() {
+  // In-memory managed-project table -- same shape control relies on
+  // (get/getByProject/list/upsert/remove). control never decrypts, so the
+  // "encrypted token" here is just a placeholder string.
+  const rows: Array<ManagedProject & { _token: string }> = [];
+  let nextId = 1;
+  function stripToken(row: ManagedProject & { _token: string }): ManagedProject {
+    const { _token, ...rest } = row;
+    return rest;
+  }
+  return {
+    async get(repo: string) {
+      const row = rows.find((r) => r.repo === repo);
+      return row ? stripToken(row) : null;
+    },
+    async getByProject(project: string) {
+      const row = rows.find((r) => r.project === project);
+      return row ? stripToken(row) : null;
+    },
+    async list() {
+      return [...rows].sort((a, b) => a.project.localeCompare(b.project)).map(stripToken);
+    },
+    async upsert(input: UpsertManagedProjectRequest, _publicKey: string) {
+      const existingIndex = rows.findIndex((r) => r.repo === input.repo);
+      const now = new Date().toISOString();
+      if (existingIndex >= 0) {
+        const existing = rows[existingIndex];
+        rows[existingIndex] = {
+          ...existing,
+          project: input.project,
+          config: input.config === undefined ? existing.config : input.config,
+          _token: input.token ?? existing._token,
+          updatedAt: now,
+        };
+        return stripToken(rows[existingIndex]);
+      }
+      const row = {
+        id: String(nextId++),
+        project: input.project,
+        repo: input.repo,
+        credentialSet: true,
+        config: input.config ?? null,
+        createdAt: now,
+        updatedAt: now,
+        _token: input.token ?? '',
+      };
+      rows.push(row);
+      return stripToken(row);
+    },
+    async remove(repo: string) {
+      const i = rows.findIndex((r) => r.repo === repo);
+      if (i >= 0) rows.splice(i, 1);
+    },
+  } as never;
+}
+
+const CRUD_TOKEN = 'crud-secret';
+const CRUD_HEADERS = { 'x-control-crud-token': CRUD_TOKEN };
+
+describe('createControlServer managed-project CRUD', () => {
+  let server: ReturnType<typeof createControlServer>;
+  let port: number;
+  let deps: ControlDeps;
+
+  function listen() {
+    server = createControlServer(deps);
+    return new Promise<void>((resolve) => {
+      server.listen(0, () => {
+        port = (server.address() as AddressInfo).port;
+        resolve();
+      });
+    });
+  }
+
+  beforeEach(() => {
+    const { publicKey } = generateManagedProjectKeyPair();
+    deps = {
+      client: { workflow: { start: vi.fn(), list: vi.fn(), getHandle: vi.fn() } } as never,
+      taskQueue: 'agentops-devcycle',
+      namespace: 'default',
+      temporalUiBaseUrl: 'https://temporal.example',
+      registry: [],
+      managedProjectStore: createFakeStore(),
+      projectCredentialPublicKey: publicKey,
+      projectCrudAuthToken: CRUD_TOKEN,
+    };
+  });
+
+  afterEach(() => {
+    server?.close();
+  });
+
+  it('POST /api/projects creates a project and never echoes the token', async () => {
+    await listen();
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_secret' }),
+    });
+    const created = (await res.json()) as Record<string, unknown>;
+    expect(res.status).toBe(201);
+    expect(created.project).toBe('acme-web');
+    expect(created.credentialSet).toBe(true);
+    expect(created.token).toBeUndefined();
+    expect(created.encryptedToken).toBeUndefined();
+  });
+
+  it('POST rejects a missing token with 400', async () => {
+    await listen();
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST 409s on a duplicate repo', async () => {
+    await listen();
+    await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_a' }),
+    });
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({ project: 'other', repo: 'acme/web', token: 'ghp_b' }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it('POST 409s on a duplicate project slug', async () => {
+    await listen();
+    await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_a' }),
+    });
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({ project: 'acme-web', repo: 'acme/other', token: 'ghp_b' }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it('GET /api/projects lists created projects (repo URL-decoded path is tested via show)', async () => {
+    await listen();
+    await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_a' }),
+    });
+    const { status, body } = await getJsonWithHeaders(port, '/api/projects', CRUD_HEADERS);
+    expect(status).toBe(200);
+    expect(body).toHaveLength(1);
+    expect((body as Array<{ project: string }>)[0].project).toBe('acme-web');
+  });
+
+  it('GET /api/projects/:repo returns 200 and URL-decodes the repo, or 404', async () => {
+    await listen();
+    await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_a' }),
+    });
+    const found = await getJsonWithHeaders(port, '/api/projects/acme%2Fweb', CRUD_HEADERS);
+    expect(found.status).toBe(200);
+    expect((found.body as { repo: string }).repo).toBe('acme/web');
+
+    const missing = await getJsonWithHeaders(port, '/api/projects/acme%2Fnope', CRUD_HEADERS);
+    expect(missing.status).toBe(404);
+  });
+
+  it('PUT /api/projects/:repo rotates the token and updates config; identity is immutable', async () => {
+    await listen();
+    await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_old' }),
+    });
+    const config = {
+      stages: {},
+      routing: {},
+      brakes: { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 },
+    };
+    const { status, body } = await putJson(port, '/api/projects/acme%2Fweb', { token: 'ghp_new', config }, CRUD_HEADERS);
+    expect(status).toBe(200);
+    expect((body as { project: string }).project).toBe('acme-web'); // unchanged identity
+    expect((body as { config: { brakes: { maxTokens: number } } }).config.brakes.maxTokens).toBe(200_000);
+  });
+
+  it('PUT 404s on an unknown repo', async () => {
+    await listen();
+    const { status } = await putJson(port, '/api/projects/acme%2Fnope', { token: 'ghp_new' }, CRUD_HEADERS);
+    expect(status).toBe(404);
+  });
+
+  it('PUT clears config back to file-based with an explicit null', async () => {
+    await listen();
+    const config = { stages: {}, routing: {}, brakes: { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 100, maxBabysitRounds: 1 } };
+    await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_a', config }),
+    });
+    const { body } = await putJson(port, '/api/projects/acme%2Fweb', { config: null }, CRUD_HEADERS);
+    expect((body as { config: unknown }).config).toBeNull();
+  });
+
+  it('DELETE /api/projects/:repo removes a project (204), 404 when absent', async () => {
+    await listen();
+    await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_a' }),
+    });
+    expect((await deleteJson(port, '/api/projects/acme%2Fweb', CRUD_HEADERS)).status).toBe(204);
+    expect((await deleteJson(port, '/api/projects/acme%2Fweb', CRUD_HEADERS)).status).toBe(404);
+  });
+
+  it('returns 401 without/with-wrong the bearer token', async () => {
+    await listen();
+    expect((await getJson(port, '/api/projects')).status).toBe(401);
+    expect((await getJsonWithHeaders(port, '/api/projects', { 'x-control-crud-token': 'wrong' })).status).toBe(401);
+  });
+
+  it('returns 503 when CRUD is not configured (no auth token)', async () => {
+    delete deps.projectCrudAuthToken;
+    await listen();
+    expect((await getJsonWithHeaders(port, '/api/projects', CRUD_HEADERS)).status).toBe(503);
   });
 });

@@ -38,7 +38,7 @@ export const DEFAULT_PROJECT_CONFIG: Omit<
     assess: { backend: 'claude', model: 'claude-sonnet-5', effort: 'medium' },
     design: { backend: 'claude', model: 'claude-sonnet-5', effort: 'medium' },
     plan: { backend: 'claude', model: 'claude-sonnet-5', effort: 'medium' },
-    implement: { backend: 'claude', model: 'claude-sonnet-5', effort: 'high' },
+    implement: { backend: 'pi', model: 'openrouter/deepseek-v4-flash', effort: 'high' },
     full_verify: { backend: 'claude', model: 'claude-sonnet-5', effort: 'high' },
     review: { backend: 'claude', model: 'claude-sonnet-5', effort: 'high' },
   },
