@@ -64,6 +64,8 @@ export const DevCycleRunDetailSchema = z.object({
 
 **`DevCycleState` moves to contracts.** Today it is a plain TS interface in `packages/workflows/src/dev-cycle.ts` (stage, status, blockReason, prRef, cumulativeTokens, …). `control` now consumes it across a network boundary, so per AGENTS.md rule 3 it gets a zod schema: new `DevCycleStateSchema` in contracts, and `dev-cycle.ts` replaces its local interface with the inferred type (no structural duplication). No shape change — a mechanical move.
 
+Also added: `DevCycleTargetSchema` / `DevCycleTargetsResponseSchema` (`{ targets: {repo, project}[] }`) for the console's target picker, and a new `'unregistered-repo'` value in `BlockReasonSchema` — the fail-fast reason from §5 is machine-readable state, not free text.
+
 ## 5. Workflow change (`packages/workflows/src/dev-cycle.ts`)
 
 At the top of `devCycle`, before anything reads `input.config` (note: `effectiveBrakes` is initialized from it today, so the resolution step moves ahead of that):
@@ -83,6 +85,7 @@ Three routes, existing conventions (plain `node:http`, one handler file per rout
 | `POST /api/devcycle/runs` | Validate with `StartDevCycleRequestSchema` (400). Resolve `project` slug server-side: managed store row for `repo`, else static `PROJECT_REGISTRY_JSON` entry — both readable without decryption; unknown repo → 422. `taskId = body.taskId ?? randomUUID()`; `workflowId = prompt-${project}-${taskId}`. `client.workflow.start(devCycle, { taskQueue, workflowId, args: [{taskId, project, repo, goal: prompt}], memo: { prompt } })`. `WorkflowExecutionAlreadyStartedError` → 409. 202 with `{workflowId, runId, taskId}`. |
 | `GET /api/devcycle/runs?limit=20` | `client.workflow.list({ query: 'WorkflowType="devCycle" ORDER BY StartTime DESC' })` — includes webhook/CLI-started runs (a feature: this is the first slice of the cross-workflow board). `promptSnippet` from memo when present, else absent (UI falls back to workflowId, same as platform list). |
 | `GET /api/devcycle/runs/:workflowId` | `describe()` for status (404 on not-found). While `RUNNING`: `handle.query('state')` for live `DevCycleState`. Once closed: `COMPLETED` → `handle.result()` (devCycle returns its final `DevCycleState`); other terminal statuses → failure message from `describe()`, never `result()`. Validate with `DevCycleStateSchema.safeParse`; mismatch sets `error`, not a crash. |
+| `GET /api/devcycle/targets` | Union of managed projects and static-registry entries as `{repo, project}` pairs (managed wins on duplicate repo). Identity only — no credentials or config — so it is served ungated like `/api/registry/repos`; the CRUD token keeps guarding credential writes. Backs the home form's target selector. |
 
 Notes:
 - The state query can race a run that closes between `describe()` and `query()` — catch and fall back to the closed-run path rather than 500ing.
