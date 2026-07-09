@@ -2,8 +2,12 @@ import { z } from 'zod';
 import { VerifyServiceSchema } from './project-config';
 import { StageSchema } from './stage';
 
+export const DEFAULT_IDLE_TIMEOUT_MS = 300_000;
+export const DEFAULT_BACKSTOP_TIMEOUT_MS = 1_800_000;
+
 export const AgentRunLimitsSchema = z.object({
   maxTokens: z.number().int().positive(),
+  idleTimeoutMs: z.number().int().positive().optional(),
   timeoutMs: z.number().int().positive(),
 });
 export type AgentRunLimits = z.infer<typeof AgentRunLimitsSchema>;
