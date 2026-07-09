@@ -72,6 +72,15 @@ spec:
             {{- end }}
           resources:
             {{- toYaml .Values.gateway.resources | nindent 12 }}
+          # Same cold-start profile as control (tsx boot): give startup up to
+          # 150s before the liveness probe can kill it, so a slow boot under
+          # rollout contention doesn't turn into a CrashLoopBackOff.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.gateway.port }}
+            periodSeconds: 5
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /healthz
