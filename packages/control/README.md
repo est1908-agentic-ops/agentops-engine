@@ -26,5 +26,6 @@ TEMPORAL_UI_BASE_URL=http://localhost:8233 pnpm --filter @agentops/control run s
 
 Serves `packages/ui`'s built static assets itself once
 `pnpm --filter @agentops/ui run build` has produced `packages/ui/dist` — see
-`images/control/Dockerfile`. Locally, run `packages/ui`'s own Vite dev server
-instead (see `packages/ui/README.md`), which proxies `/api/*` here.
+`images/engine/Dockerfile`'s `control` target. Locally, run `packages/ui`'s
+own Vite dev server instead (see `packages/ui/README.md`), which proxies
+`/api/*` here.

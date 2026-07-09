@@ -65,9 +65,10 @@ pnpm engine signal <task-id> resume
 
 Three images build from this repo:
 
-- `images/worker/Dockerfile` — runs the worker via the same `tsx src/main.ts`
-  entrypoint used locally (`pnpm worker`); see the engine-image-and-chart
-  design doc for why this isn't a compiled `node dist/main.js` image.
+- `images/engine/Dockerfile` (`--target worker`) — runs the worker via the
+  same `tsx src/main.ts` entrypoint used locally (`pnpm worker`); see the
+  engine-image-and-chart design doc for why this isn't a compiled
+  `node dist/main.js` image.
 - `images/agent-runner/Dockerfile` — `git` + every agent backend's CLI
   (`claude`, `pi`) in one shared image (ARCHITECTURE.md §5.4: both are thin
   `npm install -g` wrappers with no conflicting deps, so one pinned image
@@ -77,7 +78,7 @@ Three images build from this repo:
   root CA certificate exported from step-ca (see agentops-platform's
   platform-components design doc for the export command) — the placeholder
   lets the image build today but issues no real trust to internal services.
-- `images/gateway/Dockerfile` — the M3 webhook receiver ([design doc](docs/superpowers/specs/2026-07-06-gateway-design.md)), same plain `node:22-slim` + pnpm shape as the worker image, no CLI installs.
+- `images/engine/Dockerfile` (`--target gateway`) — the M3 webhook receiver ([design doc](docs/superpowers/specs/2026-07-06-gateway-design.md)), same plain `node:22-slim` + pnpm shape as the worker image, no CLI installs.
 
 CI builds all three on every push/PR and pushes immutable tags to the self-hosted
 registry on merge to `main`:
