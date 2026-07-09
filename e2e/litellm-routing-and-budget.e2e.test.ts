@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { TaskInput } from '@agentops/contracts';
 import { LiteLlmBackend } from '@agentops/backends';
 import { devCycle, resumeSignal } from '@agentops/workflows';
-import { buildTestEnv, waitForStatus, type TestEnv } from './helpers';
+import { buildTestEnv, teardownTestEnv, waitForStatus, type TestEnv } from './helpers';
 
 function baseConfig(routingOverrides: TaskInput['config']['routing']): TaskInput['config'] {
   return {
@@ -35,7 +35,7 @@ describe('DevCycle e2e: LiteLLM routing and budget enforcement (M5 gate)', () =>
   let testEnv: TestEnv | undefined;
 
   afterEach(async () => {
-    await testEnv?.env.teardown();
+    await teardownTestEnv(testEnv);
   });
 
   it('routes two tasks to different backends per their ProjectConfig', async () => {

@@ -3,13 +3,13 @@ import { InMemorySpanExporter, type ReadableSpan } from '@opentelemetry/sdk-trac
 import type { TaskInput } from '@agentops/contracts';
 import { devCycle } from '@agentops/workflows';
 import { setupTracing } from '@agentops/worker';
-import { buildTestEnv, waitForStatus, type TestEnv } from './helpers';
+import { buildTestEnv, teardownTestEnv, waitForStatus, type TestEnv } from './helpers';
 
 describe('DevCycle e2e: OTel instrumentation', () => {
   let testEnv: TestEnv | undefined;
 
   afterEach(async () => {
-    await testEnv?.env.teardown();
+    await teardownTestEnv(testEnv);
   });
 
   it('produces a RunWorkflow span and a RunActivity span carrying gen_ai attributes', async () => {
