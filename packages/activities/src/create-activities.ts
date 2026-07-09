@@ -47,8 +47,12 @@ export interface ActivityDependencies {
 }
 
 function rethrowWorkspaceError(err: unknown): never {
-  if (err instanceof WorkspaceError && err.nonRetryable) {
-    throw ApplicationFailure.nonRetryable(err.message, 'WorkspaceError');
+  if (err instanceof WorkspaceError) {
+    throw ApplicationFailure.create({
+      message: err.message,
+      type: 'WorkspaceError',
+      nonRetryable: err.nonRetryable,
+    });
   }
   throw err;
 }
