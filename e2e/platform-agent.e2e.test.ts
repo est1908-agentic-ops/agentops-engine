@@ -44,7 +44,6 @@ describe('platform e2e', () => {
           project: 'engine',
           repo: 'demo/repo',
           trackerType: 'github',
-          tokenEnvVar: 'X',
           token: 'fake',
         },
       ],

@@ -343,6 +343,10 @@ function createFakeStore() {
       const row = rows.find((r) => r.project === project);
       return row ? toManagedProject(row) : null;
     },
+    async getByLinearTeamKey(teamKey: string) {
+      const row = rows.find((r) => r.linearTeamKey === teamKey);
+      return row ? toManagedProject(row) : null;
+    },
     async list() {
       return [...rows].sort((a, b) => a.project.localeCompare(b.project)).map(toManagedProject);
     },
@@ -509,6 +513,37 @@ describe('createControlServer managed-project CRUD', () => {
       body: JSON.stringify({ project: 'acme-linear', repo: 'acme/linear-tracked', token: 'ghp_secret', trackerType: 'linear' }),
     });
     expect(res.status).toBe(400);
+  });
+
+  it('POST 409s on a duplicate linearTeamKey across two different projects', async () => {
+    await listen();
+    await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({
+        project: 'acme-linear-a',
+        repo: 'acme/linear-a',
+        token: 'ghp_a',
+        trackerType: 'linear',
+        linearTeamKey: 'ENG',
+        linearTriggerLabelId: '11111111-1111-1111-1111-111111111111',
+        linearToken: 'lin_a',
+      }),
+    });
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({
+        project: 'acme-linear-b',
+        repo: 'acme/linear-b',
+        token: 'ghp_b',
+        trackerType: 'linear',
+        linearTeamKey: 'ENG',
+        linearTriggerLabelId: '22222222-2222-2222-2222-222222222222',
+        linearToken: 'lin_b',
+      }),
+    });
+    expect(res.status).toBe(409);
   });
 
   it('PUT rotates a linear-tracked project token independently of the github token', async () => {

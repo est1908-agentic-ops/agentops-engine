@@ -231,6 +231,9 @@ async function handleCreateProject(deps: ControlDeps, req: IncomingMessage): Pro
   if (await deps.managedProjectStore!.getByProject(project)) {
     return { status: 409, body: { error: `a managed project with project "${project}" already exists` } };
   }
+  if (trackerType === 'linear' && linearTeamKey && (await deps.managedProjectStore!.getByLinearTeamKey(linearTeamKey))) {
+    return { status: 409, body: { error: `a managed project with linearTeamKey "${linearTeamKey}" already exists` } };
+  }
   try {
     const created = await deps.managedProjectStore!.upsert(
       { project, repo, token, config, trackerType, linearTeamKey, linearTriggerLabelId, linearToken },
