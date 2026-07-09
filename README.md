@@ -15,14 +15,22 @@ pnpm lint && pnpm typecheck && pnpm test && pnpm test:policies-coverage && pnpm 
 
 ## Run locally
 
-Requires a running Temporal dev server and `agentops.json` in the target repo. For a real (non-demo) run, register at least one project via a repo-root `.env` file — see [project-registry-design.md](docs/superpowers/specs/2026-07-06-project-registry-design.md):
+Requires a running Temporal dev server, a Postgres instance, and `agentops.json` in the target repo (or a config registered directly on the project). Projects are registered exclusively in the DB-backed managed project registry (`managed_projects` table) — see [managed-project-registry-design.md](docs/superpowers/specs/2026-07-08-managed-project-registry-design.md) and the [Linear trigger design's DB-only addendum](docs/superpowers/specs/2026-07-09-linear-trigger-design.md). Set up the encryption keypair + DB connection in `.env`:
 
 ```
-PROJECT_REGISTRY_JSON=[{"project":"my-project","repo":"owner/repo","trackerType":"github","tokenEnvVar":"GITHUB_TOKEN__MY_PROJECT"}]
-GITHUB_TOKEN__MY_PROJECT=ghp_xxx
+ENGINE_DB_HOST=localhost
+PROJECT_CREDENTIAL_PRIVATE_KEY=<base64 PKCS8 DER, from generateManagedProjectKeyPair()>
+PROJECT_CREDENTIAL_PUBLIC_KEY=<base64 SPKI DER, same keypair>
+CONTROL_CRUD_TOKEN=dev-token
 ```
 
-No `.env` at all → DEMO mode (in-memory ports + stub backend, no tokens spent). `--project` must match the registered project for the given `--repo` once a registry is configured.
+Then register a project through `control`'s API (the CLI is a thin HTTP client of it):
+
+```bash
+pnpm engine project add --project my-project --repo owner/repo --token ghp_xxx
+```
+
+No DB configured at all → DEMO mode (in-memory ports + stub backend, no tokens spent). `--project` must match the registered project for the given `--repo` once one is registered.
 
 ```bash
 # terminal 1
@@ -31,7 +39,10 @@ temporal server start-dev
 # terminal 2
 pnpm worker
 
-# terminal 3
+# terminal 3 (control, for the `engine project` commands above)
+pnpm --filter @agentops/control run start
+
+# terminal 4
 pnpm engine start \
   --issue owner/repo#42 --repo owner/repo --project my-project --goal "..."
 ```
@@ -40,7 +51,7 @@ pnpm engine start \
 
 Add the **`agentops`** label to an issue on a registered repo to start `devCycle` automatically — no CLI command. The [gateway](packages/gateway/README.md) handles GitHub `issues` / `labeled` webhooks and starts the same workflow as `engine start` (`goal` = issue title). Override the trigger label with `TRIGGER_LABEL` (default `agentops`).
 
-Requires worker + Temporal (above), `PROJECT_REGISTRY_JSON`, and the gateway running with `GITHUB_WEBHOOK_SECRET`:
+Requires worker + Temporal (above), a project registered via `engine project add`, and the gateway running with `GITHUB_WEBHOOK_SECRET`:
 
 ```bash
 # terminal 3 (instead of engine start)

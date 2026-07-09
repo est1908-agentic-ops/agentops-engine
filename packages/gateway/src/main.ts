@@ -1,5 +1,5 @@
 import { Client, Connection } from '@temporalio/client';
-import { loadEnv, loadProjectRegistry, PostgresManagedProjectStore, SpawnGitCommandRunner, type ManagedProjectRegistryDeps } from '@agentops/activities';
+import { loadEnv, PostgresManagedProjectStore, SpawnGitCommandRunner, type ManagedProjectRegistryDeps } from '@agentops/activities';
 import type { ResolvedProjectEntry } from '@agentops/contracts';
 import { createGithubPorts } from '@agentops/ports';
 import { Pool } from 'pg';
@@ -36,17 +36,14 @@ async function main(): Promise<void> {
     throw new Error('GITHUB_WEBHOOK_SECRET is required');
   }
 
-  const registry = loadProjectRegistry();
-  console.log(
-    registry.length > 0
-      ? `agentops gateway: ${registry.length} project(s) registered: ${registry.map((e) => `${e.project} (${e.repo})`).join(', ')}`
-      : 'agentops gateway: no PROJECT_REGISTRY_JSON set — every webhook will be acknowledged and ignored',
-  );
-
   const managedProjectDeps = buildGatewayManagedProjectDeps();
   if (managedProjectDeps) {
     await managedProjectDeps.store.ensureSchema();
     console.log('agentops gateway: managed-project DB lookup ENABLED (ENGINE_DB_HOST set)');
+  } else {
+    console.warn(
+      'agentops gateway: no managed-project DB configured (ENGINE_DB_HOST/PROJECT_CREDENTIAL_PRIVATE_KEY unset) — every webhook will be acknowledged and ignored, nothing is registered anywhere',
+    );
   }
 
   const connection = await Connection.connect({ address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233' });
@@ -64,7 +61,6 @@ async function main(): Promise<void> {
     taskQueue: TASK_QUEUE,
     webhookSecret,
     triggerLabel: process.env.TRIGGER_LABEL ?? 'agentops',
-    registry,
     buildScm,
     managedProjectDeps,
     linearWebhookSecret,

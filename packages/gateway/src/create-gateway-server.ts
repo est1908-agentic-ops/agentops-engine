@@ -1,11 +1,15 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { Client } from '@temporalio/client';
-import { resolveManagedProjectEntry, resolveProjectConfig, type ManagedProjectRegistryDeps } from '@agentops/activities';
+import {
+  resolveManagedProjectEntry,
+  resolveManagedProjectEntryByLinearTeamKey,
+  resolveProjectConfig,
+  type ManagedProjectRegistryDeps,
+} from '@agentops/activities';
 import type { ResolvedProjectEntry } from '@agentops/contracts';
 import type { ScmPort } from '@agentops/ports';
 import { matchesLinearTriggerLabel, parseLinearIssueEvent } from './parse-linear-issue-event';
 import { parseIssueLabeledEvent } from './parse-issue-labeled';
-import { findLinearProjectEntry } from './resolve-linear-project';
 import { startDevCycleForLinearIssue } from './start-dev-cycle-for-linear-issue';
 import { startDevCycleForIssue } from './start-dev-cycle';
 import { isFreshLinearWebhook, verifyLinearSignature } from './verify-linear-signature';
@@ -16,12 +20,14 @@ export interface GatewayDeps {
   taskQueue: string;
   webhookSecret: string;
   triggerLabel: string;
-  registry: ResolvedProjectEntry[];
   // Injectable so tests don't need a live GitHub client — the real caller
   // (main.ts) builds a GithubScmPort from the entry's token.
   buildScm: (entry: ResolvedProjectEntry) => ScmPort;
-  // Undefined when ENGINE_DB_HOST/PROJECT_CREDENTIAL_PRIVATE_KEY aren't set —
-  // every lookup falls through to `registry` only, same as before this field existed.
+  // The only project registry -- DB-backed (managed_projects table). No
+  // static-registry fallback exists anymore (see the Linear trigger design
+  // doc's DB-only addendum); undefined means ENGINE_DB_HOST/
+  // PROJECT_CREDENTIAL_PRIVATE_KEY aren't set, so every webhook is
+  // acknowledged and ignored (nothing is registered anywhere).
   managedProjectDeps?: ManagedProjectRegistryDeps;
   // Undefined disables the /webhooks/linear route entirely (404) -- lets a
   // deployment with no Linear-tracked projects skip configuring a new
@@ -100,7 +106,7 @@ async function handleGithubWebhook(deps: GatewayDeps, req: IncomingMessage, res:
     return;
   }
 
-  const entry = await resolveManagedProjectEntry(deps.managedProjectDeps, deps.registry, event.repo);
+  const entry = await resolveManagedProjectEntry(deps.managedProjectDeps, event.repo);
   if (!entry) {
     console.warn(`gateway: no project registered for repo "${event.repo}" — ignoring labeled event`);
     res.writeHead(202).end('no project registered for this repo');
@@ -157,7 +163,7 @@ async function handleLinearWebhook(deps: GatewayDeps, req: IncomingMessage, res:
     return;
   }
 
-  const entry = findLinearProjectEntry(deps.registry, parsed.teamKey);
+  const entry = await resolveManagedProjectEntryByLinearTeamKey(deps.managedProjectDeps, parsed.teamKey);
   if (!entry) {
     console.warn(`gateway: no project registered for Linear team "${parsed.teamKey}" — ignoring issue event`);
     res.writeHead(202).end('no project registered for this Linear team');

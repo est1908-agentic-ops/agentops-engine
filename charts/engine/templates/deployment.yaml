@@ -39,22 +39,6 @@ spec:
               value: "{{ .Values.image.repository }}/agent-runner:{{ .Values.image.agentRunnerTag }}"
             - name: AGENT_RUNNER_UID
               value: {{ .Values.agentRunnerUid | quote }}
-            {{- range $project, $cfg := .Values.projects }}
-            - name: {{ printf "GITHUB_TOKEN__%s" (upper (replace "-" "_" $project)) }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $cfg.githubTokenSecretName }}
-                  key: GITHUB_TOKEN
-            {{- if eq ($cfg.trackerType | default "github") "linear" }}
-            - name: {{ printf "LINEAR_TOKEN__%s" (upper (replace "-" "_" $project)) }}
-              valueFrom:
-                secretKeyRef:
-                  name: {{ $cfg.linearTokenSecretName }}
-                  key: LINEAR_TOKEN
-            {{- end }}
-            {{- end }}
-            - name: PROJECT_REGISTRY_JSON
-              value: {{ include "engine.projectRegistryJson" . | quote }}
             - name: CLAUDE_AUTH_SECRET_NAME
               value: {{ .Values.claudeAuthSecretName | quote }}
             - name: PI_AUTH_SECRET_NAME

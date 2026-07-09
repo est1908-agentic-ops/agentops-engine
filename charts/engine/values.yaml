@@ -43,9 +43,11 @@ engineDb:
 
 # Base64 PKCS8 DER private key for decrypting managed-project credentials
 # (docs/superpowers/specs/2026-07-08-managed-project-registry-design.md §5).
-# Empty by default -- unset means the worker/gateway/cli fall through to the
-# static PROJECT_REGISTRY_JSON registry only, same "off by default" pattern
-# as engineDb.host above. Generate with credential-crypto's
+# This -- together with engineDb.host above -- is the *only* project
+# registration mechanism now (the static PROJECT_REGISTRY_JSON registry was
+# removed; see docs/superpowers/specs/2026-07-09-linear-trigger-design.md's
+# DB-only addendum). Unset means the worker/gateway/cli have nothing
+# registered anywhere. Generate with credential-crypto's
 # generateManagedProjectKeyPair() and store the private half SOPS-encrypted.
 projectCredentialPrivateKeySecretName: ""
 
@@ -113,30 +115,6 @@ workspace:
   storageClassName: local-path
   taskSize: 10Gi
   cacheSize: 20Gi
-
-# One entry per project. agentops-platform supplies the real list as a values
-# override (see docs/superpowers/specs/2026-07-06-project-registry-design.md) —
-# this repo ships no real repo names, matching ARCHITECTURE.md §5.8 (the engine
-# is project-agnostic). Each entry renders one GITHUB_TOKEN__<PROJECT> env var
-# sourced from githubTokenSecretName, plus one row in PROJECT_REGISTRY_JSON.
-# trackerType defaults to "github" when omitted, so every existing values
-# override stays valid unchanged. A "linear" entry additionally needs
-# linearTeamKey, linearTokenSecretName (renders LINEAR_TOKEN__<PROJECT>), and
-# linearTriggerLabelId (a label UUID, not name — see
-# docs/superpowers/specs/2026-07-09-linear-trigger-design.md).
-#
-# projects:
-#   project-a:
-#     repo: flair-hr/project-a
-#     githubTokenSecretName: github-token-project-a
-#   project-b:
-#     repo: flair-hr/project-b
-#     githubTokenSecretName: github-token-project-b
-#     trackerType: linear
-#     linearTeamKey: ENG
-#     linearTokenSecretName: linear-token-project-b
-#     linearTriggerLabelId: <label-uuid>
-projects: {}
 
 claudeAuthSecretName: claude-credentials
 piAuthSecretName: pi-credentials
