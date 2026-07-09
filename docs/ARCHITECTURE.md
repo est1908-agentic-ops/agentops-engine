@@ -243,7 +243,8 @@ packages/
   worker/       # Temporal worker entrypoints
   cli/          # admin CLI: start, resume, clarify, inspect, replay
   ui/           # Mission Control: React SPA + BFF (§5.10)
-images/         # Dockerfiles: worker, gateway, agent-runner (shared across backends, §5.4)
+images/         # Dockerfiles: engine (worker/gateway/control, one multi-stage
+                # Dockerfile), agent-runner (shared across backends, §5.4)
 charts/         # Helm chart (values live in agentops-platform)
 ```
 
