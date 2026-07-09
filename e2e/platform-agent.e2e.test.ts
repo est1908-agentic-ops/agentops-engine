@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { PlatformAgentInput } from '@agentops/contracts';
 import { platform } from '@agentops/workflows';
-import { buildTestEnv, waitForStatus, type TestEnv } from './helpers';
+import { buildTestEnv, teardownTestEnv, waitForStatus, type TestEnv } from './helpers';
 
 describe('platform e2e', () => {
   let testEnv: TestEnv | undefined;
 
   afterEach(async () => {
-    await testEnv?.env.teardown();
+    await teardownTestEnv(testEnv);
   });
 
   it('answers a pure question with no proposed fixes and starts no child workflow', async () => {

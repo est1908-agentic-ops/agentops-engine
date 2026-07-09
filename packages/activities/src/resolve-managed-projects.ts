@@ -1,4 +1,5 @@
 import type { ResolvedProjectEntry } from '@agentops/contracts';
+import { normalizeRepo } from '@agentops/ports';
 import { decryptForManagedProject } from './credential-crypto';
 import type { PostgresManagedProjectStore } from './postgres-managed-project-store';
 
@@ -25,8 +26,15 @@ async function resolveOne(deps: ManagedProjectRegistryDeps, repo: string): Promi
     return null;
   }
 
+  // Canonicalize to short `owner/repo`: a project registered through the CRUD
+  // with a full GitHub URL is stored verbatim, but every downstream consumer
+  // (createProjectScopedPorts keys, githubCloneUrl, resolveRepoConfig) assumes
+  // the short form. Applies to both tracker types -- the repo a linear-tracked
+  // project's PR lands in has the same URL-vs-short-form ambiguity.
+  const normalizedRepo = normalizeRepo(managedProject.repo);
+
   if (managedProject.trackerType !== 'linear') {
-    return { trackerType: 'github', project: managedProject.project, repo: managedProject.repo, token };
+    return { trackerType: 'github', project: managedProject.project, repo: normalizedRepo, token };
   }
 
   const encryptedLinearToken = await deps.store.getEncryptedLinearToken(repo);
@@ -44,7 +52,7 @@ async function resolveOne(deps: ManagedProjectRegistryDeps, repo: string): Promi
   return {
     trackerType: 'linear',
     project: managedProject.project,
-    repo: managedProject.repo,
+    repo: normalizedRepo,
     token,
     linearTeamKey: managedProject.linearTeamKey,
     linearTriggerLabelId: managedProject.linearTriggerLabelId,

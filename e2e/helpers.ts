@@ -49,7 +49,7 @@ export async function buildTestEnv(opts: BuildTestEnvOptions = {}): Promise<Test
   const workspaces = new MemoryWorkspaceManager();
 
   const activities: DevCycleActivities & PlatformActivities = createActivities({
-    backends: { stub, claude: stub, ...opts.extraBackends },
+    backends: { stub, claude: stub, platform: stub, ...opts.extraBackends },
     tracker,
     scm,
     stats,
@@ -68,6 +68,16 @@ export async function buildTestEnv(opts: BuildTestEnvOptions = {}): Promise<Test
   });
 
   return { env, worker, stub, tracker, scm, stats, stageResults, workspaces, taskQueue };
+}
+
+export async function teardownTestEnv(testEnv: TestEnv | undefined): Promise<void> {
+  if (!testEnv) {
+    return;
+  }
+  if (testEnv.worker.getState() !== 'STOPPED') {
+    await testEnv.worker.shutdown();
+  }
+  await testEnv.env.teardown();
 }
 
 export async function waitForStatus(

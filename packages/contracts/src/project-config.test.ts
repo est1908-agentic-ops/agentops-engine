@@ -24,6 +24,15 @@ describe('ProjectConfigSchema', () => {
     expect(parsed.escalation?.model).toBe('opus');
   });
 
+  it('accepts an optional per-stage timeouts override', () => {
+    const parsed = ProjectConfigSchema.parse({
+      ...validConfig,
+      timeouts: { context: { idleTimeoutMs: 600_000 }, implement: { timeoutMs: 3_600_000 } },
+    });
+    expect(parsed.timeouts?.context).toEqual({ idleTimeoutMs: 600_000 });
+    expect(parsed.timeouts?.implement).toEqual({ timeoutMs: 3_600_000 });
+  });
+
   it('rejects a config missing brakes', () => {
     const { brakes: _brakes, ...withoutBrakes } = validConfig;
     expect(() => ProjectConfigSchema.parse(withoutBrakes)).toThrow();
@@ -158,5 +167,13 @@ describe('parseProjectConfig', () => {
 
     const configured = parseProjectConfig({ initCommands: ['pnpm install', 'pnpm worktree-setup'] });
     expect(configured.initCommands).toEqual(['pnpm install', 'pnpm worktree-setup']);
+  });
+
+  it('leaves timeouts undefined when not configured, and passes it through untouched when supplied', () => {
+    const empty = parseProjectConfig({});
+    expect(empty.timeouts).toBeUndefined();
+
+    const configured = parseProjectConfig({ timeouts: { context: { idleTimeoutMs: 600_000 } } });
+    expect(configured.timeouts).toEqual({ context: { idleTimeoutMs: 600_000 } });
   });
 });

@@ -1,6 +1,6 @@
 import { executeChild, proxyActivities, workflowInfo } from '@temporalio/workflow';
 import type { PlatformAgentInput, PlatformAgentResult, TaskInput } from '@agentops/contracts';
-import { PlatformAgentResultSchema } from '@agentops/contracts';
+import { DEFAULT_IDLE_TIMEOUT_MS, PlatformAgentResultSchema } from '@agentops/contracts';
 import { parsePlatformResult } from '@agentops/policies';
 import { devCycle } from './dev-cycle';
 import type { PlatformActivities } from './platform-activities-api';
@@ -11,19 +11,23 @@ const activities = proxyActivities<PlatformActivities>({
 });
 
 const agentActivities = proxyActivities<Pick<PlatformActivities, 'runAgent'>>({
-  startToCloseTimeout: '30 minutes',
+  startToCloseTimeout: '35 minutes',
   heartbeatTimeout: '15s',
   retry: { maximumAttempts: 5 },
 });
 
 // This role isn't scoped to one project, so there's no ProjectConfig to route
 // through -- fixed here at the same reasoning-heavy tier devCycle uses for
-// design/review. Shares the 'claude' backend devCycle stages use (no
-// dedicated ServiceAccount/secret for this role) -- see
-// docs/superpowers/specs/2026-07-09-routing-defaults-rebalance-design.md.
-const PLATFORM_MODEL = { backend: 'claude', model: 'claude-sonnet-5', effort: 'high' as const };
+// design/review. 'platform' (not 'claude') as the backend key: it's the same
+// claude CLI/model/credential (see packages/worker/src/main.ts buildBackends),
+// but a distinct worker backend entry carrying this role's own
+// ServiceAccount/secrets/pod-label -- keep routing through this key rather
+// than switching to 'claude' directly, or the role silently loses cluster
+// access again (see docs/superpowers/specs/2026-07-09-routing-defaults-rebalance-design.md).
+const PLATFORM_MODEL = { backend: 'platform', model: 'claude-sonnet-5', effort: 'high' as const };
 const PLATFORM_MAX_TOKENS = 400_000;
 const PLATFORM_TIMEOUT_MS = 1_800_000;
+const PLATFORM_IDLE_TIMEOUT_MS = DEFAULT_IDLE_TIMEOUT_MS;
 const MAX_RESULT_CALLS = 2;
 
 export async function platform(input: PlatformAgentInput): Promise<PlatformAgentResult> {
@@ -48,7 +52,7 @@ export async function platform(input: PlatformAgentInput): Promise<PlatformAgent
           hintRepos: (input.hintRepos ?? []).join(', ') || '(none provided)',
         },
         workspaceRef,
-        limits: { maxTokens: PLATFORM_MAX_TOKENS, timeoutMs: PLATFORM_TIMEOUT_MS },
+        limits: { maxTokens: PLATFORM_MAX_TOKENS, idleTimeoutMs: PLATFORM_IDLE_TIMEOUT_MS, timeoutMs: PLATFORM_TIMEOUT_MS },
       });
       await activities.recordRunStats({
         taskId,

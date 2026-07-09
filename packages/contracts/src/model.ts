@@ -32,6 +32,25 @@ export const RoutingSchema = z.object({
 });
 export type Routing = z.infer<typeof RoutingSchema>;
 
+export const StageTimeoutSchema = z.object({
+  idleTimeoutMs: z.number().int().positive().optional(),
+  timeoutMs: z.number().int().positive().optional(),
+});
+export type StageTimeout = z.infer<typeof StageTimeoutSchema>;
+
+export const TimeoutsSchema = z.object({
+  context: StageTimeoutSchema.optional(),
+  assess: StageTimeoutSchema.optional(),
+  design: StageTimeoutSchema.optional(),
+  plan: StageTimeoutSchema.optional(),
+  implement: StageTimeoutSchema.optional(),
+  full_verify: StageTimeoutSchema.optional(),
+  review: StageTimeoutSchema.optional(),
+  pr: StageTimeoutSchema.optional(),
+  pr_babysit: StageTimeoutSchema.optional(),
+});
+export type Timeouts = z.infer<typeof TimeoutsSchema>;
+
 export const StageToggleSchema = z.object({
   assess: z.boolean().optional(),
   triage: z.boolean().optional(),

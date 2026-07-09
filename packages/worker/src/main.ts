@@ -130,14 +130,25 @@ export function buildJobRunnerOptions(
 // default) means unlimited, same as today; set both env vars for a backend
 // to turn the limit on. In-memory, per-worker-process: correct for today's
 // single-replica deployment, not for multiple replicas sharing one quota
-// (see RateWindowLimiter).
-function wrapWithRateWindow(backend: AgentBackend, envPrefix: string, name: string): AgentBackend {
+// (see RateWindowLimiter). Built once per envPrefix and passed to every
+// backend entry that shares that provider account (claude + platform both
+// draw on CLAUDE_*) so they share one counter -- constructing a fresh
+// limiter per entry would silently double the effective ceiling.
+function buildRateWindowLimiter(envPrefix: string): RateWindowLimiter | undefined {
   const maxCalls = Number(process.env[`${envPrefix}_RATE_WINDOW_MAX_CALLS`]);
   const windowMs = Number(process.env[`${envPrefix}_RATE_WINDOW_MS`]);
   if (!Number.isFinite(maxCalls) || maxCalls <= 0 || !Number.isFinite(windowMs) || windowMs <= 0) {
-    return backend;
+    return undefined;
   }
-  return new RateWindowedBackend(backend, new RateWindowLimiter({ maxCalls, windowMs }), name);
+  return new RateWindowLimiter({ maxCalls, windowMs });
+}
+
+function wrapWithRateWindow(
+  backend: AgentBackend,
+  limiter: RateWindowLimiter | undefined,
+  name: string,
+): AgentBackend {
+  return limiter ? new RateWindowedBackend(backend, limiter, name) : backend;
 }
 
 // Reacts to a real provider-side rate limit (ProviderRateLimitedError),
@@ -199,15 +210,17 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
   });
 
   if (!inCluster) {
+    const claudeRateWindowLimiter = buildRateWindowLimiter('CLAUDE');
     return {
       stub: new StubBackend(),
-      claude: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), 'CLAUDE', 'claude'),
-      pi: wrapWithRateLimitFallback(wrapWithRateWindow(new ProcessCliRunner(piSpec), 'PI', 'pi'), 'PI', 'pi'),
-      platform: wrapWithRateLimitFallback(
-        wrapWithRateWindow(new ProcessCliRunner(piSpec), 'PI', 'platform'),
+      claude: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), claudeRateWindowLimiter, 'claude'),
+      pi: wrapWithRateLimitFallback(
+        wrapWithRateWindow(new ProcessCliRunner(piSpec), buildRateWindowLimiter('PI'), 'pi'),
         'PI',
-        'platform',
+        'pi',
       ),
+      // Same CLI/model/rate window as claude (see the in-cluster branch below for why).
+      platform: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), claudeRateWindowLimiter, 'platform'),
       litellm,
     };
   }
@@ -215,41 +228,48 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
   const kc = new KubeConfig();
   kc.loadFromCluster();
   const batchApi = batchApiFromClient(kc.makeApiClient(BatchV1Api));
+  const claudeRateWindowLimiter = buildRateWindowLimiter('CLAUDE');
 
   return {
     stub: new StubBackend(),
-    // Each backend gets its own auth secret — claude's z.ai/Anthropic env vars
-    // and pi's (provider-dependent, see images/agent-runner/Dockerfile) are not
-    // guaranteed to be the same shape, so they were never safe to share.
+    // claude and platform now share one auth secret and one rate window --
+    // see the platform entry's comment below for why. pi's stays separate:
+    // its env vars are provider-dependent (images/agent-runner/Dockerfile),
+    // not guaranteed to be the same shape as claude's.
     claude: wrapWithRateWindow(
       new K8sJobRunner(claudeSpec, buildJobRunnerOptions(batchApi, { authSecretName: process.env.CLAUDE_AUTH_SECRET_NAME })),
-      'CLAUDE',
+      claudeRateWindowLimiter,
       'claude',
     ),
     pi: wrapWithRateLimitFallback(
       wrapWithRateWindow(
         new K8sJobRunner(piSpec, buildJobRunnerOptions(batchApi, { authSecretName: process.env.PI_AUTH_SECRET_NAME })),
-        'PI',
+        buildRateWindowLimiter('PI'),
         'pi',
       ),
       'PI',
       'pi',
     ),
-    platform: wrapWithRateLimitFallback(
-      wrapWithRateWindow(
-        new K8sJobRunner(
-          piSpec,
-          buildJobRunnerOptions(batchApi, {
-            authSecretName: process.env.PI_AUTH_SECRET_NAME,
-            serviceAccountName: process.env.PLATFORM_AGENT_SERVICE_ACCOUNT,
-            additionalSecretNames: process.env.PLATFORM_AGENT_SECRET_NAME ? [process.env.PLATFORM_AGENT_SECRET_NAME] : undefined,
-            podLabels: { 'agentops/role': 'platform-agent' },
-          }),
-        ),
-        'PI',
-        'platform',
+    // Same CLI/model/credential/rate-window limiter as claude (they share one
+    // Anthropic subscription window, deliberately -- see
+    // docs/superpowers/specs/2026-07-09-routing-defaults-rebalance-design.md
+    // and its 3fade45 correction), plus this role's own K8s identity: a
+    // dedicated ServiceAccount (read-only cluster RBAC), an extra secret
+    // (Temporal/Grafana credentials, once agentops-platform supplies
+    // platformAgentSecretName), and a pod label the platform-agent
+    // NetworkPolicy selects on. No rate-limit fallback wrapper -- that's for
+    // z.ai's 429s, not relevant on Anthropic.
+    platform: wrapWithRateWindow(
+      new K8sJobRunner(
+        claudeSpec,
+        buildJobRunnerOptions(batchApi, {
+          authSecretName: process.env.CLAUDE_AUTH_SECRET_NAME,
+          serviceAccountName: process.env.PLATFORM_AGENT_SERVICE_ACCOUNT,
+          additionalSecretNames: process.env.PLATFORM_AGENT_SECRET_NAME ? [process.env.PLATFORM_AGENT_SECRET_NAME] : undefined,
+          podLabels: { 'agentops/role': 'platform-agent' },
+        }),
       ),
-      'PI',
+      claudeRateWindowLimiter,
       'platform',
     ),
     litellm,

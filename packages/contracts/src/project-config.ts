@@ -1,5 +1,5 @@
 import { z, ZodError } from 'zod';
-import { ModelRefSchema, BrakesSchema, RoutingSchema, StageToggleSchema } from './model';
+import { ModelRefSchema, BrakesSchema, RoutingSchema, StageToggleSchema, TimeoutsSchema } from './model';
 
 export const VerifyServiceReadinessSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('exec'), command: z.array(z.string()).min(1) }),
@@ -25,6 +25,7 @@ export const ProjectConfigSchema = z.object({
   routing: RoutingSchema,
   escalation: ModelRefSchema.optional(),
   brakes: BrakesSchema,
+  timeouts: TimeoutsSchema.optional(),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 

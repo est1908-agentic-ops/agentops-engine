@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ModelRefSchema, BrakesSchema, RoutingSchema } from './model';
+import { ModelRefSchema, BrakesSchema, RoutingSchema, TimeoutsSchema } from './model';
 
 describe('ModelRefSchema', () => {
   it('accepts a backend + model pair', () => {
@@ -42,5 +42,22 @@ describe('RoutingSchema', () => {
     const routing = RoutingSchema.parse({ implement: { backend: 'stub', model: 'stub-v1' } });
     expect(routing.implement).toEqual({ backend: 'stub', model: 'stub-v1' });
     expect(routing.review).toBeUndefined();
+  });
+});
+
+describe('TimeoutsSchema', () => {
+  it('allows a partial timeouts table, same shape as RoutingSchema', () => {
+    const timeouts = TimeoutsSchema.parse({ context: { idleTimeoutMs: 600_000 } });
+    expect(timeouts.context).toEqual({ idleTimeoutMs: 600_000 });
+    expect(timeouts.review).toBeUndefined();
+  });
+
+  it('allows a stage entry with both idleTimeoutMs and timeoutMs', () => {
+    const timeouts = TimeoutsSchema.parse({ implement: { idleTimeoutMs: 300_000, timeoutMs: 3_600_000 } });
+    expect(timeouts.implement).toEqual({ idleTimeoutMs: 300_000, timeoutMs: 3_600_000 });
+  });
+
+  it('rejects a negative idleTimeoutMs', () => {
+    expect(() => TimeoutsSchema.parse({ context: { idleTimeoutMs: -1 } })).toThrow();
   });
 });

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Context } from '@temporalio/activity';
@@ -58,8 +58,32 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   });
 }
 
-const SHELL_REDIRECT =
-  'exec "$0" "$@" < "$PROMPT_FILE" > "$OUT_FILE" 2> "$ERR_FILE"';
+async function fileSize(filePath: string): Promise<number> {
+  try {
+    return (await stat(filePath)).size;
+  } catch {
+    return 0;
+  }
+}
+
+// A plain `exec ... > OUT 2> ERR` sent the CLI's entire output only to
+// files on the workspace PVC -- nothing reached the container's own
+// stdout/stderr, so Alloy (which scrapes container logs, not PVC files)
+// captured nothing for the `agent` container. This mirrors the same
+// output to both: FIFOs decouple the CLI's write from `tee`'s dual
+// write, and the CLI's exit code is captured explicitly in $CODE rather
+// than relying on `set -o pipefail`, which dash (a common /bin/sh) does
+// not support.
+const SHELL_REDIRECT = [
+  'rm -f /tmp/agentops-out /tmp/agentops-err',
+  'mkfifo /tmp/agentops-out /tmp/agentops-err',
+  'tee "$OUT_FILE" < /tmp/agentops-out &',
+  'tee "$ERR_FILE" < /tmp/agentops-err >&2 &',
+  '"$0" "$@" < "$PROMPT_FILE" > /tmp/agentops-out 2> /tmp/agentops-err',
+  'CODE=$?',
+  'wait',
+  'exit "$CODE"',
+].join('\n');
 
 // A call's on-disk artifacts and its K8s Job are keyed by
 // (taskId, stage, attempt, callIndex) AND the model. A RateLimitFallbackBackend
@@ -248,7 +272,19 @@ export class K8sJobRunner implements AgentBackend {
 
     const start = this.now();
     let lastStatus: V1Job['status'];
+    let lastProgressAt = start;
+    let lastOutputBytes = 0;
+    let lastErrorBytes = 0;
+    const idleTimeoutMs = req.limits.idleTimeoutMs ?? req.limits.timeoutMs;
     while (true) {
+      const outputBytes = await fileSize(paths.outFile);
+      const errorBytes = await fileSize(paths.errFile);
+      if (outputBytes > lastOutputBytes || errorBytes > lastErrorBytes) {
+        lastProgressAt = this.now();
+      }
+      lastOutputBytes = outputBytes;
+      lastErrorBytes = errorBytes;
+
       try {
         this.heartbeat({
           phase: lastStatus ? 'polling' : 'job-created',
@@ -256,7 +292,10 @@ export class K8sJobRunner implements AgentBackend {
           taskId: req.taskId,
           stage: req.stage,
           elapsedMs: this.now() - start,
+          idleMs: this.now() - lastProgressAt,
           timeoutMs: req.limits.timeoutMs,
+          outputBytes,
+          errorBytes,
           jobStatus: lastStatus,
         });
       } catch (err) {
@@ -266,11 +305,22 @@ export class K8sJobRunner implements AgentBackend {
         throw err;
       }
 
+      if (this.now() - lastProgressAt > idleTimeoutMs) {
+        await this.opts.batchApi.deleteNamespacedJob(jobName, this.opts.namespace, {
+          propagationPolicy: 'Background',
+        });
+        throw new ProcessCliTimeoutError(
+          `${this.spec.binary} produced no output for ${idleTimeoutMs}ms (idle since elapsed ${lastProgressAt - start}ms)`,
+        );
+      }
+
       if (this.now() - start > req.limits.timeoutMs) {
         await this.opts.batchApi.deleteNamespacedJob(jobName, this.opts.namespace, {
           propagationPolicy: 'Background',
         });
-        throw new ProcessCliTimeoutError(`${this.spec.binary} timed out after ${req.limits.timeoutMs}ms`);
+        throw new ProcessCliTimeoutError(
+          `${this.spec.binary} exceeded overall ${req.limits.timeoutMs}ms budget despite ongoing output`,
+        );
       }
 
       let statusJob: V1Job;

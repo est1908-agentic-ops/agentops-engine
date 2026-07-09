@@ -2,7 +2,7 @@ import type { GitCommandRunner } from '../git/git-command-runner';
 import type { ScmPort } from '../scm-port';
 import type { TrackerPort } from '../tracker-port';
 import { parseTrackerRef } from '../tracker-ref';
-import { parseRef } from './parse-ref';
+import { normalizeRepo, parseRef } from './parse-ref';
 
 export interface ProjectScopedPortsEntry {
   repo: string;
@@ -28,13 +28,18 @@ function repoFromRef(ref: string): string {
 }
 
 export function createProjectScopedPorts(entries: ProjectScopedPortsEntry[]): ProjectScopedPorts {
-  const byRepo = new Map(entries.map((entry) => [entry.repo, entry]));
+  // Key and look up by the canonical `owner/repo` form so an entry registered
+  // with a full URL (e.g. a managed project stored as
+  // "https://github.com/owner/repo") still matches a short-form lookup, and
+  // vice versa -- otherwise the exact-string Map miss surfaces as
+  // "no project registered for repo ...".
+  const byRepo = new Map(entries.map((entry) => [normalizeRepo(entry.repo), entry]));
   const byLinearTeamKey = new Map(
     entries.filter((entry) => entry.linearTeamKey).map((entry) => [entry.linearTeamKey as string, entry]),
   );
 
   function resolve(repo: string): ProjectScopedPortsEntry {
-    const found = byRepo.get(repo);
+    const found = byRepo.get(normalizeRepo(repo));
     if (!found) {
       throw new Error(`createProjectScopedPorts: no project registered for repo "${repo}" — check the project registry`);
     }
