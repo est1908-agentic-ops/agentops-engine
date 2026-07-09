@@ -67,6 +67,19 @@ spec:
             {{- end }}
           resources:
             {{- toYaml .Values.control.resources | nindent 12 }}
+          # The console image bundles a Vite SPA and boots via `tsx src/main.ts`,
+          # so cold start needs ~25s+ (more under rollout memory contention) to
+          # bind :{{ .Values.control.port }}. Without a startupProbe the default
+          # liveness probe (initialDelay 0, period 10, threshold 3) kills the
+          # container ~30s in, before it ever serves -- a CrashLoopBackOff that
+          # never lets a new pod reach Ready. The startupProbe gives boot up to
+          # 150s before liveness takes over.
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.control.port }}
+            periodSeconds: 5
+            failureThreshold: 30
           readinessProbe:
             httpGet:
               path: /healthz
