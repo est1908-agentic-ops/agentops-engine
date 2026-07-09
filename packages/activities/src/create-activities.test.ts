@@ -6,6 +6,7 @@ import type { AgentBackend } from '@agentops/backends';
 import type { BackendRunRequest, ResolvedProjectEntry } from '@agentops/contracts';
 import {
   LiteLlmBudgetExceededError,
+  ProcessCliAuthError,
   RateWindowExceededError,
   StubBackend,
 } from '@agentops/backends';
@@ -442,6 +443,24 @@ describe('createActivities — backend error translation', () => {
 
     expect(err).toBeInstanceOf(ApplicationFailure);
     expect((err as ApplicationFailure).type).toBe('LiteLlmBudgetExceededError');
+    expect((err as ApplicationFailure).nonRetryable).toBe(true);
+  });
+
+  it('converts a ProcessCliAuthError into a non-retryable ApplicationFailure typed AuthError', async () => {
+    const deps = buildDeps();
+    deps.backends.claude = {
+      run: async () => {
+        throw new ProcessCliAuthError(
+          'claude reported is_error: Failed to authenticate. API Error: 401 token expired or incorrect',
+        );
+      },
+    };
+    const activities = createActivities(deps);
+
+    const err: unknown = await activities.runAgent(runAgentReq('claude')).catch((e) => e);
+
+    expect(err).toBeInstanceOf(ApplicationFailure);
+    expect((err as ApplicationFailure).type).toBe('AuthError');
     expect((err as ApplicationFailure).nonRetryable).toBe(true);
   });
 

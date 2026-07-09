@@ -148,6 +148,28 @@ describe('ClaudeBackend', () => {
     expect((error as Error).message).toMatch(/hit an internal snag/);
   });
 
+  it('throws ClaudeBackendAuthError (not a generic process error) when is_error:true carries a 401/auth message', async () => {
+    const { child } = fakeChildProcess();
+    const spawnFn = vi.fn(() => {
+      queueMicrotask(() => {
+        child.stdout.end(
+          JSON.stringify({
+            is_error: true,
+            result: 'Failed to authenticate. API Error: 401 token expired or incorrect',
+            usage: { input_tokens: 1, output_tokens: 1 },
+            duration_ms: 5,
+          }),
+        );
+        child.stderr.end('');
+        child.emit('close', 0);
+      });
+      return child;
+    });
+    const backend = new ProcessCliRunner(createClaudeCliSpec(), { spawn: spawnFn as never });
+
+    await expect(backend.run(baseRequest)).rejects.toThrow(ClaudeBackendAuthError);
+  });
+
   it('throws ClaudeBackendProcessError when the process exits nonzero with no stdout at all', async () => {
     const { child } = fakeChildProcess();
     const spawnFn = vi.fn(() => {
