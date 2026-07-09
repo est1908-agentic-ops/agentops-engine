@@ -376,7 +376,11 @@ describe('createActivities — workspace error translation', () => {
     expect((err as ApplicationFailure).nonRetryable).toBe(true);
   });
 
-  it('passes a retryable WorkspaceError through unchanged', async () => {
+  it('wraps a retryable WorkspaceError in a retryable ApplicationFailure', async () => {
+    // After #23, retryable WorkspaceErrors are also wrapped in an
+    // ApplicationFailure (nonRetryable: false) so Temporal's retry policy
+    // applies -- previously they leaked through unwrapped and were never
+    // retried despite the configured maximumAttempts.
     const deps = buildDeps();
     deps.workspaces = {
       prepare: async () => {
@@ -388,9 +392,13 @@ describe('createActivities — workspace error translation', () => {
     };
     const activities = createActivities(deps);
 
-    await expect(activities.prepareWorkspace({ taskId: 't1', repo: 'owner/repo' })).rejects.toThrow(
-      WorkspaceError,
-    );
+    const err: unknown = await activities
+      .prepareWorkspace({ taskId: 't1', repo: 'owner/repo' })
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(ApplicationFailure);
+    expect((err as ApplicationFailure).nonRetryable).toBe(false);
+    expect((err as ApplicationFailure).type).toBe('WorkspaceError');
   });
 
   it('converts a non-retryable WorkspaceError from cleanupWorkspace too', async () => {
