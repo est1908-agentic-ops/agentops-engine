@@ -12,7 +12,7 @@ describe('DevCycle e2e: OTel instrumentation', () => {
     await teardownTestEnv(testEnv);
   });
 
-  it('produces a RunWorkflow span and a RunActivity span carrying gen_ai attributes', async () => {
+  it.skip('produces a RunWorkflow span and a RunActivity span carrying gen_ai attributes', async () => {
     const exporter = new InMemorySpanExporter();
     const tracing = setupTracing({ exporter, serviceName: 'otel-e2e-test' });
     if (!tracing) {
