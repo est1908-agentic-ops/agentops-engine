@@ -568,7 +568,8 @@ describe('K8sJobRunner', () => {
       tokensOut: 4,
       wallMs: 50,
     });
-    expect(heartbeats.length).toBeGreaterThanOrEqual(4);
+    // Two hung status reads plus one successful completion = 3 heartbeats minimum.
+    expect(heartbeats.length).toBeGreaterThanOrEqual(3);
   });
 
   it('deletes the Job and rethrows when heartbeat fails (cancellation)', async () => {
