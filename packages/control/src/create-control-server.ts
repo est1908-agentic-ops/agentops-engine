@@ -191,7 +191,10 @@ function isProjectCrudEnabled(deps: ControlDeps): boolean {
 }
 
 function authorizeProjectCrud(deps: ControlDeps, req: IncomingMessage): boolean {
-  return req.headers.authorization === `Bearer ${deps.projectCrudAuthToken}`;
+  // X-Control-Crud-Token (not Authorization): Traefik basic-auth on the control
+  // ingress consumes the Authorization header, so the CRUD bearer token uses a
+  // custom header to avoid collision. Works with or without basic-auth in front.
+  return req.headers['x-control-crud-token'] === deps.projectCrudAuthToken;
 }
 
 async function handleListProjects(deps: ControlDeps): Promise<HandlerResponse> {

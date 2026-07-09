@@ -107,7 +107,7 @@ export function ProjectsPage() {
         <div className="section">
           <p className="muted-text">
             The project-management routes require an operator bearer token (<code>CONTROL_CRUD_TOKEN</code>). Paste it
-            below — it is stored only in this browser (localStorage) and sent as an Authorization header on each request.
+            below — it is stored only in this browser (localStorage) and sent as an X-Control-Crud-Token header on each request.
           </p>
           <label className="field-label" htmlFor="crud-token">
             Control CRUD token

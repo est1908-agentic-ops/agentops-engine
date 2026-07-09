@@ -36,7 +36,9 @@ function crudHeaders(hasBody: boolean): Record<string, string> {
   const headers: Record<string, string> = {};
   const token = getCrudToken();
   if (token) {
-    headers.authorization = `Bearer ${token}`;
+    // X-Control-Crud-Token (not Authorization) to avoid colliding with Traefik
+    // basic-auth on the control ingress (design §7 / issue #4).
+    headers['x-control-crud-token'] = token;
   }
   if (hasBody) {
     headers['content-type'] = 'application/json';

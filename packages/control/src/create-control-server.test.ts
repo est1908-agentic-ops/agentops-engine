@@ -336,7 +336,7 @@ function createFakeStore() {
 }
 
 const CRUD_TOKEN = 'crud-secret';
-const CRUD_HEADERS = { authorization: `Bearer ${CRUD_TOKEN}` };
+const CRUD_HEADERS = { 'x-control-crud-token': CRUD_TOKEN };
 
 describe('createControlServer managed-project CRUD', () => {
   let server: ReturnType<typeof createControlServer>;
@@ -504,7 +504,7 @@ describe('createControlServer managed-project CRUD', () => {
   it('returns 401 without/with-wrong the bearer token', async () => {
     await listen();
     expect((await getJson(port, '/api/projects')).status).toBe(401);
-    expect((await getJsonWithHeaders(port, '/api/projects', { authorization: 'Bearer wrong' })).status).toBe(401);
+    expect((await getJsonWithHeaders(port, '/api/projects', { 'x-control-crud-token': 'wrong' })).status).toBe(401);
   });
 
   it('returns 503 when CRUD is not configured (no auth token)', async () => {

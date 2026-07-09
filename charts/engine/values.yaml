@@ -188,6 +188,10 @@ control:
     enabled: false
     host: ""
     clusterIssuer: letsencrypt
+    # Name of a Traefik basicAuth Middleware (CRD) deployed platform-side to
+    # guard the public control ingress. Empty => no middleware attached.
+    # agentops-platform sets this to control-basic-auth (issue #4).
+    basicAuthSecretName: ""
   resources:
     requests:
       cpu: 100m

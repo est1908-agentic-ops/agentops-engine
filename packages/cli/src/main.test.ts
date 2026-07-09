@@ -161,7 +161,7 @@ describe('engine project (control HTTP client)', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('http://control.test:3001/api/projects');
     expect(init.method).toBe('POST');
-    expect((init.headers as Record<string, string>).authorization).toBe('Bearer tok');
+    expect((init.headers as Record<string, string>)['x-control-crud-token']).toBe('tok');
     expect((init.headers as Record<string, string>)['content-type']).toBe('application/json');
     expect(init.body).toBe(JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_x' }));
   });
