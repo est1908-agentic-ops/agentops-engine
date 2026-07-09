@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { TaskInput } from '@agentops/contracts';
 import { devCycle } from '@agentops/workflows';
-import { buildTestEnv, waitForStatus, type TestEnv } from './helpers';
+import { buildTestEnv, teardownTestEnv, waitForStatus, type TestEnv } from './helpers';
 
 describe('DevCycle e2e: exhausted repair rounds open the PR anyway', () => {
   let testEnv: TestEnv | undefined;
 
   afterEach(async () => {
-    await testEnv?.env.teardown();
+    await teardownTestEnv(testEnv);
   });
 
   it('opens a PR with findings and comments on the issue after 3 failed review rounds', async () => {

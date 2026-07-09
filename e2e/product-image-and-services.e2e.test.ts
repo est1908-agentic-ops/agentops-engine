@@ -2,13 +2,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentBackend } from '@agentops/backends';
 import type { BackendRunRequest, TaskInput } from '@agentops/contracts';
 import { devCycle } from '@agentops/workflows';
-import { buildTestEnv, waitForStatus, type TestEnv } from './helpers';
+import { buildTestEnv, teardownTestEnv, waitForStatus, type TestEnv } from './helpers';
 
 describe('DevCycle e2e: project image and services reach every stage agent call', () => {
   let testEnv: TestEnv | undefined;
 
   afterEach(async () => {
-    await testEnv?.env.teardown();
+    await teardownTestEnv(testEnv);
   });
 
   it('threads config.image and config.services from TaskInput into runAgent for implement/full_verify/review', async () => {

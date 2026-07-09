@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { AgentRunRequestSchema, AgentRunResultSchema, BackendRunRequestSchema } from './agent-run';
+import {
+  AgentRunLimitsSchema,
+  AgentRunRequestSchema,
+  AgentRunResultSchema,
+  BackendRunRequestSchema,
+  DEFAULT_BACKSTOP_TIMEOUT_MS,
+  DEFAULT_IDLE_TIMEOUT_MS,
+} from './agent-run';
 
 describe('AgentRunRequestSchema', () => {
   it('defaults callIndex to 1', () => {
@@ -114,5 +121,30 @@ describe('AgentRunResultSchema', () => {
       wallMs: 1200,
     });
     expect(parsed.tokensIn + parsed.tokensOut).toBe(150);
+  });
+});
+
+describe('AgentRunLimitsSchema', () => {
+  it('accepts limits without idleTimeoutMs — optional, only K8sJobRunner reads it', () => {
+    expect(() => AgentRunLimitsSchema.parse({ maxTokens: 1000, timeoutMs: 60_000 })).not.toThrow();
+  });
+
+  it('accepts limits with an explicit idleTimeoutMs', () => {
+    const parsed = AgentRunLimitsSchema.parse({ maxTokens: 1000, idleTimeoutMs: 300_000, timeoutMs: 1_800_000 });
+    expect(parsed.idleTimeoutMs).toBe(300_000);
+  });
+
+  it('rejects a negative idleTimeoutMs', () => {
+    expect(() => AgentRunLimitsSchema.parse({ maxTokens: 1000, idleTimeoutMs: -1, timeoutMs: 60_000 })).toThrow();
+  });
+});
+
+describe('default timeout constants', () => {
+  it('DEFAULT_IDLE_TIMEOUT_MS is 5 minutes', () => {
+    expect(DEFAULT_IDLE_TIMEOUT_MS).toBe(300_000);
+  });
+
+  it('DEFAULT_BACKSTOP_TIMEOUT_MS is 30 minutes', () => {
+    expect(DEFAULT_BACKSTOP_TIMEOUT_MS).toBe(1_800_000);
   });
 });

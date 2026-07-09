@@ -11,7 +11,7 @@ import {
 } from '@temporalio/workflow';
 import type { BlockReason, Brakes, ModelRef, Routing, Stage, TaskInput, TaskStatus, VerdictKind } from '@agentops/contracts';
 import { feedbackHash } from '@agentops/contracts';
-import { babysitDecision, nextRepairAction, parseVerdict, preImplementStages } from '@agentops/policies';
+import { babysitDecision, nextRepairAction, parseVerdict, preImplementStages, resolveStageLimits } from '@agentops/policies';
 import type { DevCycleActivities } from './activities-api';
 
 // No step retries forever: a failure that keeps recurring attempt after attempt
@@ -26,7 +26,7 @@ const activities = proxyActivities<DevCycleActivities>({
 });
 
 const agentActivities = proxyActivities<Pick<DevCycleActivities, 'runAgent'>>({
-  startToCloseTimeout: '30 minutes',
+  startToCloseTimeout: '35 minutes',
   heartbeatTimeout: '15s',
   retry: { maximumAttempts: 5 },
 });
@@ -172,7 +172,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
           promptRef: `${stage}.md`,
           promptContext: { taskId: input.taskId, goal: input.goal, ...extraContext },
           workspaceRef: state.workspaceRef,
-          limits: { maxTokens: input.config.brakes.maxTokens, timeoutMs: 600_000 },
+          limits: { maxTokens: input.config.brakes.maxTokens, ...resolveStageLimits(input.config, stage) },
         });
         break;
       } catch (err) {

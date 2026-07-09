@@ -70,6 +70,16 @@ export async function buildTestEnv(opts: BuildTestEnvOptions = {}): Promise<Test
   return { env, worker, stub, tracker, scm, stats, stageResults, workspaces, taskQueue };
 }
 
+export async function teardownTestEnv(testEnv: TestEnv | undefined): Promise<void> {
+  if (!testEnv) {
+    return;
+  }
+  if (testEnv.worker.getState() !== 'STOPPED') {
+    await testEnv.worker.shutdown();
+  }
+  await testEnv.env.teardown();
+}
+
 export async function waitForStatus(
   handle: WorkflowHandle<(input: never) => Promise<DevCycleState>>,
   statuses: DevCycleState['status'][],

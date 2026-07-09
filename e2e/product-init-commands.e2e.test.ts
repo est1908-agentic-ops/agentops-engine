@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { TaskInput } from '@agentops/contracts';
 import { devCycle } from '@agentops/workflows';
-import { buildTestEnv, waitForStatus, type TestEnv } from './helpers';
+import { buildTestEnv, teardownTestEnv, waitForStatus, type TestEnv } from './helpers';
 
 describe('DevCycle e2e: project initCommands reach workspace preparation', () => {
   let testEnv: TestEnv | undefined;
 
   afterEach(async () => {
-    await testEnv?.env.teardown();
+    await teardownTestEnv(testEnv);
   });
 
   it('threads config.initCommands from TaskInput into prepareWorkspace before any stage runs', async () => {
