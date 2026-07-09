@@ -1,13 +1,13 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import type { TaskInput } from '@agentops/contracts';
 import { devCycle, resumeSignal } from '@agentops/workflows';
-import { buildTestEnv, waitForStatus, type TestEnv } from './helpers';
+import { buildTestEnv, teardownTestEnv, waitForStatus, type TestEnv } from './helpers';
 
 describe('DevCycle e2e: brake + rescue', () => {
   let testEnv: TestEnv | undefined;
 
   afterEach(async () => {
-    await testEnv?.env.teardown();
+    await teardownTestEnv(testEnv);
   });
 
   it('blocks on token-brake then completes after a resume signal', async () => {

@@ -1,6 +1,6 @@
 import { executeChild, proxyActivities, workflowInfo } from '@temporalio/workflow';
 import type { PlatformAgentInput, PlatformAgentResult, TaskInput } from '@agentops/contracts';
-import { PlatformAgentResultSchema } from '@agentops/contracts';
+import { DEFAULT_IDLE_TIMEOUT_MS, PlatformAgentResultSchema } from '@agentops/contracts';
 import { parsePlatformResult } from '@agentops/policies';
 import { devCycle } from './dev-cycle';
 import type { PlatformActivities } from './platform-activities-api';
@@ -11,7 +11,7 @@ const activities = proxyActivities<PlatformActivities>({
 });
 
 const agentActivities = proxyActivities<Pick<PlatformActivities, 'runAgent'>>({
-  startToCloseTimeout: '30 minutes',
+  startToCloseTimeout: '35 minutes',
   heartbeatTimeout: '15s',
   retry: { maximumAttempts: 5 },
 });
@@ -24,6 +24,7 @@ const agentActivities = proxyActivities<Pick<PlatformActivities, 'runAgent'>>({
 const PLATFORM_MODEL = { backend: 'claude', model: 'claude-sonnet-5', effort: 'high' as const };
 const PLATFORM_MAX_TOKENS = 400_000;
 const PLATFORM_TIMEOUT_MS = 1_800_000;
+const PLATFORM_IDLE_TIMEOUT_MS = DEFAULT_IDLE_TIMEOUT_MS;
 const MAX_RESULT_CALLS = 2;
 
 export async function platform(input: PlatformAgentInput): Promise<PlatformAgentResult> {
@@ -48,7 +49,7 @@ export async function platform(input: PlatformAgentInput): Promise<PlatformAgent
           hintRepos: (input.hintRepos ?? []).join(', ') || '(none provided)',
         },
         workspaceRef,
-        limits: { maxTokens: PLATFORM_MAX_TOKENS, timeoutMs: PLATFORM_TIMEOUT_MS },
+        limits: { maxTokens: PLATFORM_MAX_TOKENS, idleTimeoutMs: PLATFORM_IDLE_TIMEOUT_MS, timeoutMs: PLATFORM_TIMEOUT_MS },
       });
       await activities.recordRunStats({
         taskId,

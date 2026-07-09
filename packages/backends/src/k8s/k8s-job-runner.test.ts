@@ -1,9 +1,11 @@
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { BackendRunRequest } from '@agentops/contracts';
 import { createClaudeCliSpec } from '../claude/claude-backend';
+import type { CliSpec } from '../cli-spec';
 import { ProcessCliAuthError } from '../process-cli-runner';
 import { FakeBatchApi } from './fake-batch-api';
 import type { V1Job } from './k8s-types';
@@ -118,7 +120,16 @@ describe('buildAgentJob', () => {
     expect(container?.command).toEqual([
       '/bin/sh',
       '-c',
-      'exec "$0" "$@" < "$PROMPT_FILE" > "$OUT_FILE" 2> "$ERR_FILE"',
+      [
+        'rm -f /tmp/agentops-out /tmp/agentops-err',
+        'mkfifo /tmp/agentops-out /tmp/agentops-err',
+        'tee "$OUT_FILE" < /tmp/agentops-out &',
+        'tee "$ERR_FILE" < /tmp/agentops-err >&2 &',
+        '"$0" "$@" < "$PROMPT_FILE" > /tmp/agentops-out 2> /tmp/agentops-err',
+        'CODE=$?',
+        'wait',
+        'exit "$CODE"',
+      ].join('\n'),
       'claude',
       '-p',
       '--output-format',
@@ -346,6 +357,60 @@ describe('buildAgentJob', () => {
 
     expect(job.spec?.template?.metadata?.labels).toBeUndefined();
   });
+
+  it('preserves the real CLI exit code and mirrors stdout/stderr into the artifact files via the FIFO/tee script', async () => {
+    const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-shell-'));
+    const req = { ...baseRequest, workspaceRef };
+    const paths = agentOpsArtifactPaths(req);
+    await mkdir(paths.dir, { recursive: true });
+    await writeFile(paths.promptFile, 'irrelevant', 'utf8');
+
+    const fixturePath = path.join(workspaceRef, 'fake-cli.sh');
+    await writeFile(fixturePath, '#!/bin/sh\necho "$1"\necho "$2" >&2\nexit "$3"\n', { mode: 0o755 });
+
+    const fakeSpec: CliSpec = {
+      image: 'ghcr.io/example/fake:abc',
+      binary: fixturePath,
+      buildArgs: () => ['stdout-line', 'stderr-line', '7'],
+      parseOutput: () => {
+        throw new Error('not used in this test');
+      },
+      isAuthError: () => false,
+    };
+
+    const job = buildAgentJob(
+      req,
+      fakeSpec,
+      { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+      paths,
+    );
+    const [command, ...args] = job.spec?.template?.spec?.containers?.[0].command ?? [];
+    if (!command) throw new Error('buildAgentJob did not produce a container command');
+
+    const exitCode = await new Promise<number>((resolve, reject) => {
+      const child = spawn(command, args, {
+        env: { ...process.env, PROMPT_FILE: paths.promptFile, OUT_FILE: paths.outFile, ERR_FILE: paths.errFile },
+      });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk;
+      });
+      child.on('error', reject);
+      child.on('close', (code) => {
+        expect(stdout).toBe('stdout-line\n');
+        expect(stderr).toBe('stderr-line\n');
+        resolve(code ?? -1);
+      });
+    });
+
+    expect(exitCode).toBe(7);
+    expect(await readFile(paths.outFile, 'utf8')).toBe('stdout-line\n');
+    expect(await readFile(paths.errFile, 'utf8')).toBe('stderr-line\n');
+  });
 });
 
 describe('K8sJobRunner', () => {
@@ -421,7 +486,10 @@ describe('K8sJobRunner', () => {
       taskId: 'task-1',
       stage: 'implement',
       elapsedMs: 0,
+      idleMs: 0,
       timeoutMs: 30_000,
+      outputBytes: 0,
+      errorBytes: 0,
       jobStatus: undefined,
     });
     expect(heartbeats[1]).toEqual({
@@ -430,7 +498,10 @@ describe('K8sJobRunner', () => {
       taskId: 'task-1',
       stage: 'implement',
       elapsedMs: 0,
+      idleMs: 0,
       timeoutMs: 30_000,
+      outputBytes: 0,
+      errorBytes: 0,
       jobStatus: { active: 1 },
     });
 
@@ -497,7 +568,8 @@ describe('K8sJobRunner', () => {
       tokensOut: 4,
       wallMs: 50,
     });
-    expect(heartbeats.length).toBeGreaterThanOrEqual(4);
+    // Two hung status reads plus one successful completion = 3 heartbeats minimum.
+    expect(heartbeats.length).toBeGreaterThanOrEqual(3);
   });
 
   it('deletes the Job and rethrows when heartbeat fails (cancellation)', async () => {
@@ -591,5 +663,72 @@ describe('K8sJobRunner', () => {
     batchApi.setJobStatus(k8sJobName(req), { failed: 1 });
 
     await expect(runPromise).rejects.toThrow(ProcessCliAuthError);
+  });
+
+  it('kills the Job and throws when output goes idle, even though the Job status stays active', async () => {
+    const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-idle-'));
+    const req = {
+      ...baseRequest,
+      workspaceRef,
+      limits: { maxTokens: 1000, idleTimeoutMs: 100, timeoutMs: 100_000 },
+    };
+    const paths = agentOpsArtifactPaths(req);
+    await mkdir(paths.dir, { recursive: true });
+
+    const batchApi = new FakeBatchApi();
+    let now = 1_000;
+    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
+      namespace: 'dev-agents',
+      workspacePvcName: 'workspace-tasks',
+      workspaceMountPath: '/workspace/tasks',
+      batchApi,
+      pollIntervalMs: 1,
+      now: () => now,
+      heartbeat: () => {},
+    });
+
+    const runPromise = runner.run(req);
+    await vi.waitFor(() => expect(batchApi.creates).toHaveLength(1));
+    batchApi.setJobStatus(k8sJobName(req), { active: 1 });
+
+    // No output is ever written -- simulates a Job whose pod is healthy
+    // but whose CLI process has genuinely gone silent.
+    now += 150;
+
+    await expect(runPromise).rejects.toThrow(/produced no output for 100ms/);
+    expect(batchApi.deletes).toHaveLength(1);
+  });
+
+  it('kills the Job and throws when the overall backstop is exceeded despite ongoing output', async () => {
+    const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-backstop-'));
+    const req = {
+      ...baseRequest,
+      workspaceRef,
+      // idleTimeoutMs set impossibly high so only the backstop check can fire.
+      limits: { maxTokens: 1000, idleTimeoutMs: 1_000_000, timeoutMs: 100 },
+    };
+    const paths = agentOpsArtifactPaths(req);
+    await mkdir(paths.dir, { recursive: true });
+
+    const batchApi = new FakeBatchApi();
+    let now = 1_000;
+    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
+      namespace: 'dev-agents',
+      workspacePvcName: 'workspace-tasks',
+      workspaceMountPath: '/workspace/tasks',
+      batchApi,
+      pollIntervalMs: 1,
+      now: () => now,
+      heartbeat: () => {},
+    });
+
+    const runPromise = runner.run(req);
+    await vi.waitFor(() => expect(batchApi.creates).toHaveLength(1));
+    await writeFile(paths.outFile, '{"type":"message_start"}\n', 'utf8');
+
+    now += 150; // exceeds timeoutMs (100ms) even though output just grew
+
+    await expect(runPromise).rejects.toThrow(/exceeded overall 100ms budget despite ongoing output/);
+    expect(batchApi.deletes).toHaveLength(1);
   });
 });

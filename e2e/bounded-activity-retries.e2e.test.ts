@@ -22,9 +22,15 @@ import { nextTaskQueue } from './helpers';
 // not special-casing one call site.
 describe('DevCycle e2e: bounded activity retries', () => {
   let env: TestWorkflowEnvironment | undefined;
+  let worker: Awaited<ReturnType<typeof createWorker>> | undefined;
 
   afterEach(async () => {
+    if (worker && worker.getState() !== 'STOPPED') {
+      await worker.shutdown();
+    }
     await env?.teardown();
+    worker = undefined;
+    env = undefined;
   });
 
   it('gives up instead of retrying forever when an activity fails the same way on every attempt', async () => {
@@ -48,7 +54,7 @@ describe('DevCycle e2e: bounded activity retries', () => {
       registry: [],
     });
     const taskQueue = nextTaskQueue();
-    const worker = await createWorker({ taskQueue, activities, connection: env.nativeConnection });
+    worker = await createWorker({ taskQueue, activities, connection: env.nativeConnection });
 
     const input: TaskInput = {
       taskId: 'stuck-workspace-task',
