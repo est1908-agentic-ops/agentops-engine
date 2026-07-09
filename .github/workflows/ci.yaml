@@ -9,26 +9,17 @@ concurrency:
   group: ${{ github.event_name == 'push' && 'merge-to-main' || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'push' }}
 
-# Runners: GitHub-hosted ubuntu-latest (temporary). To restore self-hosted:
-# 1. On build, build-images, and bump-platform: swap runs-on — comment ubuntu-latest,
-#    uncomment self-hosted.
-# 2. In build: uncomment the pnpm dest block; comment/remove the plain pnpm/action-setup step.
-# 3. In build-images: uncomment buildx `with: driver: docker`.
-# Pool must be online (est1908-agentic-ops org). Design: docs/superpowers/specs/2026-07-08-ci-self-hosted-runners-design.md
-
 jobs:
   build:
-    # runs-on: self-hosted
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     steps:
       - uses: actions/checkout@v4
 
       # Self-hosted runners share $HOME; namespace by runner so concurrent
       # jobs on different runners don't race on the same install path.
-      # - uses: pnpm/action-setup@v4
-      #   with:
-      #     dest: ~/setup-pnpm-${{ runner.name }}
       - uses: pnpm/action-setup@v4
+        with:
+          dest: ~/setup-pnpm-${{ runner.name }}
 
       - uses: actions/setup-node@v4
         with:
@@ -55,8 +46,7 @@ jobs:
       - run: bash charts/engine/tests/run.sh
 
   build-images:
-    # runs-on: self-hosted
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build
     permissions:
       contents: read
@@ -64,9 +54,8 @@ jobs:
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
-      # Self-hosted: use host Docker daemon so layer cache persists across runs.
-      #  with:
-      #    driver: docker
+        with:
+          driver: docker
 
       - uses: docker/login-action@v3
         if: github.ref == 'refs/heads/main'
@@ -125,8 +114,7 @@ jobs:
             oci://gitactions.est1908.top/agentic-ops
 
   bump-platform:
-    # runs-on: self-hosted
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     needs: build-images
     if: github.ref == 'refs/heads/main'
     steps:
