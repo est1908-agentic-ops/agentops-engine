@@ -14,6 +14,7 @@ import {
 } from '@agentops/contracts';
 import type { PostgresManagedProjectStore } from '@agentops/activities';
 import { platform } from '@agentops/workflows';
+import type { RegistryEntrySummary } from './read-registry-entries';
 import { matchPath } from './route';
 import { resolveStaticFile } from './serve-static';
 
@@ -22,7 +23,7 @@ export interface ControlDeps {
   taskQueue: string;
   namespace: string;
   temporalUiBaseUrl: string;
-  registry: string[];
+  registryEntries: RegistryEntrySummary[];
   uiDistPath?: string;
   // Managed-project CRUD (design §7). The store encrypts tokens internally
   // with `projectCredentialPublicKey`; control holds ONLY the public key and
@@ -183,7 +184,7 @@ async function handleGetRun(deps: ControlDeps, workflowId: string): Promise<Hand
 }
 
 function handleListRepos(deps: ControlDeps): HandlerResponse {
-  return { status: 200, body: RepoListResponseSchema.parse({ repos: deps.registry }) };
+  return { status: 200, body: RepoListResponseSchema.parse({ repos: deps.registryEntries.map((entry) => entry.repo) }) };
 }
 
 function isProjectCrudEnabled(deps: ControlDeps): boolean {

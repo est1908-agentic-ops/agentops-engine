@@ -65,7 +65,10 @@ describe('createControlServer', () => {
       taskQueue: 'agentops-devcycle',
       namespace: 'default',
       temporalUiBaseUrl: 'https://temporal.example',
-      registry: ['flair-hr/agentops-engine', 'flair-hr/agentops-platform'],
+      registryEntries: [
+        { project: 'engine', repo: 'flair-hr/agentops-engine' },
+        { project: 'platform', repo: 'flair-hr/agentops-platform' },
+      ],
     };
   });
 
@@ -360,7 +363,7 @@ describe('createControlServer managed-project CRUD', () => {
       taskQueue: 'agentops-devcycle',
       namespace: 'default',
       temporalUiBaseUrl: 'https://temporal.example',
-      registry: [],
+      registryEntries: [],
       managedProjectStore: createFakeStore(),
       projectCredentialPublicKey: publicKey,
       projectCrudAuthToken: CRUD_TOKEN,

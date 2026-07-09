@@ -4,7 +4,7 @@ import { Client, Connection } from '@temporalio/client';
 import { loadEnv, PostgresManagedProjectStore } from '@agentops/activities';
 import { Pool } from 'pg';
 import { createControlServer } from './create-control-server';
-import { readRegistryRepos } from './read-registry-repos';
+import { readRegistryEntries } from './read-registry-entries';
 
 loadEnv();
 
@@ -35,10 +35,10 @@ async function main(): Promise<void> {
   const connection = await Connection.connect({ address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233' });
   const client = new Client({ connection, namespace });
 
-  const registry = readRegistryRepos();
+  const registryEntries = readRegistryEntries();
   console.log(
-    registry.length > 0
-      ? `agentops control: ${registry.length} repo(s) registered for the hint-repos picker`
+    registryEntries.length > 0
+      ? `agentops control: ${registryEntries.length} repo(s) registered for the hint-repos picker`
       : 'agentops control: no PROJECT_REGISTRY_JSON set — hint-repos picker will offer no suggestions',
   );
 
@@ -74,7 +74,7 @@ async function main(): Promise<void> {
     taskQueue: process.env.TASK_QUEUE ?? 'agentops-devcycle',
     namespace,
     temporalUiBaseUrl,
-    registry,
+    registryEntries,
     uiDistPath: existsSync(uiDistPath) ? uiDistPath : undefined,
     managedProjectStore,
     projectCredentialPublicKey: process.env.PROJECT_CREDENTIAL_PUBLIC_KEY,
