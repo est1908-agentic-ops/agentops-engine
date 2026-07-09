@@ -6,7 +6,6 @@ import {
   PlatformAgentResultSchema,
   RepoListResponseSchema,
   RunDetailSchema,
-  RunListItemSchema,
   StartRunRequestSchema,
   StartRunResponseSchema,
   CreateManagedProjectRequestSchema,
@@ -15,6 +14,13 @@ import {
 import type { PostgresManagedProjectStore } from '@agentops/activities';
 import { platform } from '@agentops/workflows';
 import type { RegistryEntrySummary } from './read-registry-entries';
+import { listRunsByType, memoPrompt, readJsonBody, type HandlerResponse } from './handler-util';
+import {
+  handleGetDevCycleRun,
+  handleListDevCycleRuns,
+  handleListDevCycleTargets,
+  handleStartDevCycleRun,
+} from './devcycle-routes';
 import { matchPath } from './route';
 import { resolveStaticFile } from './serve-static';
 
@@ -34,39 +40,6 @@ export interface ControlDeps {
   managedProjectStore?: PostgresManagedProjectStore;
   projectCredentialPublicKey?: string;
   projectCrudAuthToken?: string;
-}
-
-interface HandlerResponse {
-  status: number;
-  body?: unknown;
-}
-
-function readJsonBody(req: IncomingMessage): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
-    req.on('end', () => {
-      const raw = Buffer.concat(chunks).toString('utf8');
-      if (!raw) {
-        resolve({});
-        return;
-      }
-      try {
-        resolve(JSON.parse(raw));
-      } catch (err) {
-        reject(err);
-      }
-    });
-    req.on('error', reject);
-  });
-}
-
-function truncate(text: string, maxLength: number): string {
-  return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
-}
-
-function memoPrompt(memo: Record<string, unknown> | undefined): string | undefined {
-  return typeof memo?.prompt === 'string' ? memo.prompt : undefined;
 }
 
 async function handleStartRun(deps: ControlDeps, req: IncomingMessage): Promise<HandlerResponse> {
@@ -105,41 +78,7 @@ async function handleStartRun(deps: ControlDeps, req: IncomingMessage): Promise<
 }
 
 async function handleListRuns(deps: ControlDeps, url: URL): Promise<HandlerResponse> {
-  const requestedLimit = Number.parseInt(url.searchParams.get('limit') ?? '', 10);
-  const limit = Number.isFinite(requestedLimit) && requestedLimit > 0 ? requestedLimit : 20;
-
-  const executions: Array<{
-    workflowId: string;
-    runId: string;
-    status: { name: string };
-    startTime: Date;
-    closeTime?: Date;
-    memo?: Record<string, unknown>;
-  }> = [];
-
-  // Dev server visibility does not support ORDER BY — fetch matching runs and sort locally.
-  for await (const execution of deps.client.workflow.list({ query: 'WorkflowType="platform"' })) {
-    executions.push(execution as (typeof executions)[number]);
-  }
-
-  executions.sort((a, b) => b.startTime.getTime() - a.startTime.getTime());
-
-  const items: unknown[] = [];
-  for (const execution of executions.slice(0, limit)) {
-    const prompt = memoPrompt(execution.memo);
-    const parsed = RunListItemSchema.safeParse({
-      workflowId: execution.workflowId,
-      runId: execution.runId,
-      status: execution.status.name,
-      startTime: execution.startTime.toISOString(),
-      closeTime: execution.closeTime?.toISOString(),
-      promptSnippet: prompt ? truncate(prompt, 120) : undefined,
-    });
-    if (parsed.success) {
-      items.push(parsed.data);
-    }
-  }
-  return { status: 200, body: items };
+  return listRunsByType(deps, url, 'platform');
 }
 
 async function handleGetRun(deps: ControlDeps, workflowId: string): Promise<HandlerResponse> {
@@ -281,6 +220,19 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
   const runMatch = matchPath('/api/platform/runs/:workflowId', pathname);
   if (req.method === 'GET' && runMatch) {
     return handleGetRun(deps, runMatch.params.workflowId);
+  }
+  if (req.method === 'POST' && pathname === '/api/devcycle/runs') {
+    return handleStartDevCycleRun(deps, req);
+  }
+  if (req.method === 'GET' && pathname === '/api/devcycle/runs') {
+    return handleListDevCycleRuns(deps, url);
+  }
+  const devCycleRunMatch = matchPath('/api/devcycle/runs/:workflowId', pathname);
+  if (req.method === 'GET' && devCycleRunMatch) {
+    return handleGetDevCycleRun(deps, devCycleRunMatch.params.workflowId);
+  }
+  if (req.method === 'GET' && pathname === '/api/devcycle/targets') {
+    return handleListDevCycleTargets(deps);
   }
   if (req.method === 'GET' && pathname === '/api/registry/repos') {
     return handleListRepos(deps);

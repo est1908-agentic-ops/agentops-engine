@@ -235,6 +235,192 @@ describe('createControlServer', () => {
     expect(res.status).toBe(404);
   });
 
+  describe('devCycle routes', () => {
+    function fakeStore(rows: Array<{ repo: string; project: string }>) {
+      return {
+        get: vi.fn(async (repo: string) => rows.find((row) => row.repo === repo) ?? null),
+        list: vi.fn(async () => rows),
+      } as never;
+    }
+
+    describe('POST /api/devcycle/runs', () => {
+      it('rejects an empty prompt with 400', async () => {
+        await listen();
+        const { status } = await postJson(port, '/api/devcycle/runs', { repo: 'flair-hr/agentops-engine', prompt: '' });
+        expect(status).toBe(400);
+        expect(start).not.toHaveBeenCalled();
+      });
+
+      it('rejects an unknown repo with 422 without starting a workflow', async () => {
+        await listen();
+        const { status, body } = await postJson(port, '/api/devcycle/runs', { repo: 'nobody/unknown', prompt: 'x' });
+        expect(status).toBe(422);
+        expect((body as { error: string }).error).toContain('nobody/unknown');
+        expect(start).not.toHaveBeenCalled();
+      });
+
+      it('starts devCycle with goal=prompt, no config, a prompt-<project>- workflowId, and the prompt memo', async () => {
+        start.mockResolvedValue({ workflowId: 'prompt-engine-t1', firstExecutionRunId: 'run-1' });
+        await listen();
+        const { status, body } = await postJson(port, '/api/devcycle/runs', {
+          repo: 'flair-hr/agentops-engine',
+          prompt: 'add a widget',
+          taskId: 't1',
+        });
+
+        expect(status).toBe(202);
+        expect(body).toEqual({ workflowId: 'prompt-engine-t1', runId: 'run-1', taskId: 't1' });
+        const [, options] = start.mock.calls[0];
+        expect(options.workflowId).toBe('prompt-engine-t1');
+        expect(options.args).toEqual([{ taskId: 't1', project: 'engine', repo: 'flair-hr/agentops-engine', goal: 'add a widget' }]);
+        expect(options.memo).toEqual({ prompt: 'add a widget' });
+      });
+
+      it('resolves the project slug from the managed store ahead of the static registry', async () => {
+        deps.managedProjectStore = fakeStore([{ repo: 'acme/app', project: 'acme-app' }]);
+        start.mockResolvedValue({ workflowId: 'prompt-acme-app-t2', firstExecutionRunId: 'run-2' });
+        await listen();
+        const { status } = await postJson(port, '/api/devcycle/runs', { repo: 'acme/app', prompt: 'x', taskId: 't2' });
+        expect(status).toBe(202);
+        const [, options] = start.mock.calls[0];
+        expect(options.args[0].project).toBe('acme-app');
+      });
+
+      it('responds 409 when the workflowId is already in use', async () => {
+        start.mockRejectedValueOnce(new WorkflowExecutionAlreadyStartedError('already started', 'prompt-engine-dup', 'devCycle'));
+        await listen();
+        const { status } = await postJson(port, '/api/devcycle/runs', {
+          repo: 'flair-hr/agentops-engine',
+          prompt: 'x',
+          taskId: 'dup',
+        });
+        expect(status).toBe(409);
+      });
+    });
+
+    describe('GET /api/devcycle/runs', () => {
+      it('lists devCycle executions with promptSnippet from memo', async () => {
+        list.mockImplementation(async function* () {
+          yield makeExecution({ workflowId: 'prompt-engine-t1', memo: { prompt: 'add a widget' } });
+        });
+        await listen();
+        const { status, body } = await getJson(port, '/api/devcycle/runs');
+        expect(status).toBe(200);
+        const items = body as Array<{ workflowId: string; promptSnippet?: string }>;
+        expect(items[0].workflowId).toBe('prompt-engine-t1');
+        expect(items[0].promptSnippet).toBe('add a widget');
+        expect(list).toHaveBeenCalledWith({ query: 'WorkflowType="devCycle"' });
+      });
+    });
+
+    describe('GET /api/devcycle/runs/:workflowId', () => {
+      const RUNNING_STATE = {
+        taskId: 't1',
+        stage: 'implement',
+        status: 'running',
+        blockReason: null,
+        implementAttempts: 1,
+        iterations: 1,
+        cumulativeTokens: 1000,
+        babysitRounds: 0,
+        prRef: null,
+        workspaceRef: 'ws-1',
+        branch: 'task/t1',
+      };
+
+      it('returns live state from the state query while RUNNING', async () => {
+        getHandle.mockReturnValue({
+          describe: vi.fn().mockResolvedValue({ runId: 'run-1', status: { code: 1, name: 'RUNNING' }, memo: { prompt: 'add a widget' } } as never),
+          query: vi.fn().mockResolvedValue(RUNNING_STATE),
+          result: vi.fn(),
+        });
+        await listen();
+        const { status, body } = await getJson(port, '/api/devcycle/runs/prompt-engine-t1');
+        const detail = body as { status: string; prompt: string; state?: { stage: string } };
+        expect(status).toBe(200);
+        expect(detail.status).toBe('RUNNING');
+        expect(detail.prompt).toBe('add a widget');
+        expect(detail.state?.stage).toBe('implement');
+      });
+
+      it('falls back to a bare detail when the state query fails (run closed mid-request)', async () => {
+        getHandle.mockReturnValue({
+          describe: vi.fn().mockResolvedValue({ runId: 'run-1', status: { code: 1, name: 'RUNNING' }, memo: {} } as never),
+          query: vi.fn().mockRejectedValue(new Error('workflow completed')),
+          result: vi.fn(),
+        });
+        await listen();
+        const { status, body } = await getJson(port, '/api/devcycle/runs/prompt-engine-t1');
+        const detail = body as { state?: unknown; error?: string };
+        expect(status).toBe(200);
+        expect(detail.state).toBeUndefined();
+        expect(detail.error).toBeUndefined();
+      });
+
+      it('returns the final state as `state` for a COMPLETED run', async () => {
+        getHandle.mockReturnValue({
+          describe: vi.fn().mockResolvedValue({ runId: 'run-1', status: { code: 2, name: 'COMPLETED' }, memo: {} } as never),
+          query: vi.fn(),
+          result: vi.fn().mockResolvedValue({ ...RUNNING_STATE, stage: 'done', status: 'done', prRef: 'pr-1' }),
+        });
+        await listen();
+        const { body } = await getJson(port, '/api/devcycle/runs/prompt-engine-t1');
+        const detail = body as { state?: { prRef: string | null }; error?: string };
+        expect(detail.state?.prRef).toBe('pr-1');
+        expect(detail.error).toBeUndefined();
+      });
+
+      it('sets error (not a 500) when a completed result fails DevCycleStateSchema', async () => {
+        getHandle.mockReturnValue({
+          describe: vi.fn().mockResolvedValue({ runId: 'run-1', status: { code: 2, name: 'COMPLETED' }, memo: {} } as never),
+          query: vi.fn(),
+          result: vi.fn().mockResolvedValue({ nope: true }),
+        });
+        await listen();
+        const { status, body } = await getJson(port, '/api/devcycle/runs/prompt-engine-t1');
+        const detail = body as { state?: unknown; error?: string };
+        expect(status).toBe(200);
+        expect(detail.state).toBeUndefined();
+        expect(detail.error).toBeTruthy();
+      });
+
+      it('responds 404 when describe() throws', async () => {
+        getHandle.mockReturnValue({ describe: vi.fn().mockRejectedValue(new Error('not found')), query: vi.fn(), result: vi.fn() });
+        await listen();
+        const { status } = await getJson(port, '/api/devcycle/runs/nope');
+        expect(status).toBe(404);
+      });
+    });
+
+    describe('GET /api/devcycle/targets', () => {
+      it('returns static registry entries when no store is configured', async () => {
+        await listen();
+        const { status, body } = await getJson(port, '/api/devcycle/targets');
+        expect(status).toBe(200);
+        expect(body).toEqual({
+          targets: [
+            { repo: 'flair-hr/agentops-engine', project: 'engine' },
+            { repo: 'flair-hr/agentops-platform', project: 'platform' },
+          ],
+        });
+      });
+
+      it('unions managed projects with static entries, managed winning on duplicate repo', async () => {
+        deps.managedProjectStore = fakeStore([
+          { repo: 'flair-hr/agentops-engine', project: 'engine-managed' },
+          { repo: 'acme/app', project: 'acme-app' },
+        ]);
+        await listen();
+        const { body } = await getJson(port, '/api/devcycle/targets');
+        const { targets } = body as { targets: Array<{ repo: string; project: string }> };
+        expect(targets).toContainEqual({ repo: 'acme/app', project: 'acme-app' });
+        expect(targets).toContainEqual({ repo: 'flair-hr/agentops-engine', project: 'engine-managed' });
+        expect(targets).toContainEqual({ repo: 'flair-hr/agentops-platform', project: 'platform' });
+        expect(targets.filter((t) => t.repo === 'flair-hr/agentops-engine')).toHaveLength(1);
+      });
+    });
+  });
+
   describe('static file fallback', () => {
     let uiDistPath: string;
 
