@@ -1,10 +1,16 @@
 import type { GitCommandRunner } from '../git/git-command-runner';
 import type { ScmPort } from '../scm-port';
 import type { TrackerPort } from '../tracker-port';
+import { parseTrackerRef } from '../tracker-ref';
 import { parseRef } from './parse-ref';
 
 export interface ProjectScopedPortsEntry {
   repo: string;
+  // Only set for Linear-tracked projects -- routes TrackerPort calls whose
+  // ref is Linear-shaped (see parseTrackerRef) to this entry. SCM/git are
+  // always keyed by `repo` regardless of tracker: PRs/worktrees live on the
+  // GitHub side even when the issue came from Linear.
+  linearTeamKey?: string;
   scm: ScmPort;
   tracker: TrackerPort;
   git: GitCommandRunner;
@@ -23,11 +29,31 @@ function repoFromRef(ref: string): string {
 
 export function createProjectScopedPorts(entries: ProjectScopedPortsEntry[]): ProjectScopedPorts {
   const byRepo = new Map(entries.map((entry) => [entry.repo, entry]));
+  const byLinearTeamKey = new Map(
+    entries.filter((entry) => entry.linearTeamKey).map((entry) => [entry.linearTeamKey as string, entry]),
+  );
 
   function resolve(repo: string): ProjectScopedPortsEntry {
     const found = byRepo.get(repo);
     if (!found) {
       throw new Error(`createProjectScopedPorts: no project registered for repo "${repo}" — check the project registry`);
+    }
+    return found;
+  }
+
+  // Tracker refs route by whichever key the ref's own shape identifies
+  // (GitHub ref → repo, Linear ref → team key) rather than always assuming a
+  // GitHub-shaped ref — see docs/superpowers/specs/2026-07-09-linear-trigger-design.md.
+  function resolveByTrackerRef(ref: string): ProjectScopedPortsEntry {
+    const parsed = parseTrackerRef(ref);
+    if (parsed.kind === 'github') {
+      return resolve(parsed.repo);
+    }
+    const found = byLinearTeamKey.get(parsed.teamKey);
+    if (!found) {
+      throw new Error(
+        `createProjectScopedPorts: no project registered for Linear team "${parsed.teamKey}" — check the project registry`,
+      );
     }
     return found;
   }
@@ -45,9 +71,9 @@ export function createProjectScopedPorts(entries: ProjectScopedPortsEntry[]): Pr
       readFile: async (repo, path) => resolve(repo).scm.readFile(repo, path),
     },
     tracker: {
-      getIssue: async (ref) => resolve(repoFromRef(ref)).tracker.getIssue(ref),
-      comment: async (ref, body) => resolve(repoFromRef(ref)).tracker.comment(ref, body),
-      label: async (ref, label) => resolve(repoFromRef(ref)).tracker.label(ref, label),
+      getIssue: async (ref) => resolveByTrackerRef(ref).tracker.getIssue(ref),
+      comment: async (ref, body) => resolveByTrackerRef(ref).tracker.comment(ref, body),
+      label: async (ref, label) => resolveByTrackerRef(ref).tracker.label(ref, label),
     },
     resolveGit: (repo) => resolve(repo).git,
   };

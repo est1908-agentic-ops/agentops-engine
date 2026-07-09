@@ -125,6 +125,141 @@ describe('createGatewayServer', () => {
   });
 });
 
+const LINEAR_SECRET = 'linear-shared-secret';
+const LINEAR_TRIGGER_LABEL_ID = 'label-uuid-1';
+
+function signLinear(body: string): string {
+  return createHmac('sha256', LINEAR_SECRET).update(body).digest('hex');
+}
+
+function linearIssuePayload(overrides: Record<string, unknown> = {}) {
+  return {
+    type: 'Issue',
+    action: 'update',
+    data: { identifier: 'ENG-123', title: 'Add a widget', labelIds: [LINEAR_TRIGGER_LABEL_ID] },
+    updatedFrom: { labelIds: [] },
+    webhookTimestamp: Date.now(),
+    ...overrides,
+  };
+}
+
+describe('createGatewayServer Linear route', () => {
+  let server: ReturnType<typeof createGatewayServer>;
+  let port: number;
+  let start: ReturnType<typeof vi.fn>;
+  let registeredScm: MemoryScmPort;
+
+  beforeEach(async () => {
+    start = vi.fn().mockResolvedValue(undefined);
+    registeredScm = new MemoryScmPort();
+    const deps: GatewayDeps = {
+      client: { workflow: { start } } as never,
+      taskQueue: 'agentops-devcycle',
+      webhookSecret: SECRET,
+      triggerLabel: TRIGGER_LABEL,
+      registry: [
+        {
+          project: 'my-linear-project',
+          repo: 'octocat/hello-world',
+          trackerType: 'linear',
+          tokenEnvVar: 'X',
+          linearTeamKey: 'ENG',
+          linearTokenEnvVar: 'Y',
+          linearTriggerLabelId: LINEAR_TRIGGER_LABEL_ID,
+          token: 't',
+          linearToken: 'lt',
+        },
+      ],
+      buildScm: () => registeredScm,
+      linearWebhookSecret: LINEAR_SECRET,
+    };
+    server = createGatewayServer(deps);
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    port = (server.address() as AddressInfo).port;
+  });
+
+  afterEach(() => {
+    server.close();
+  });
+
+  it('404s when linearWebhookSecret is not configured', async () => {
+    start = vi.fn().mockResolvedValue(undefined);
+    const deps: GatewayDeps = {
+      client: { workflow: { start } } as never,
+      taskQueue: 'agentops-devcycle',
+      webhookSecret: SECRET,
+      triggerLabel: TRIGGER_LABEL,
+      registry: [],
+      buildScm: () => new MemoryScmPort(),
+    };
+    const noLinearServer = createGatewayServer(deps);
+    await new Promise<void>((resolve) => noLinearServer.listen(0, resolve));
+    const noLinearPort = (noLinearServer.address() as AddressInfo).port;
+
+    const body = JSON.stringify(linearIssuePayload());
+    const res = await post(noLinearPort, '/webhooks/linear', body, {
+      'content-type': 'application/json',
+      'linear-signature': signLinear(body),
+    });
+    expect(res.status).toBe(404);
+    noLinearServer.close();
+  });
+
+  it('rejects a webhook with an invalid signature', async () => {
+    const body = JSON.stringify(linearIssuePayload());
+    const res = await post(port, '/webhooks/linear', body, { 'content-type': 'application/json', 'linear-signature': 'deadbeef' });
+    expect(res.status).toBe(401);
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('starts devCycle for a correctly signed labeled event on a registered Linear team', async () => {
+    const body = JSON.stringify(linearIssuePayload());
+    const res = await post(port, '/webhooks/linear', body, {
+      'content-type': 'application/json',
+      'linear-signature': signLinear(body),
+    });
+    expect(res.status).toBe(202);
+    expect(start).toHaveBeenCalledTimes(1);
+    const [, options] = start.mock.calls[0];
+    expect(options.args[0]).toMatchObject({
+      project: 'my-linear-project',
+      repo: 'octocat/hello-world',
+      issueRef: 'linear:ENG-123',
+      goal: 'Add a widget',
+    });
+  });
+
+  it('ignores (204) an issue event whose labelIds do not include the trigger label', async () => {
+    const body = JSON.stringify(linearIssuePayload({ data: { identifier: 'ENG-123', title: 't', labelIds: ['other'] } }));
+    const res = await post(port, '/webhooks/linear', body, {
+      'content-type': 'application/json',
+      'linear-signature': signLinear(body),
+    });
+    expect(res.status).toBe(204);
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges (202) but does not start a task for a team with no registered project', async () => {
+    const body = JSON.stringify(linearIssuePayload({ data: { identifier: 'OTHER-1', title: 't', labelIds: [LINEAR_TRIGGER_LABEL_ID] } }));
+    const res = await post(port, '/webhooks/linear', body, {
+      'content-type': 'application/json',
+      'linear-signature': signLinear(body),
+    });
+    expect(res.status).toBe(202);
+    expect(start).not.toHaveBeenCalled();
+  });
+
+  it('ignores (204) a stale webhook past the freshness window', async () => {
+    const body = JSON.stringify(linearIssuePayload({ webhookTimestamp: Date.now() - 10 * 60_000 }));
+    const res = await post(port, '/webhooks/linear', body, {
+      'content-type': 'application/json',
+      'linear-signature': signLinear(body),
+    });
+    expect(res.status).toBe(204);
+    expect(start).not.toHaveBeenCalled();
+  });
+});
+
 import { encryptForManagedProject, generateManagedProjectKeyPair } from '@agentops/activities';
 
 describe('createGatewayServer with a managed-project registry', () => {

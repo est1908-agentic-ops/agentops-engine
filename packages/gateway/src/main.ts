@@ -52,6 +52,13 @@ async function main(): Promise<void> {
   const connection = await Connection.connect({ address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233' });
   const client = new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE });
 
+  const linearWebhookSecret = process.env.LINEAR_WEBHOOK_SECRET;
+  console.log(
+    linearWebhookSecret
+      ? 'agentops gateway: Linear webhook route ENABLED (LINEAR_WEBHOOK_SECRET set)'
+      : 'agentops gateway: Linear webhook route disabled (LINEAR_WEBHOOK_SECRET unset)',
+  );
+
   const server = createGatewayServer({
     client,
     taskQueue: TASK_QUEUE,
@@ -60,6 +67,7 @@ async function main(): Promise<void> {
     registry,
     buildScm,
     managedProjectDeps,
+    linearWebhookSecret,
   });
 
   const port = Number(process.env.PORT ?? 3000);

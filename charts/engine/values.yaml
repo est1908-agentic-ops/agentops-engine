@@ -119,11 +119,23 @@ workspace:
 # this repo ships no real repo names, matching ARCHITECTURE.md §5.8 (the engine
 # is project-agnostic). Each entry renders one GITHUB_TOKEN__<PROJECT> env var
 # sourced from githubTokenSecretName, plus one row in PROJECT_REGISTRY_JSON.
+# trackerType defaults to "github" when omitted, so every existing values
+# override stays valid unchanged. A "linear" entry additionally needs
+# linearTeamKey, linearTokenSecretName (renders LINEAR_TOKEN__<PROJECT>), and
+# linearTriggerLabelId (a label UUID, not name — see
+# docs/superpowers/specs/2026-07-09-linear-trigger-design.md).
 #
 # projects:
 #   project-a:
 #     repo: flair-hr/project-a
 #     githubTokenSecretName: github-token-project-a
+#   project-b:
+#     repo: flair-hr/project-b
+#     githubTokenSecretName: github-token-project-b
+#     trackerType: linear
+#     linearTeamKey: ENG
+#     linearTokenSecretName: linear-token-project-b
+#     linearTriggerLabelId: <label-uuid>
 projects: {}
 
 claudeAuthSecretName: claude-credentials
@@ -163,6 +175,12 @@ gateway:
   # Secret must contain a GITHUB_WEBHOOK_SECRET key — the shared secret
   # configured on each registered repo's GitHub webhook (Settings > Webhooks).
   webhookSecretName: gateway-webhook-secret
+  # Empty by default -- unset means the /webhooks/linear route 404s entirely
+  # (packages/gateway/src/main.ts), same "chart ships no cluster assumption"
+  # pattern as piRateLimitFallbackModel above. Secret must contain a
+  # LINEAR_WEBHOOK_SECRET key -- the shared secret configured on the Linear
+  # workspace's webhook, once a `projects` entry sets `trackerType: linear`.
+  linearWebhookSecretName: ""
   # Disabled by default: this chart ships no real public hostname.
   # agentops-platform's values override sets host + enabled: true once a real
   # domain is pointed at the cluster. clusterIssuer must be a cert-manager

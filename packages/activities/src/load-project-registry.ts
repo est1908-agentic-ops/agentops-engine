@@ -11,6 +11,13 @@ export function loadProjectRegistry(env: NodeJS.ProcessEnv = process.env): Resol
     if (!token) {
       throw new Error(`loadProjectRegistry: env var "${entry.tokenEnvVar}" for project "${entry.project}" is not set`);
     }
-    return { ...entry, token };
+    if (entry.trackerType !== 'linear') {
+      return { ...entry, token };
+    }
+    const linearToken = env[entry.linearTokenEnvVar];
+    if (!linearToken) {
+      throw new Error(`loadProjectRegistry: env var "${entry.linearTokenEnvVar}" for project "${entry.project}" is not set`);
+    }
+    return { ...entry, token, linearToken };
   });
 }

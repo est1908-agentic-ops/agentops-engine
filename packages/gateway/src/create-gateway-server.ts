@@ -3,8 +3,12 @@ import type { Client } from '@temporalio/client';
 import { resolveManagedProjectEntry, resolveProjectConfig, type ManagedProjectRegistryDeps } from '@agentops/activities';
 import type { ResolvedProjectEntry } from '@agentops/contracts';
 import type { ScmPort } from '@agentops/ports';
+import { matchesLinearTriggerLabel, parseLinearIssueEvent } from './parse-linear-issue-event';
 import { parseIssueLabeledEvent } from './parse-issue-labeled';
+import { findLinearProjectEntry } from './resolve-linear-project';
+import { startDevCycleForLinearIssue } from './start-dev-cycle-for-linear-issue';
 import { startDevCycleForIssue } from './start-dev-cycle';
+import { isFreshLinearWebhook, verifyLinearSignature } from './verify-linear-signature';
 import { verifyGithubSignature } from './verify-signature';
 
 export interface GatewayDeps {
@@ -19,6 +23,10 @@ export interface GatewayDeps {
   // Undefined when ENGINE_DB_HOST/PROJECT_CREDENTIAL_PRIVATE_KEY aren't set —
   // every lookup falls through to `registry` only, same as before this field existed.
   managedProjectDeps?: ManagedProjectRegistryDeps;
+  // Undefined disables the /webhooks/linear route entirely (404) -- lets a
+  // deployment with no Linear-tracked projects skip configuring a new
+  // required secret, same as every existing GitHub-only gateway deployment.
+  linearWebhookSecret?: string;
 }
 
 function readRawBody(req: IncomingMessage): Promise<Buffer> {
@@ -42,11 +50,20 @@ async function handleRequest(deps: GatewayDeps, req: IncomingMessage, res: Serve
     return;
   }
 
-  if (req.method !== 'POST' || req.url !== '/webhooks/github') {
-    res.writeHead(404).end();
+  if (req.method === 'POST' && req.url === '/webhooks/github') {
+    await handleGithubWebhook(deps, req, res);
     return;
   }
 
+  if (req.method === 'POST' && req.url === '/webhooks/linear') {
+    await handleLinearWebhook(deps, req, res);
+    return;
+  }
+
+  res.writeHead(404).end();
+}
+
+async function handleGithubWebhook(deps: GatewayDeps, req: IncomingMessage, res: ServerResponse): Promise<void> {
   const rawBody = await readRawBody(req);
   const signature = req.headers['x-hub-signature-256'];
 
@@ -91,6 +108,69 @@ async function handleRequest(deps: GatewayDeps, req: IncomingMessage, res: Serve
     res.writeHead(202).end(JSON.stringify(result));
   } catch (err) {
     console.error(`gateway: failed to start devCycle for ${event.issueRef}:`, err);
+    res.writeHead(500).end('failed to start task');
+  }
+}
+
+async function handleLinearWebhook(deps: GatewayDeps, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  if (!deps.linearWebhookSecret) {
+    // No Linear-tracked project has ever been configured on this deployment
+    // — same 404 as any other unrecognized route, not a 401/500, so an
+    // operator probing routes can't distinguish "misconfigured" from "not
+    // built here" (matching every existing GitHub-only gateway deployment).
+    res.writeHead(404).end();
+    return;
+  }
+
+  const rawBody = await readRawBody(req);
+  const signature = req.headers['linear-signature'];
+
+  if (!verifyLinearSignature(rawBody, typeof signature === 'string' ? signature : undefined, deps.linearWebhookSecret)) {
+    res.writeHead(401).end('invalid signature');
+    return;
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(rawBody.toString('utf8'));
+  } catch {
+    res.writeHead(400).end('invalid JSON');
+    return;
+  }
+
+  const parsed = parseLinearIssueEvent(payload);
+  if (!parsed || !isFreshLinearWebhook(parsed.webhookTimestamp, Date.now())) {
+    // Not an Issue create/update event this gateway understands, or stale
+    // enough to treat as a possible replay — acknowledge, do nothing.
+    res.writeHead(204).end();
+    return;
+  }
+
+  const entry = findLinearProjectEntry(deps.registry, parsed.teamKey);
+  if (!entry) {
+    console.warn(`gateway: no project registered for Linear team "${parsed.teamKey}" — ignoring issue event`);
+    res.writeHead(202).end('no project registered for this Linear team');
+    return;
+  }
+
+  if (!matchesLinearTriggerLabel(parsed, entry.linearTriggerLabelId)) {
+    // Real issue, real project, just not this project's trigger label.
+    res.writeHead(204).end();
+    return;
+  }
+
+  try {
+    const scm = deps.buildScm(entry);
+    const config = await resolveProjectConfig(deps.managedProjectDeps, scm, entry.repo);
+    const result = await startDevCycleForLinearIssue(deps.client, deps.taskQueue, entry.project, parsed, entry.repo, config);
+    console.log(
+      result.started
+        ? `gateway: started devCycle ${result.taskId} for linear:${parsed.identifier}`
+        : `gateway: devCycle ${result.taskId} already running for linear:${parsed.identifier} — ignored duplicate label event`,
+    );
+    res.writeHead(202).end(JSON.stringify(result));
+  } catch (err) {
+    console.error(`gateway: failed to start devCycle for linear:${parsed.identifier}:`, err);
     res.writeHead(500).end('failed to start task');
   }
 }

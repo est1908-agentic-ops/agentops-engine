@@ -39,6 +39,8 @@ import {
   createGithubPorts,
   createProjectScopedPorts,
   githubCloneUrl,
+  LinearGraphqlClient,
+  LinearTrackerPort,
   MemoryScmPort,
   MemoryTrackerPort,
   type ScmPort,
@@ -61,8 +63,18 @@ export function buildActivityDependencies(registry: ResolvedProjectEntry[], work
   }
   const entries = registry.map((entry) => {
     const git = new SpawnGitCommandRunner({ authToken: () => entry.token });
-    const { scm, tracker } = createGithubPorts(entry.token, git);
-    return { repo: entry.repo, scm, tracker, git };
+    // SCM/git are always GitHub -- PRs and worktrees live on the repo side
+    // regardless of which tracker filed the task (see the Linear trigger
+    // design doc). Only the tracker implementation varies per entry.
+    const { scm, tracker: githubTracker } = createGithubPorts(entry.token, git);
+    if (entry.trackerType !== 'linear') {
+      return { repo: entry.repo, scm, tracker: githubTracker, git };
+    }
+    if (!entry.linearToken) {
+      throw new Error(`buildActivityDependencies: project "${entry.project}" is linear-tracked but has no resolved linearToken`);
+    }
+    const tracker = new LinearTrackerPort(new LinearGraphqlClient(entry.linearToken));
+    return { repo: entry.repo, linearTeamKey: entry.linearTeamKey, scm, tracker, git };
   });
   const { scm, tracker, resolveGit } = createProjectScopedPorts(entries);
   return { scm, tracker, workspaces: new WorkspaceManager({ resolveGit, cloneUrl: githubCloneUrl, workspacesDir }) };

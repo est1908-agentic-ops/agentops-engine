@@ -8,12 +8,26 @@ const validEntry = {
   tokenEnvVar: 'GITHUB_TOKEN__PROJECT_A',
 };
 
+const validLinearEntry = {
+  project: 'project-linear',
+  repo: 'flair-hr/project-linear',
+  trackerType: 'linear',
+  tokenEnvVar: 'GITHUB_TOKEN__PROJECT_LINEAR',
+  linearTeamKey: 'ENG',
+  linearTokenEnvVar: 'LINEAR_TOKEN__PROJECT_LINEAR',
+  linearTriggerLabelId: 'a1b2c3d4-0000-0000-0000-000000000000',
+};
+
 describe('ProjectRegistrySchema', () => {
-  it('parses an array of valid entries', () => {
+  it('parses an array of valid github entries', () => {
     expect(ProjectRegistrySchema.parse([validEntry])).toEqual([validEntry]);
   });
 
-  it('rejects a trackerType other than github', () => {
+  it('parses an array of valid linear entries', () => {
+    expect(ProjectRegistrySchema.parse([validLinearEntry])).toEqual([validLinearEntry]);
+  });
+
+  it('rejects a trackerType that is neither github nor linear', () => {
     expect(() => ProjectRegistrySchema.parse([{ ...validEntry, trackerType: 'gitea' }])).toThrow();
   });
 
@@ -24,6 +38,16 @@ describe('ProjectRegistrySchema', () => {
   it('rejects an entry missing a required field', () => {
     const { tokenEnvVar: _tokenEnvVar, ...withoutTokenEnvVar } = validEntry;
     expect(() => ProjectRegistrySchema.parse([withoutTokenEnvVar])).toThrow();
+  });
+
+  it('rejects a linear entry missing linearTeamKey', () => {
+    const { linearTeamKey: _linearTeamKey, ...withoutTeamKey } = validLinearEntry;
+    expect(() => ProjectRegistrySchema.parse([withoutTeamKey])).toThrow();
+  });
+
+  it('rejects a linear entry missing linearTriggerLabelId', () => {
+    const { linearTriggerLabelId: _linearTriggerLabelId, ...withoutLabelId } = validLinearEntry;
+    expect(() => ProjectRegistrySchema.parse([withoutLabelId])).toThrow();
   });
 });
 

@@ -45,6 +45,13 @@ spec:
                 secretKeyRef:
                   name: {{ $cfg.githubTokenSecretName }}
                   key: GITHUB_TOKEN
+            {{- if eq ($cfg.trackerType | default "github") "linear" }}
+            - name: {{ printf "LINEAR_TOKEN__%s" (upper (replace "-" "_" $project)) }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $cfg.linearTokenSecretName }}
+                  key: LINEAR_TOKEN
+            {{- end }}
             {{- end }}
             - name: PROJECT_REGISTRY_JSON
               value: {{ include "engine.projectRegistryJson" . | quote }}

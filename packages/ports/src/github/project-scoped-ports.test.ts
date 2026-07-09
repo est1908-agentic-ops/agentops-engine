@@ -26,8 +26,8 @@ function fakeGit(): GitCommandRunner {
   return { run: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }) };
 }
 
-function buildEntry(repo: string): ProjectScopedPortsEntry {
-  return { repo, scm: fakeScm(), tracker: fakeTracker(), git: fakeGit() };
+function buildEntry(repo: string, linearTeamKey?: string): ProjectScopedPortsEntry {
+  return { repo, linearTeamKey, scm: fakeScm(), tracker: fakeTracker(), git: fakeGit() };
 }
 
 describe('createProjectScopedPorts', () => {
@@ -91,6 +91,29 @@ describe('createProjectScopedPorts', () => {
 
     await expect(scm.readFile('owner/unknown-repo', 'x.json')).rejects.toThrow(
       /no project registered for repo "owner\/unknown-repo"/,
+    );
+  });
+
+  it('routes tracker calls with a linear-shaped ref by team key, not repo', async () => {
+    const githubEntry = buildEntry('owner/repo-a');
+    const linearEntry = buildEntry('owner/repo-linear', 'ENG');
+    const { tracker } = createProjectScopedPorts([githubEntry, linearEntry]);
+
+    await tracker.getIssue('linear:ENG-123');
+    await tracker.comment('linear:ENG-123', 'hello');
+    await tracker.label('linear:ENG-123', 'bug');
+
+    expect(linearEntry.tracker.getIssue).toHaveBeenCalledWith('linear:ENG-123');
+    expect(linearEntry.tracker.comment).toHaveBeenCalledWith('linear:ENG-123', 'hello');
+    expect(linearEntry.tracker.label).toHaveBeenCalledWith('linear:ENG-123', 'bug');
+    expect(githubEntry.tracker.getIssue).not.toHaveBeenCalled();
+  });
+
+  it('throws a clear error for a linear team key not in the registry', async () => {
+    const { tracker } = createProjectScopedPorts([buildEntry('owner/repo-a')]);
+
+    await expect(tracker.getIssue('linear:ENG-123')).rejects.toThrow(
+      /no project registered for Linear team "ENG"/,
     );
   });
 });

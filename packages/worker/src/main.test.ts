@@ -72,6 +72,48 @@ describe('buildActivityDependencies', () => {
     expect(deps.workspaces).toBeInstanceOf(WorkspaceManager);
   });
 
+  it('builds a LinearTrackerPort for a linear-tracked entry, still with a GitHub-backed scm', () => {
+    const linearRegistry = [
+      {
+        project: 'project-linear',
+        repo: 'octocat/linear-demo',
+        trackerType: 'linear' as const,
+        tokenEnvVar: 'GITHUB_TOKEN__PROJECT_LINEAR',
+        linearTeamKey: 'ENG',
+        linearTokenEnvVar: 'LINEAR_TOKEN__PROJECT_LINEAR',
+        linearTriggerLabelId: 'label-uuid',
+        token: 'ghp_fake',
+        linearToken: 'lin_fake',
+      },
+    ];
+
+    const deps = buildActivityDependencies(linearRegistry);
+
+    // The dispatch-by-ref-shape logic itself (github repo vs. linear team key)
+    // is covered by project-scoped-ports's own tests; this just confirms the
+    // worker's wiring builds a working, non-memory tracker/scm for a linear
+    // entry without throwing.
+    expect(deps.tracker).not.toBeInstanceOf(MemoryTrackerPort);
+    expect(deps.scm).not.toBeInstanceOf(MemoryScmPort);
+  });
+
+  it('throws a clear error when a linear entry is missing its resolved linearToken', () => {
+    const linearRegistryWithoutToken = [
+      {
+        project: 'project-linear',
+        repo: 'octocat/linear-demo',
+        trackerType: 'linear' as const,
+        tokenEnvVar: 'GITHUB_TOKEN__PROJECT_LINEAR',
+        linearTeamKey: 'ENG',
+        linearTokenEnvVar: 'LINEAR_TOKEN__PROJECT_LINEAR',
+        linearTriggerLabelId: 'label-uuid',
+        token: 'ghp_fake',
+      },
+    ];
+
+    expect(() => buildActivityDependencies(linearRegistryWithoutToken)).toThrow(/no resolved linearToken/);
+  });
+
   describe('workspacesDir wiring', () => {
     let root: string;
 

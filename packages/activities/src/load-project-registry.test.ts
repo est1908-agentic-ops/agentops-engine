@@ -39,6 +39,57 @@ describe('loadProjectRegistry', () => {
     expect(() => loadProjectRegistry({ PROJECT_REGISTRY_JSON: '{}' })).toThrow();
   });
 
+  it("resolves a linear entry's linearToken from linearTokenEnvVar, alongside the github token", () => {
+    const env = {
+      PROJECT_REGISTRY_JSON: JSON.stringify([
+        {
+          project: 'project-linear',
+          repo: 'flair-hr/project-linear',
+          trackerType: 'linear',
+          tokenEnvVar: 'GITHUB_TOKEN__PROJECT_LINEAR',
+          linearTeamKey: 'ENG',
+          linearTokenEnvVar: 'LINEAR_TOKEN__PROJECT_LINEAR',
+          linearTriggerLabelId: 'label-uuid',
+        },
+      ]),
+      GITHUB_TOKEN__PROJECT_LINEAR: 'ghp_fake',
+      LINEAR_TOKEN__PROJECT_LINEAR: 'lin_fake',
+    };
+
+    expect(loadProjectRegistry(env)).toEqual([
+      {
+        project: 'project-linear',
+        repo: 'flair-hr/project-linear',
+        trackerType: 'linear',
+        tokenEnvVar: 'GITHUB_TOKEN__PROJECT_LINEAR',
+        linearTeamKey: 'ENG',
+        linearTokenEnvVar: 'LINEAR_TOKEN__PROJECT_LINEAR',
+        linearTriggerLabelId: 'label-uuid',
+        token: 'ghp_fake',
+        linearToken: 'lin_fake',
+      },
+    ]);
+  });
+
+  it('throws naming the project and env var when a referenced linearTokenEnvVar is missing', () => {
+    const env = {
+      PROJECT_REGISTRY_JSON: JSON.stringify([
+        {
+          project: 'project-linear',
+          repo: 'flair-hr/project-linear',
+          trackerType: 'linear',
+          tokenEnvVar: 'GITHUB_TOKEN__PROJECT_LINEAR',
+          linearTeamKey: 'ENG',
+          linearTokenEnvVar: 'LINEAR_TOKEN__PROJECT_LINEAR',
+          linearTriggerLabelId: 'label-uuid',
+        },
+      ]),
+      GITHUB_TOKEN__PROJECT_LINEAR: 'ghp_fake',
+    };
+
+    expect(() => loadProjectRegistry(env)).toThrow(/"LINEAR_TOKEN__PROJECT_LINEAR".*"project-linear"/);
+  });
+
   it('resolves multiple entries independently', () => {
     const env = {
       PROJECT_REGISTRY_JSON: JSON.stringify([
