@@ -12,6 +12,9 @@ describe('DevCycle e2e: OTel instrumentation', () => {
     await teardownTestEnv(testEnv);
   });
 
+  // TODO: Re-enable once RunWorkflow:devCycle span instrumentation is fixed.
+  // The workflow-level span is not being generated in the current instrumentation setup.
+  // The test fails looking for a span named 'RunWorkflow:devCycle' that does not exist.
   it.skip('produces a RunWorkflow span and a RunActivity span carrying gen_ai attributes', async () => {
     const exporter = new InMemorySpanExporter();
     const tracing = setupTracing({ exporter, serviceName: 'otel-e2e-test' });
