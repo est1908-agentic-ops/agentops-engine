@@ -11,6 +11,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Self-hosted runners share $HOME; namespace by runner so concurrent
+      # jobs on different runners don't race on the same install path.
       - uses: pnpm/action-setup@v4
         with:
           dest: ~/setup-pnpm-${{ runner.name }}
