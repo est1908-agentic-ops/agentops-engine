@@ -2,6 +2,18 @@
 
 Status: draft · 2026-07-09 · Owner: Artem
 
+**Correction (2026-07-09, later same day, PR #16):** the Non-goal below ("removing
+the now-unused `platform` backend entry ... is dead code, left as-is") caused a
+real regression — the `platform` role lost its ServiceAccount/RBAC/NetworkPolicy
+access because that entry was the only place carrying it, and nothing routed to
+it anymore. Fixed by repointing the `platform` backend entry itself at
+`claudeSpec`/`CLAUDE_AUTH_SECRET_NAME` (preserving this design's z.ai-avoidance
+goal — same Anthropic account, same shared rate window — via a shared
+`RateWindowLimiter`) while keeping its ServiceAccount/secret/podLabel options,
+and routing `platform.ts` back through `backend: 'platform'` instead of
+`'claude'`. The design intent below (move `platform`'s model/credential off
+z.ai) still holds; only the "which map entry" mechanics changed.
+
 ## Context
 
 Artem is repeatedly hitting z.ai's concurrency-limit rejections (z.ai's plans cap how many sessions can be in flight at once) when running multiple sessions in parallel across the `pi` backend (which routes `implement` today) and the `platform` role (hardcoded to z.ai's GLM). This is distinct from the already-fixed `issue-broccoli-94` incident ([2026-07-08-provider-rate-limit-fallback-design.md](2026-07-08-provider-rate-limit-fallback-design.md)), which handled z.ai's Fair Usage Policy 429 with a one-shot same-backend fallback for `pi`.
