@@ -376,7 +376,7 @@ describe('createActivities — workspace error translation', () => {
     expect((err as ApplicationFailure).nonRetryable).toBe(true);
   });
 
-  it('passes a retryable WorkspaceError through unchanged', async () => {
+  it('converts a retryable WorkspaceError into a retryable ApplicationFailure', async () => {
     const deps = buildDeps();
     deps.workspaces = {
       prepare: async () => {
@@ -388,9 +388,13 @@ describe('createActivities — workspace error translation', () => {
     };
     const activities = createActivities(deps);
 
-    await expect(activities.prepareWorkspace({ taskId: 't1', repo: 'owner/repo' })).rejects.toThrow(
-      WorkspaceError,
-    );
+    const err: unknown = await activities
+      .prepareWorkspace({ taskId: 't1', repo: 'owner/repo' })
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(ApplicationFailure);
+    expect((err as ApplicationFailure).type).toBe('WorkspaceError');
+    expect((err as ApplicationFailure).nonRetryable).toBe(false);
   });
 
   it('converts a non-retryable WorkspaceError from cleanupWorkspace too', async () => {
