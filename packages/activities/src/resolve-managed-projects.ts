@@ -1,4 +1,5 @@
 import type { ResolvedProjectEntry } from '@agentops/contracts';
+import { normalizeRepo } from '@agentops/ports';
 import { decryptForManagedProject } from './credential-crypto';
 import type { PostgresManagedProjectStore } from './postgres-managed-project-store';
 
@@ -33,7 +34,11 @@ async function resolveOne(deps: ManagedProjectRegistryDeps, repo: string): Promi
   }
   return {
     project: managedProject.project,
-    repo: managedProject.repo,
+    // Canonicalize to short `owner/repo`: a project registered through the CRUD
+    // with a full GitHub URL is stored verbatim, but every downstream consumer
+    // (createProjectScopedPorts keys, githubCloneUrl, resolveRepoConfig) assumes
+    // the short form.
+    repo: normalizeRepo(managedProject.repo),
     trackerType: 'github',
     tokenEnvVar: MANAGED_PROJECT_TOKEN_ENV_VAR_SENTINEL,
     token,

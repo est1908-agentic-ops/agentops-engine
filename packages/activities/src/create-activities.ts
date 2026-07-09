@@ -5,7 +5,14 @@ import {
   RateWindowExceededError,
   type AgentBackend,
 } from '@agentops/backends';
-import type { Issue, OpenPrRequest, OpenPrResult, ScmPort, TrackerPort } from '@agentops/ports';
+import {
+  normalizeRepo,
+  type Issue,
+  type OpenPrRequest,
+  type OpenPrResult,
+  type ScmPort,
+  type TrackerPort,
+} from '@agentops/ports';
 import type {
   AgentRunRequest,
   AgentRunResult,
@@ -172,7 +179,8 @@ export function createActivities(deps: ActivityDependencies) {
     async resolveRepoConfig(
       repo: string,
     ): Promise<{ registered: boolean; project: string; config: ProjectConfig }> {
-      const entry = deps.registry.find((candidate) => candidate.repo === repo);
+      const target = normalizeRepo(repo);
+      const entry = deps.registry.find((candidate) => normalizeRepo(candidate.repo) === target);
       if (!entry) {
         // No project registry entry means no SCM credentials scoped to this
         // repo either -- loadProjectConfig would just throw via the
