@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: merge-to-main
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: self-hosted
