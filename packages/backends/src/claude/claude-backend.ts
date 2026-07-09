@@ -21,7 +21,14 @@ interface ClaudeJsonResult {
   duration_ms?: number;
 }
 
-const AUTH_ERROR_PATTERN = /(invalid|expired).{0,30}(api key|token)/i;
+// Matches an auth failure however the CLI phrases it. Kept deliberately broad
+// because these arrive two ways: on stderr (a credential rejected at CLI
+// startup) and -- as seen in prod -- inside the JSON `is_error` result on
+// stdout ("Failed to authenticate. API Error: 401 token expired or incorrect"),
+// which the stderr-only check never sees. Covers both word orders
+// (token expired / expired token) plus a bare 401 and "unauthorized".
+const AUTH_ERROR_PATTERN =
+  /\b401\b|unauthoriz|failed to authenticate|(invalid|expired|incorrect|revoked)[\s\S]{0,30}(api key|token|credential)|(api key|token|credential)[\s\S]{0,30}(invalid|expired|incorrect|revoked)/i;
 const DEFAULT_IMAGE = 'ghcr.io/CHANGEME/agentops-engine/agent-claude:CHANGEME';
 
 export function createClaudeCliSpec(opts: ClaudeCliSpecOptions = {}): CliSpec {
@@ -66,7 +73,17 @@ export function createClaudeCliSpec(opts: ClaudeCliSpecOptions = {}): CliSpec {
       // full_verify/review, where it can never match FULL:/VERDICT: and just
       // reads as a garbled response instead of the actual failure it is.
       if (parsed.is_error) {
-        throw new ProcessCliProcessError(`claude reported is_error: ${parsed.result}`);
+        const message = `claude reported is_error: ${parsed.result}`;
+        // A 401 / expired / revoked credential is reported here, in the JSON
+        // result on stdout -- not on stderr, so the stderr-only isAuthError()
+        // check below never catches it. Without this, a dead credential looks
+        // like a generic (retryable) process error: it gets retried pointlessly
+        // and its cause is buried. Classify it as an auth error so runAgent can
+        // fail fast and non-retryably.
+        if (AUTH_ERROR_PATTERN.test(parsed.result)) {
+          throw new ProcessCliAuthError(message);
+        }
+        throw new ProcessCliProcessError(message);
       }
 
       return {

@@ -1,6 +1,7 @@
 import { trace } from '@opentelemetry/api';
 import {
   LiteLlmBudgetExceededError,
+  ProcessCliAuthError,
   RateWindowExceededError,
   type AgentBackend,
 } from '@agentops/backends';
@@ -98,6 +99,13 @@ export function createActivities(deps: ActivityDependencies) {
         // here" shape as rethrowWorkspaceError below.
         if (err instanceof LiteLlmBudgetExceededError) {
           throw ApplicationFailure.nonRetryable(err.message, 'LiteLlmBudgetExceededError');
+        }
+        // A rejected credential (bad/expired/revoked token, placeholder key) is
+        // definitive, not transient -- retrying just burns the activity's retry
+        // budget and delays surfacing the real cause. Fail fast with a clearly
+        // typed, non-retryable failure so it reads as an auth problem in Temporal.
+        if (err instanceof ProcessCliAuthError) {
+          throw ApplicationFailure.nonRetryable(err.message, 'AuthError');
         }
         // A subscription rate window is a scheduling fact, not something a
         // human needs to resolve -- retryable, with nextRetryDelay set to
