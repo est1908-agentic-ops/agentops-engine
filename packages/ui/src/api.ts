@@ -1,14 +1,21 @@
 import {
+  DevCycleRunDetailSchema,
+  DevCycleTargetsResponseSchema,
   ManagedProjectListResponseSchema,
   ManagedProjectSchema,
   RepoListResponseSchema,
   RunDetailSchema,
   RunListItemSchema,
+  StartDevCycleResponseSchema,
   StartRunResponseSchema,
   z,
+  type DevCycleRunDetail,
+  type DevCycleTarget,
   type ManagedProject,
   type RunDetail,
   type RunListItem,
+  type StartDevCycleRequest,
+  type StartDevCycleResponse,
   type StartRunRequest,
   type StartRunResponse,
 } from '@agentops/contracts';
@@ -94,6 +101,33 @@ export async function listRepos(): Promise<string[]> {
   const res = await fetch('/api/registry/repos');
   const parsed = await parseJsonResponse(res, RepoListResponseSchema);
   return parsed.repos;
+}
+
+// --- devCycle runs (prompt-devcycle design §6/§8) ---
+
+export async function startDevCycleRun(input: StartDevCycleRequest): Promise<StartDevCycleResponse> {
+  const res = await fetch('/api/devcycle/runs', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
+  return parseJsonResponse(res, StartDevCycleResponseSchema);
+}
+
+export async function listDevCycleRuns(limit = 20): Promise<RunListItem[]> {
+  const res = await fetch(`/api/devcycle/runs?limit=${limit}`);
+  return parseJsonResponse(res, z.array(RunListItemSchema));
+}
+
+export async function getDevCycleRun(workflowId: string): Promise<DevCycleRunDetail> {
+  const res = await fetch(`/api/devcycle/runs/${encodeURIComponent(workflowId)}`);
+  return parseJsonResponse(res, DevCycleRunDetailSchema);
+}
+
+export async function listDevCycleTargets(): Promise<DevCycleTarget[]> {
+  const res = await fetch('/api/devcycle/targets');
+  const parsed = await parseJsonResponse(res, DevCycleTargetsResponseSchema);
+  return parsed.targets;
 }
 
 /**
