@@ -40,7 +40,18 @@ function readRawBody(req: IncomingMessage): Promise<Buffer> {
 
 export function createGatewayServer(deps: GatewayDeps): Server {
   return createServer((req: IncomingMessage, res: ServerResponse) => {
-    void handleRequest(deps, req, res);
+    // handleRequest's own try/catch around the "start devCycle" calls only
+    // covers the parts expected to fail (a bad token, Temporal unreachable).
+    // This outer catch is the backstop for everything else -- an uncaught
+    // throw in a parser/verifier (this process also serves the *other*
+    // webhook route) would otherwise become an unhandled rejection that
+    // crashes the whole gateway, not just this one request.
+    handleRequest(deps, req, res).catch((err) => {
+      console.error('gateway: unhandled error handling request', err);
+      if (!res.headersSent) {
+        res.writeHead(500).end('internal error');
+      }
+    });
   });
 }
 

@@ -55,6 +55,27 @@ describe('parseLinearIssueEvent', () => {
   it('ignores a payload missing an identifier', () => {
     expect(parseLinearIssueEvent({ type: 'Issue', action: 'create', data: {} })).toBeNull();
   });
+
+  it('does not throw and returns null for a non-string identifier (adversarial/malformed payload)', () => {
+    expect(() => parseLinearIssueEvent({ type: 'Issue', action: 'create', data: { identifier: 12345 } })).not.toThrow();
+    expect(parseLinearIssueEvent({ type: 'Issue', action: 'create', data: { identifier: 12345 } })).toBeNull();
+    expect(parseLinearIssueEvent({ type: 'Issue', action: 'create', data: { identifier: { foo: 'bar' } } })).toBeNull();
+    expect(parseLinearIssueEvent({ type: 'Issue', action: 'create', data: { identifier: ['ENG-1'] } })).toBeNull();
+  });
+
+  it('treats previousLabelIds as unchanged (equal to current), not empty, when updatedFrom omits labelIds', () => {
+    // An update to an unrelated field (title/state/assignee/...) on an
+    // already-labeled issue carries no `labelIds` key on updatedFrom at all
+    // -- Linear's updatedFrom only lists fields that actually changed.
+    const event = parseLinearIssueEvent({
+      type: 'Issue',
+      action: 'update',
+      data: { identifier: 'ENG-123', title: 'Renamed', labelIds: [TRIGGER_LABEL_ID] },
+      updatedFrom: { title: 'Old title' },
+    });
+
+    expect(event?.previousLabelIds).toEqual([TRIGGER_LABEL_ID]);
+  });
 });
 
 describe('matchesLinearTriggerLabel', () => {
@@ -77,6 +98,13 @@ describe('matchesLinearTriggerLabel', () => {
 
   it('does not match when the trigger label was already present before this update', () => {
     const event = { ...baseEvent, labelIds: [TRIGGER_LABEL_ID, 'new-unrelated'], previousLabelIds: [TRIGGER_LABEL_ID] };
+    expect(matchesLinearTriggerLabel(event, TRIGGER_LABEL_ID)).toBe(false);
+  });
+
+  it('does not re-match (no devCycle re-trigger) for an unrelated edit to an already-labeled issue', () => {
+    // Regression for the "updatedFrom omits labelIds" parsing fix above --
+    // previousLabelIds equal to labelIds here means "labels didn't change".
+    const event = { ...baseEvent, labelIds: [TRIGGER_LABEL_ID], previousLabelIds: [TRIGGER_LABEL_ID] };
     expect(matchesLinearTriggerLabel(event, TRIGGER_LABEL_ID)).toBe(false);
   });
 });

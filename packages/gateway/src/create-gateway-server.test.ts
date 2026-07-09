@@ -258,6 +258,38 @@ describe('createGatewayServer Linear route', () => {
     expect(res.status).toBe(204);
     expect(start).not.toHaveBeenCalled();
   });
+
+  it('does not crash the process when a handler throws synchronously (500, not an unhandled rejection)', async () => {
+    // registry is intentionally the wrong shape here, so findLinearProjectEntry's
+    // .find call throws outside handleLinearWebhook's own try/catch -- this
+    // exercises createGatewayServer's outer defensive catch, not any one
+    // handler's inner error handling.
+    const brokenDeps: GatewayDeps = {
+      client: { workflow: { start: vi.fn() } } as never,
+      taskQueue: 'agentops-devcycle',
+      webhookSecret: SECRET,
+      triggerLabel: TRIGGER_LABEL,
+      registry: null as never,
+      buildScm: () => new MemoryScmPort(),
+      linearWebhookSecret: LINEAR_SECRET,
+    };
+    const brokenServer = createGatewayServer(brokenDeps);
+    await new Promise<void>((resolve) => brokenServer.listen(0, resolve));
+    const brokenPort = (brokenServer.address() as AddressInfo).port;
+
+    const body = JSON.stringify(linearIssuePayload());
+    const res = await post(brokenPort, '/webhooks/linear', body, {
+      'content-type': 'application/json',
+      'linear-signature': signLinear(body),
+    });
+
+    expect(res.status).toBe(500);
+    // The server is still alive and answering other requests -- proves the
+    // process didn't crash.
+    const healthRes = await fetch(`http://127.0.0.1:${brokenPort}/healthz`);
+    expect(healthRes.status).toBe(200);
+    brokenServer.close();
+  });
 });
 
 import { encryptForManagedProject, generateManagedProjectKeyPair } from '@agentops/activities';

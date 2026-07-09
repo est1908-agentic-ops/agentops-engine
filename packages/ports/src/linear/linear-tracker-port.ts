@@ -29,6 +29,12 @@ export class LinearTrackerPort implements TrackerPort {
   // implemented to match GithubTrackerPort's additive semantics rather than
   // stubbed: Linear's issueUpdate replaces the full labelIds set, so this
   // reads the issue's current labels first and merges the new one in.
+  //
+  // This read-then-write is NOT race-safe, unlike GitHub's atomic addLabels:
+  // a concurrent label() call, or a human editing labels in the Linear UI
+  // between the read and the write, can silently lose a label. Low blast
+  // radius while nothing calls label() on the hot path -- revisit (version
+  // check or retry-on-conflict) before anything wires this up for real.
   async label(ref: string, label: string): Promise<void> {
     const { teamKey, identifier } = requireLinearRef(ref);
     const issue = await this.client.getIssue(identifier);

@@ -24,8 +24,15 @@ interface LinearIssueWebhookPayload {
 // but the project can only be resolved from this event's teamKey -- so
 // project lookup has to happen between parsing and label-matching. See
 // matchesLinearTriggerLabel and docs/superpowers/specs/2026-07-09-linear-trigger-design.md.
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
+
 export function parseLinearIssueEvent(payload: unknown): LinearIssueEvent | null {
   const body = payload as LinearIssueWebhookPayload;
+  if (body == null || typeof body !== 'object') {
+    return null;
+  }
   if (body.type !== 'Issue') {
     return null;
   }
@@ -33,20 +40,34 @@ export function parseLinearIssueEvent(payload: unknown): LinearIssueEvent | null
     return null;
   }
   const identifier = body.data?.identifier;
-  if (!identifier) {
+  // Untrusted external payload -- `identifier` is only cast, never validated,
+  // so a webhook sender putting a non-string here (legal JSON, e.g. a number
+  // or object) must not reach identifier.indexOf below.
+  if (typeof identifier !== 'string' || identifier.length === 0) {
     return null;
   }
   const separatorIndex = identifier.indexOf('-');
   if (separatorIndex <= 0) {
     return null;
   }
+  const labelIds = asStringArray(body.data?.labelIds);
+  // Linear's `updatedFrom` carries only the fields that changed in this
+  // particular delivery -- if `labelIds` isn't a key on it at all, labels
+  // didn't change, and the previous set equals the current set. Falling back
+  // to `[]` instead would conflate "labels unchanged" with "labels used to
+  // be empty," making an unrelated edit (title, state, assignee, ...) on an
+  // already-labeled issue look like a fresh "labeled" event and re-trigger
+  // devCycle under the same (already-completed) workflow id.
+  const updatedFromHasLabelIds = body.action === 'update' && body.updatedFrom != null && 'labelIds' in body.updatedFrom;
+  const previousLabelIds =
+    body.action !== 'update' ? undefined : updatedFromHasLabelIds ? asStringArray(body.updatedFrom?.labelIds) : labelIds;
   return {
     teamKey: identifier.slice(0, separatorIndex),
     identifier,
-    title: body.data?.title ?? '',
-    labelIds: body.data?.labelIds ?? [],
-    previousLabelIds: body.action === 'update' ? body.updatedFrom?.labelIds ?? [] : undefined,
-    webhookTimestamp: body.webhookTimestamp,
+    title: typeof body.data?.title === 'string' ? body.data.title : '',
+    labelIds,
+    previousLabelIds,
+    webhookTimestamp: typeof body.webhookTimestamp === 'number' ? body.webhookTimestamp : undefined,
   };
 }
 
