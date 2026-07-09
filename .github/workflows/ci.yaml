@@ -60,7 +60,8 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: images/worker/Dockerfile
+          file: images/engine/Dockerfile
+          target: worker
           push: ${{ github.ref == 'refs/heads/main' }}
           tags: gitactions.est1908.top/agentic-ops/worker:${{ github.sha }}
 
@@ -76,14 +77,16 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: images/gateway/Dockerfile
+          file: images/engine/Dockerfile
+          target: gateway
           push: ${{ github.ref == 'refs/heads/main' }}
           tags: gitactions.est1908.top/agentic-ops/gateway:${{ github.sha }}
 
       - uses: docker/build-push-action@v6
         with:
           context: .
-          file: images/control/Dockerfile
+          file: images/engine/Dockerfile
+          target: control
           push: ${{ github.ref == 'refs/heads/main' }}
           tags: gitactions.est1908.top/agentic-ops/control:${{ github.sha }}
 
