@@ -8,9 +8,40 @@ import {
   listProjects,
   setCrudToken,
   updateProject,
+  type UpdateProjectInput,
 } from '../api';
 
 type TrackerType = 'github' | 'linear';
+
+// The subset of form fields relevant to an update. Used by buildUpdatePayload
+// to compute the minimal change set against the stored project.
+interface UpdateFieldValues {
+  token: string;
+  configJson: string;
+  linearTeamKey: string;
+  linearTriggerLabelId: string;
+  linearToken: string;
+}
+
+// Builds the minimal PUT payload: a field is included only when it is a
+// genuine change. Blank = keep (the server's omit-means-keep semantics). For
+// the non-secret Linear fields -- which are prefilled on edit -- "unchanged
+// from the stored value" is also treated as keep, so editing a Linear project
+// never re-sends its current team key/label id and Save stays disabled until
+// a real change, matching the GitHub edit path.
+function buildUpdatePayload(existing: ManagedProject, v: UpdateFieldValues): UpdateProjectInput {
+  const payload: UpdateProjectInput = {};
+  if (v.token) payload.token = v.token;
+  if (v.configJson) payload.configJson = v.configJson;
+  if (existing.trackerType === 'linear') {
+    if (v.linearTeamKey && v.linearTeamKey !== existing.linearTeamKey)
+      payload.linearTeamKey = v.linearTeamKey;
+    if (v.linearTriggerLabelId && v.linearTriggerLabelId !== existing.linearTriggerLabelId)
+      payload.linearTriggerLabelId = v.linearTriggerLabelId;
+    if (v.linearToken) payload.linearToken = v.linearToken;
+  }
+  return payload;
+}
 
 // A flat bag of every field the form can collect. The page handlers project
 // this down to CreateProjectInput / UpdateProjectInput depending on mode, so
@@ -95,17 +126,18 @@ export function ProjectsPage() {
     }
   }
 
-  async function handleUpdate(repo: string, values: ProjectFormValues): Promise<void> {
+  async function handleUpdate(existing: ManagedProject, values: ProjectFormValues): Promise<void> {
     setBusy(true);
     setFormError(null);
     try {
-      await updateProject(repo, {
-        token: values.token.trim() || undefined,
-        configJson: values.configJson.trim() || undefined,
-        linearTeamKey: values.linearTeamKey.trim() || undefined,
-        linearTriggerLabelId: values.linearTriggerLabelId.trim() || undefined,
-        linearToken: values.linearToken.trim() || undefined,
+      const payload = buildUpdatePayload(existing, {
+        token: values.token.trim(),
+        configJson: values.configJson.trim(),
+        linearTeamKey: values.linearTeamKey.trim(),
+        linearTriggerLabelId: values.linearTriggerLabelId.trim(),
+        linearToken: values.linearToken.trim(),
       });
+      await updateProject(existing.repo, payload);
       setMode(null);
       await refresh();
     } catch (err) {
@@ -231,7 +263,7 @@ export function ProjectsPage() {
             setFormError(null);
           }}
           onSubmit={async (values) => {
-            await handleUpdate(mode.project.repo, values);
+            await handleUpdate(mode.project, values);
           }}
         />
       )}
@@ -399,11 +431,14 @@ function ProjectForm({
   const linearReady = trimmed.linearTeamKey && trimmed.linearTriggerLabelId && trimmed.linearToken;
   const createReady =
     trimmed.project && trimmed.repo && trimmed.token && (!isLinear || linearReady);
-  const hasUpdateChange =
-    trimmed.token ||
-    trimmed.configJson ||
-    (isLinear && (trimmed.linearTeamKey || trimmed.linearTriggerLabelId || trimmed.linearToken));
-  const canSubmit = isUpdate ? !!hasUpdateChange && !submitting : !!createReady && !submitting;
+  // Update is submittable only when at least one field genuinely changed.
+  // buildUpdatePayload encodes "blank = keep" and, for prefilled non-secret
+  // Linear fields, "unchanged = keep" -- so editing a Linear project keeps
+  // Save disabled until a real change, same as the GitHub edit path.
+  const updatePayload = isUpdate && existing ? buildUpdatePayload(existing, trimmed) : null;
+  const canSubmit = isUpdate
+    ? !!updatePayload && Object.keys(updatePayload).length > 0 && !submitting
+    : !!createReady && !submitting;
 
   async function handleSubmit() {
     setError(null);
