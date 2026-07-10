@@ -1,4 +1,4 @@
-import type { AgentRunRequest, AgentRunResult, PrFeedback, RunStats, StageResult } from '@agentops/contracts';
+import type { AgentRunRequest, AgentRunResult, PrFeedback, ProjectConfig, RunStats, StageResult } from '@agentops/contracts';
 
 export interface Issue {
   ref: string;
@@ -23,6 +23,14 @@ export interface StageResultRecord extends StageResult {
   taskId: string;
 }
 
+// Shared with PlatformActivities -- one declaration for the one activity
+// implementation in packages/activities/src/create-activities.ts.
+export interface RepoConfigResolution {
+  registered: boolean;
+  project: string;
+  config: ProjectConfig;
+}
+
 export interface PreparedWorkspace {
   workspaceRef: string;
   branch: string;
@@ -31,6 +39,7 @@ export interface PreparedWorkspace {
 
 export interface DevCycleActivities {
   runAgent(req: AgentRunRequest): Promise<AgentRunResult>;
+  resolveRepoConfig(repo: string): Promise<RepoConfigResolution>;
   getIssue(ref: string): Promise<Issue>;
   commentOnIssue(ref: string, body: string): Promise<void>;
   labelIssue(ref: string, label: string): Promise<void>;
