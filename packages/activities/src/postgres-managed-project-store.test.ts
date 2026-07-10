@@ -48,6 +48,11 @@ function createFakeDb(): Queryable {
       if (normalized.startsWith('SELECT * FROM managed_projects ORDER BY project')) {
         return { rows: [...rows].sort((a, b) => a.project.localeCompare(b.project)) };
       }
+      // getRow scans the whole (small) table and matches on the normalized repo
+      // form in JS -- see PostgresManagedProjectStore.getRow.
+      if (normalized === 'SELECT * FROM managed_projects') {
+        return { rows: [...rows] };
+      }
       if (normalized.startsWith('INSERT INTO managed_projects')) {
         const [project, repo, encryptedToken, config, trackerType, encryptedLinearToken, linearTeamKey, linearTriggerLabelId] = params as [
           string,
@@ -80,8 +85,8 @@ function createFakeDb(): Queryable {
         return { rows: [row] };
       }
       if (normalized.startsWith('DELETE FROM managed_projects')) {
-        const [repo] = params as [string];
-        const index = rows.findIndex((r) => r.repo === repo);
+        const [id] = params as [string]; // remove() deletes by primary key, resolved via getRow
+        const index = rows.findIndex((r) => r.id === id);
         if (index >= 0) {
           rows.splice(index, 1);
         }
@@ -184,6 +189,50 @@ describe('PostgresManagedProjectStore', () => {
 
     expect((await store.getByProject('acme-web'))?.repo).toBe('acme/web');
     expect(await store.getByProject('nope')).toBeNull();
+  });
+
+  // A managed project registered through the console/API can be stored with a
+  // full GitHub URL, but the gateway looks it up by the short `owner/repo` form
+  // from the webhook payload. Every repo lookup must match across those forms
+  // regardless of which one is stored -- otherwise a labeled issue is silently
+  // dropped with `no project registered for repo "..."`.
+  describe('repo lookups are form-insensitive (URL vs owner/repo)', () => {
+    it('resolves a URL-stored project when queried by the short owner/repo form', async () => {
+      const store = new PostgresManagedProjectStore(createFakeDb());
+      const { publicKey } = generateManagedProjectKeyPair();
+      await store.upsert({ project: 'acme-web', repo: 'https://github.com/acme/web', token: 'ghp_abc' }, publicKey);
+
+      expect((await store.get('acme/web'))?.project).toBe('acme-web');
+      expect(await store.getEncryptedToken('acme/web')).not.toBeNull();
+    });
+
+    it('resolves a short-form project when queried by a full URL (and .git / SSH forms)', async () => {
+      const store = new PostgresManagedProjectStore(createFakeDb());
+      const { publicKey } = generateManagedProjectKeyPair();
+      await store.upsert({ project: 'acme-web', repo: 'acme/web', token: 'ghp_abc' }, publicKey);
+
+      expect((await store.get('https://github.com/acme/web'))?.project).toBe('acme-web');
+      expect((await store.get('https://github.com/acme/web.git'))?.project).toBe('acme-web');
+      expect((await store.get('git@github.com:acme/web.git'))?.project).toBe('acme-web');
+    });
+
+    it('removes a URL-stored project addressed by the short owner/repo form', async () => {
+      const store = new PostgresManagedProjectStore(createFakeDb());
+      const { publicKey } = generateManagedProjectKeyPair();
+      await store.upsert({ project: 'acme-web', repo: 'https://github.com/acme/web', token: 'ghp_abc' }, publicKey);
+
+      await store.remove('acme/web');
+
+      expect(await store.get('acme/web')).toBeNull();
+    });
+
+    it('still returns null for a genuinely unregistered repo', async () => {
+      const store = new PostgresManagedProjectStore(createFakeDb());
+      const { publicKey } = generateManagedProjectKeyPair();
+      await store.upsert({ project: 'acme-web', repo: 'https://github.com/acme/web', token: 'ghp_abc' }, publicKey);
+
+      expect(await store.get('acme/other')).toBeNull();
+    });
   });
 
   describe('linear-tracked projects', () => {
