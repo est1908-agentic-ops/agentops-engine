@@ -72,6 +72,42 @@ pnpm engine signal <task-id> resume
 
 **Opens a real PR and spends real tokens** — use a disposable test repo and check routing in `agentops.json` first.
 
+### Start via Linear label
+
+Linear issues start `devCycle` the same way GitHub issues do — by adding a label — but the wiring differs because Linear's webhook payload carries label *IDs* (UUIDs), not names. There is no GitHub-style `TRIGGER_LABEL` default: each Linear-tracked project is configured with its own trigger-label UUID (`linearTriggerLabelId`).
+
+A Linear-tracked project still needs a GitHub repo + token (SCM stays GitHub-only — the PR lands in a GitHub repo regardless of which tracker filed the task). Register one with:
+
+```bash
+pnpm engine project add \
+  --project my-project \
+  --repo owner/repo \
+  --token ghp_xxx \
+  --tracker-type linear \
+  --linear-team-key ENG \
+  --linear-trigger-label-id <label-uuid> \
+  --linear-token lin_api_xxx
+```
+
+- `--tracker-type linear` switches this project off the GitHub webhook path onto the Linear one (immutable once set — changing tracker means `engine project remove` + re-add).
+- `--linear-team-key` is the prefix of every issue identifier in the team (`ENG-123` → `ENG`). The gateway routes a webhook to this project by matching it.
+- `--linear-trigger-label-id` is the Linear label **UUID**, not its name. Find it once via Linear's GraphQL API (query `teams { labels { nodes { id name } } }`) or the label's settings URL. This is a one-time manual step, the same shape as configuring a webhook secret.
+- `--linear-token` is a Linear API key (`lin_api_…`) used to read the issue and post the PR link back as a comment.
+
+Then run the gateway with `LINEAR_WEBHOOK_SECRET` set (the route 404s entirely when it's unset — a deployment with no Linear projects needs no new secret):
+
+```bash
+GITHUB_WEBHOOK_SECRET=gh-secret \
+LINEAR_WEBHOOK_SECRET=lin-secret \
+pnpm --filter @agentops/gateway run start
+```
+
+In Linear, register a workspace webhook pointing at `POST https://<gateway-host>/webhooks/linear` with the same shared secret. The signature is `Linear-Signature` (raw hex HMAC-SHA256 over the raw body, no `sha256=` prefix) plus a 5-minute freshness window on `webhookTimestamp` — both verified server-side, so set them once and leave them.
+
+Add the trigger label to an issue in the configured team and `devCycle` starts with workflow id `linear-<project>-<identifier>` (`linear-my-project-ENG-123`) — `goal` = issue title. Re-adding the label while running is a no-op; re-labeling after completion starts a fresh run.
+
+Mission Control's create/edit form doesn't yet expose Linear fields — use `engine project add`/`update` until it does.
+
 ## Images & chart (M2/M3)
 
 Three images build from this repo:
