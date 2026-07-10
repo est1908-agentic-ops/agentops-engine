@@ -7,7 +7,6 @@ import {
   InMemoryStatsStore,
   loadEnv,
   loadManagedProjectRegistry,
-  loadProjectRegistry,
   MemoryWorkspaceManager,
   PostgresManagedProjectStore,
   PostgresStatsStore,
@@ -39,6 +38,8 @@ import {
   createGithubPorts,
   createProjectScopedPorts,
   githubCloneUrl,
+  LinearGraphqlClient,
+  LinearTrackerPort,
   MemoryScmPort,
   MemoryTrackerPort,
   type ScmPort,
@@ -61,25 +62,21 @@ export function buildActivityDependencies(registry: ResolvedProjectEntry[], work
   }
   const entries = registry.map((entry) => {
     const git = new SpawnGitCommandRunner({ authToken: () => entry.token });
-    const { scm, tracker } = createGithubPorts(entry.token, git);
-    return { repo: entry.repo, scm, tracker, git };
+    // SCM/git are always GitHub -- PRs and worktrees live on the repo side
+    // regardless of which tracker filed the task (see the Linear trigger
+    // design doc). Only the tracker implementation varies per entry.
+    const { scm, tracker: githubTracker } = createGithubPorts(entry.token, git);
+    if (entry.trackerType !== 'linear') {
+      return { repo: entry.repo, scm, tracker: githubTracker, git };
+    }
+    if (!entry.linearToken) {
+      throw new Error(`buildActivityDependencies: project "${entry.project}" is linear-tracked but has no resolved linearToken`);
+    }
+    const tracker = new LinearTrackerPort(new LinearGraphqlClient(entry.linearToken));
+    return { repo: entry.repo, linearTeamKey: entry.linearTeamKey, scm, tracker, git };
   });
   const { scm, tracker, resolveGit } = createProjectScopedPorts(entries);
   return { scm, tracker, workspaces: new WorkspaceManager({ resolveGit, cloneUrl: githubCloneUrl, workspacesDir }) };
-}
-
-/**
- * DB-registered projects take precedence over a static entry for the same
- * repo (docs/superpowers/specs/2026-07-08-managed-project-registry-design.md
- * §6) -- filter the static list down to repos the managed registry doesn't
- * already cover, then put managed entries first for readability in logs.
- */
-export function mergeStaticAndManagedRegistries(
-  staticRegistry: ResolvedProjectEntry[],
-  managedRegistry: ResolvedProjectEntry[],
-): ResolvedProjectEntry[] {
-  const managedRepos = new Set(managedRegistry.map((entry) => entry.repo));
-  return [...managedRegistry, ...staticRegistry.filter((entry) => !managedRepos.has(entry.repo))];
 }
 
 function buildManagedProjectDeps(pool: Pool | undefined): ManagedProjectRegistryDeps | undefined {
@@ -301,7 +298,6 @@ async function main(): Promise<void> {
     address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233',
   });
 
-  const staticRegistry = loadProjectRegistry();
   const enginePool = process.env.ENGINE_DB_HOST
     ? new Pool({
         host: process.env.ENGINE_DB_HOST,
@@ -318,8 +314,7 @@ async function main(): Promise<void> {
   if (managedProjectDeps) {
     await managedProjectDeps.store.ensureSchema();
   }
-  const managedRegistry = managedProjectDeps ? await loadManagedProjectRegistry(managedProjectDeps) : [];
-  const registry = mergeStaticAndManagedRegistries(staticRegistry, managedRegistry);
+  const registry = managedProjectDeps ? await loadManagedProjectRegistry(managedProjectDeps) : [];
   const inCluster = Boolean(process.env.KUBERNETES_SERVICE_HOST);
   const { scm, tracker, workspaces } = buildActivityDependencies(registry, resolveWorkspacesDir(inCluster));
   console.log(
@@ -327,7 +322,7 @@ async function main(): Promise<void> {
       ? `agentops worker: LIVE mode — ${registry.length} project(s) registered: ${registry
           .map((entry) => `${entry.project} (${entry.repo})`)
           .join(', ')} — real GitHub + real agent CLIs, will spend tokens and open real PRs`
-      : 'agentops worker: DEMO mode (no PROJECT_REGISTRY_JSON) — in-memory ports + stub backend only',
+      : 'agentops worker: DEMO mode (no managed-project DB configured) — in-memory ports + stub backend only',
   );
   console.log(
     inCluster

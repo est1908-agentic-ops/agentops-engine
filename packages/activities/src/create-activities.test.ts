@@ -506,7 +506,6 @@ describe('createActivities — resolveRepoConfig', () => {
         project: 'engine',
         repo: 'flair-hr/agentops-engine',
         trackerType: 'github',
-        tokenEnvVar: 'X',
         token: 'fake',
       },
     ];

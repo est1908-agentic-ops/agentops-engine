@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { generateManagedProjectKeyPair } from '@agentops/activities';
+import { generateManagedProjectKeyPair, type PostgresManagedProjectStore } from '@agentops/activities';
 import type { ManagedProject, UpsertManagedProjectRequest } from '@agentops/contracts';
 import { createControlServer, type ControlDeps } from './create-control-server';
 
@@ -65,10 +65,6 @@ describe('createControlServer', () => {
       taskQueue: 'agentops-devcycle',
       namespace: 'default',
       temporalUiBaseUrl: 'https://temporal.example',
-      registryEntries: [
-        { project: 'engine', repo: 'flair-hr/agentops-engine' },
-        { project: 'platform', repo: 'flair-hr/agentops-platform' },
-      ],
     };
   });
 
@@ -222,11 +218,24 @@ describe('createControlServer', () => {
     });
   });
 
-  it('GET /api/registry/repos returns the configured registry', async () => {
+  it('GET /api/registry/repos returns repos from the managed-project store', async () => {
+    const store = createFakeStore();
+    const { publicKey } = generateManagedProjectKeyPair();
+    await store.upsert({ project: 'engine', repo: 'flair-hr/agentops-engine', token: 't1' }, publicKey);
+    await store.upsert({ project: 'platform', repo: 'flair-hr/agentops-platform', token: 't2' }, publicKey);
+    deps.managedProjectStore = store;
     await listen();
+
     const { status, body } = await getJson(port, '/api/registry/repos');
     expect(status).toBe(200);
     expect(body).toEqual({ repos: ['flair-hr/agentops-engine', 'flair-hr/agentops-platform'] });
+  });
+
+  it('GET /api/registry/repos returns no hints when no managed-project store is configured', async () => {
+    await listen();
+    const { status, body } = await getJson(port, '/api/registry/repos');
+    expect(status).toBe(200);
+    expect(body).toEqual({ repos: [] });
   });
 
   it('404s an unknown route with no uiDistPath configured', async () => {
@@ -260,6 +269,7 @@ describe('createControlServer', () => {
       });
 
       it('starts devCycle with goal=prompt, no config, a prompt-<project>- workflowId, and the prompt memo', async () => {
+        deps.managedProjectStore = fakeStore([{ repo: 'flair-hr/agentops-engine', project: 'engine' }]);
         start.mockResolvedValue({ workflowId: 'prompt-engine-t1', firstExecutionRunId: 'run-1' });
         await listen();
         const { status, body } = await postJson(port, '/api/devcycle/runs', {
@@ -276,7 +286,7 @@ describe('createControlServer', () => {
         expect(options.memo).toEqual({ prompt: 'add a widget' });
       });
 
-      it('resolves the project slug from the managed store ahead of the static registry', async () => {
+      it('resolves the project slug from the managed store', async () => {
         deps.managedProjectStore = fakeStore([{ repo: 'acme/app', project: 'acme-app' }]);
         start.mockResolvedValue({ workflowId: 'prompt-acme-app-t2', firstExecutionRunId: 'run-2' });
         await listen();
@@ -287,6 +297,7 @@ describe('createControlServer', () => {
       });
 
       it('responds 409 when the workflowId is already in use', async () => {
+        deps.managedProjectStore = fakeStore([{ repo: 'flair-hr/agentops-engine', project: 'engine' }]);
         start.mockRejectedValueOnce(new WorkflowExecutionAlreadyStartedError('already started', 'prompt-engine-dup', 'devCycle'));
         await listen();
         const { status } = await postJson(port, '/api/devcycle/runs', {
@@ -393,19 +404,14 @@ describe('createControlServer', () => {
     });
 
     describe('GET /api/devcycle/targets', () => {
-      it('returns static registry entries when no store is configured', async () => {
+      it('returns an empty target list when no managed-project store is configured', async () => {
         await listen();
         const { status, body } = await getJson(port, '/api/devcycle/targets');
         expect(status).toBe(200);
-        expect(body).toEqual({
-          targets: [
-            { repo: 'flair-hr/agentops-engine', project: 'engine' },
-            { repo: 'flair-hr/agentops-platform', project: 'platform' },
-          ],
-        });
+        expect(body).toEqual({ targets: [] });
       });
 
-      it('unions managed projects with static entries, managed winning on duplicate repo', async () => {
+      it('returns managed projects only (the DB is the single source of truth), sorted by project', async () => {
         deps.managedProjectStore = fakeStore([
           { repo: 'flair-hr/agentops-engine', project: 'engine-managed' },
           { repo: 'acme/app', project: 'acme-app' },
@@ -413,10 +419,11 @@ describe('createControlServer', () => {
         await listen();
         const { body } = await getJson(port, '/api/devcycle/targets');
         const { targets } = body as { targets: Array<{ repo: string; project: string }> };
-        expect(targets).toContainEqual({ repo: 'acme/app', project: 'acme-app' });
-        expect(targets).toContainEqual({ repo: 'flair-hr/agentops-engine', project: 'engine-managed' });
-        expect(targets).toContainEqual({ repo: 'flair-hr/agentops-platform', project: 'platform' });
-        expect(targets.filter((t) => t.repo === 'flair-hr/agentops-engine')).toHaveLength(1);
+        // sorted by project slug: 'acme-app' before 'engine-managed'; no static entries
+        expect(targets).toEqual([
+          { repo: 'acme/app', project: 'acme-app' },
+          { repo: 'flair-hr/agentops-engine', project: 'engine-managed' },
+        ]);
       });
     });
   });
@@ -471,28 +478,69 @@ async function getJsonWithHeaders(port: number, path: string, headers: Record<st
 function createFakeStore() {
   // In-memory managed-project table -- same shape control relies on
   // (get/getByProject/list/upsert/remove). control never decrypts, so the
-  // "encrypted token" here is just a placeholder string.
-  const rows: Array<ManagedProject & { _token: string }> = [];
+  // "encrypted token"s here are just placeholder strings. Not a re-test of
+  // PostgresManagedProjectStore's own business rules (see
+  // postgres-managed-project-store.test.ts) -- just enough fidelity for
+  // control's HTTP-routing/auth/error-shape tests.
+  interface FakeRow {
+    id: string;
+    project: string;
+    repo: string;
+    trackerType: 'github' | 'linear';
+    config: unknown;
+    createdAt: string;
+    updatedAt: string;
+    _token: string;
+    linearTeamKey?: string;
+    linearTriggerLabelId?: string;
+    _linearToken?: string;
+  }
+  const rows: FakeRow[] = [];
   let nextId = 1;
-  function stripToken(row: ManagedProject & { _token: string }): ManagedProject {
-    const { _token, ...rest } = row;
-    return rest;
+  function toManagedProject(row: FakeRow): ManagedProject {
+    const base = {
+      id: row.id,
+      project: row.project,
+      repo: row.repo,
+      credentialSet: true,
+      config: (row.config ?? null) as ManagedProject['config'],
+      createdAt: row.createdAt,
+      updatedAt: row.updatedAt,
+    };
+    if (row.trackerType === 'linear') {
+      return {
+        ...base,
+        trackerType: 'linear',
+        linearTeamKey: row.linearTeamKey!,
+        linearTriggerLabelId: row.linearTriggerLabelId!,
+        linearCredentialSet: Boolean(row._linearToken),
+      };
+    }
+    return { ...base, trackerType: 'github' };
   }
   return {
     async get(repo: string) {
       const row = rows.find((r) => r.repo === repo);
-      return row ? stripToken(row) : null;
+      return row ? toManagedProject(row) : null;
     },
     async getByProject(project: string) {
       const row = rows.find((r) => r.project === project);
-      return row ? stripToken(row) : null;
+      return row ? toManagedProject(row) : null;
+    },
+    async getByLinearTeamKey(teamKey: string) {
+      const row = rows.find((r) => r.linearTeamKey === teamKey);
+      return row ? toManagedProject(row) : null;
     },
     async list() {
-      return [...rows].sort((a, b) => a.project.localeCompare(b.project)).map(stripToken);
+      return [...rows].sort((a, b) => a.project.localeCompare(b.project)).map(toManagedProject);
     },
     async upsert(input: UpsertManagedProjectRequest, _publicKey: string) {
       const existingIndex = rows.findIndex((r) => r.repo === input.repo);
       const now = new Date().toISOString();
+      const trackerType = existingIndex >= 0 ? rows[existingIndex].trackerType : input.trackerType ?? 'github';
+      if (existingIndex >= 0 && trackerType !== 'linear' && (input.linearTeamKey || input.linearTriggerLabelId || input.linearToken)) {
+        throw new Error(`project "${input.repo}" is not linear-tracked -- cannot set linear fields on it`);
+      }
       if (existingIndex >= 0) {
         const existing = rows[existingIndex];
         rows[existingIndex] = {
@@ -500,28 +548,34 @@ function createFakeStore() {
           project: input.project,
           config: input.config === undefined ? existing.config : input.config,
           _token: input.token ?? existing._token,
+          linearTeamKey: input.linearTeamKey ?? existing.linearTeamKey,
+          linearTriggerLabelId: input.linearTriggerLabelId ?? existing.linearTriggerLabelId,
+          _linearToken: input.linearToken ?? existing._linearToken,
           updatedAt: now,
         };
-        return stripToken(rows[existingIndex]);
+        return toManagedProject(rows[existingIndex]);
       }
-      const row = {
+      const row: FakeRow = {
         id: String(nextId++),
         project: input.project,
         repo: input.repo,
-        credentialSet: true,
+        trackerType,
         config: input.config ?? null,
         createdAt: now,
         updatedAt: now,
         _token: input.token ?? '',
+        linearTeamKey: input.linearTeamKey,
+        linearTriggerLabelId: input.linearTriggerLabelId,
+        _linearToken: input.linearToken,
       };
       rows.push(row);
-      return stripToken(row);
+      return toManagedProject(row);
     },
     async remove(repo: string) {
       const i = rows.findIndex((r) => r.repo === repo);
       if (i >= 0) rows.splice(i, 1);
     },
-  } as never;
+  } as unknown as PostgresManagedProjectStore;
 }
 
 const CRUD_TOKEN = 'crud-secret';
@@ -549,7 +603,6 @@ describe('createControlServer managed-project CRUD', () => {
       taskQueue: 'agentops-devcycle',
       namespace: 'default',
       temporalUiBaseUrl: 'https://temporal.example',
-      registryEntries: [],
       managedProjectStore: createFakeStore(),
       projectCredentialPublicKey: publicKey,
       projectCrudAuthToken: CRUD_TOKEN,
@@ -613,6 +666,108 @@ describe('createControlServer managed-project CRUD', () => {
       body: JSON.stringify({ project: 'acme-web', repo: 'acme/other', token: 'ghp_b' }),
     });
     expect(res.status).toBe(409);
+  });
+
+  it('POST creates a linear-tracked project with all linear fields', async () => {
+    await listen();
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({
+        project: 'acme-linear',
+        repo: 'acme/linear-tracked',
+        token: 'ghp_secret',
+        trackerType: 'linear',
+        linearTeamKey: 'ENG',
+        linearTriggerLabelId: 'label-uuid',
+        linearToken: 'lin_secret',
+      }),
+    });
+    const created = (await res.json()) as Record<string, unknown>;
+    expect(res.status).toBe(201);
+    expect(created).toMatchObject({ trackerType: 'linear', linearTeamKey: 'ENG', linearCredentialSet: true });
+    expect(created.linearToken).toBeUndefined();
+  });
+
+  it('POST 400s a linear-tracked create missing a linear field', async () => {
+    await listen();
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({ project: 'acme-linear', repo: 'acme/linear-tracked', token: 'ghp_secret', trackerType: 'linear' }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it('POST 409s on a duplicate linearTeamKey across two different projects', async () => {
+    await listen();
+    await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({
+        project: 'acme-linear-a',
+        repo: 'acme/linear-a',
+        token: 'ghp_a',
+        trackerType: 'linear',
+        linearTeamKey: 'ENG',
+        linearTriggerLabelId: '11111111-1111-1111-1111-111111111111',
+        linearToken: 'lin_a',
+      }),
+    });
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({
+        project: 'acme-linear-b',
+        repo: 'acme/linear-b',
+        token: 'ghp_b',
+        trackerType: 'linear',
+        linearTeamKey: 'ENG',
+        linearTriggerLabelId: '22222222-2222-2222-2222-222222222222',
+        linearToken: 'lin_b',
+      }),
+    });
+    expect(res.status).toBe(409);
+  });
+
+  it('PUT rotates a linear-tracked project token independently of the github token', async () => {
+    await listen();
+    await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({
+        project: 'acme-linear',
+        repo: 'acme/linear-tracked',
+        token: 'ghp_secret',
+        trackerType: 'linear',
+        linearTeamKey: 'ENG',
+        linearTriggerLabelId: 'label-uuid',
+        linearToken: 'lin_old',
+      }),
+    });
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects/${encodeURIComponent('acme/linear-tracked')}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({ linearToken: 'lin_new' }),
+    });
+    const updated = (await res.json()) as Record<string, unknown>;
+    expect(res.status).toBe(200);
+    expect(updated.trackerType).toBe('linear');
+  });
+
+  it('PUT 400s when setting linear fields on a github-tracked project', async () => {
+    await listen();
+    await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_a' }),
+    });
+    const res = await fetch(`http://127.0.0.1:${port}/api/projects/${encodeURIComponent('acme/web')}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
+      body: JSON.stringify({ linearTeamKey: 'ENG' }),
+    });
+    expect(res.status).toBe(400);
   });
 
   it('GET /api/projects lists created projects (repo URL-decoded path is tested via show)', async () => {

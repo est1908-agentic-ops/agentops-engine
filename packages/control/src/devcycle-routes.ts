@@ -13,16 +13,18 @@ import { devCycle } from '@agentops/workflows';
 import type { ControlDeps } from './create-control-server';
 import { listRunsByType, memoPrompt, readJsonBody, type HandlerResponse } from './handler-util';
 
-// Managed store first (DB-registered projects take precedence, same order as
-// the worker's registry merge), then the static PROJECT_REGISTRY_JSON entries.
+// Managed store only -- the static PROJECT_REGISTRY_JSON registry this
+// fell back to no longer exists (see the Linear trigger design doc's DB-only
+// addendum). The store normalizes the repo internally (normalizeRepo), so
+// URL- and short-form identifiers are interchangeable. No store configured
+// (or repo not registered) means we cannot start/resolve -> callers surface
+// a 422, exactly like the worker's registry lookup.
 async function resolveProjectSlug(deps: ControlDeps, repo: string): Promise<string | undefined> {
-  if (deps.managedProjectStore) {
-    const managed = await deps.managedProjectStore.get(repo);
-    if (managed) {
-      return managed.project;
-    }
+  if (!deps.managedProjectStore) {
+    return undefined;
   }
-  return deps.registryEntries.find((entry) => entry.repo === repo)?.project;
+  const managed = await deps.managedProjectStore.get(repo);
+  return managed?.project;
 }
 
 export async function handleStartDevCycleRun(deps: ControlDeps, req: IncomingMessage): Promise<HandlerResponse> {
@@ -122,14 +124,11 @@ export async function handleGetDevCycleRun(deps: ControlDeps, workflowId: string
 export async function handleListDevCycleTargets(deps: ControlDeps): Promise<HandlerResponse> {
   // Identity only (repo + project slug) -- never credentials or config, so
   // this is safe to serve ungated, exactly like /api/registry/repos. The
-  // CRUD token keeps guarding everything that touches credentials.
-  const managed = deps.managedProjectStore ? await deps.managedProjectStore.list() : [];
-  const targets = managed.map((row) => ({ repo: row.repo, project: row.project }));
-  for (const entry of deps.registryEntries) {
-    if (!targets.some((target) => target.repo === entry.repo)) {
-      targets.push({ repo: entry.repo, project: entry.project });
-    }
-  }
+  // CRUD token keeps guarding everything that touches credentials. Source is
+  // the managed-project store only (DB-only design).
+  const targets = deps.managedProjectStore
+    ? (await deps.managedProjectStore.list()).map((row) => ({ repo: row.repo, project: row.project }))
+    : [];
   targets.sort((a, b) => a.project.localeCompare(b.project));
   return { status: 200, body: DevCycleTargetsResponseSchema.parse({ targets }) };
 }

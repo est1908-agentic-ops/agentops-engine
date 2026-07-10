@@ -8,7 +8,7 @@ export * from './verdict';
 export * from './agent-run';
 export * from './run-stats';
 export * from './pr-feedback';
-export * from './project-registry';
+export * from './resolved-project-entry';
 export * from './managed-project';
 export * from './platform-agent';
 export * from './control-api';

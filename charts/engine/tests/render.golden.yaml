@@ -204,8 +204,6 @@ spec:
               value: "gitactions.est1908.top/agentic-ops/agent-runner:CHANGEME"
             - name: AGENT_RUNNER_UID
               value: "1000"
-            - name: PROJECT_REGISTRY_JSON
-              value: "[]"
             - name: CLAUDE_AUTH_SECRET_NAME
               value: "claude-credentials"
             - name: PI_AUTH_SECRET_NAME
@@ -293,8 +291,6 @@ spec:
                 secretKeyRef:
                   name: gateway-webhook-secret
                   key: GITHUB_WEBHOOK_SECRET
-            - name: PROJECT_REGISTRY_JSON
-              value: "[]"
           resources:
             limits:
               cpu: 500m

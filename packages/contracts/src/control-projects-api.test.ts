@@ -30,6 +30,31 @@ describe('CreateManagedProjectRequestSchema', () => {
     const parsed = CreateManagedProjectRequestSchema.parse({ project: 'acme-web', repo: 'acme/web', token: 'ghp_abc', config });
     expect(parsed.config?.brakes.maxTokens).toBe(200_000);
   });
+
+  it('defaults trackerType to github when omitted', () => {
+    const parsed = CreateManagedProjectRequestSchema.parse({ project: 'acme-web', repo: 'acme/web', token: 'ghp_abc' });
+    expect(parsed.trackerType).toBe('github');
+  });
+
+  it('accepts a linear-tracked create with all linear fields present', () => {
+    const parsed = CreateManagedProjectRequestSchema.parse({
+      project: 'acme-web',
+      repo: 'acme/web',
+      token: 'ghp_abc',
+      trackerType: 'linear',
+      linearTeamKey: 'ENG',
+      linearTriggerLabelId: 'label-uuid',
+      linearToken: 'lin_fake',
+    });
+    expect(parsed.linearTeamKey).toBe('ENG');
+  });
+
+  it('rejects a linear-tracked create missing any linear field', () => {
+    const base = { project: 'acme-web', repo: 'acme/web', token: 'ghp_abc', trackerType: 'linear' as const };
+    expect(() => CreateManagedProjectRequestSchema.parse({ ...base, linearTriggerLabelId: 'x', linearToken: 'y' })).toThrow();
+    expect(() => CreateManagedProjectRequestSchema.parse({ ...base, linearTeamKey: 'ENG', linearToken: 'y' })).toThrow();
+    expect(() => CreateManagedProjectRequestSchema.parse({ ...base, linearTeamKey: 'ENG', linearTriggerLabelId: 'x' })).toThrow();
+  });
 });
 
 describe('UpdateManagedProjectRequestSchema', () => {
@@ -67,6 +92,7 @@ describe('ManagedProjectListResponseSchema', () => {
         id: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
         project: 'acme-web',
         repo: 'acme/web',
+        trackerType: 'github',
         credentialSet: true,
         config: null,
         createdAt: '2026-07-08T12:00:00.000Z',
@@ -77,5 +103,35 @@ describe('ManagedProjectListResponseSchema', () => {
     expect(parsed[0].credentialSet).toBe(true);
     expect((parsed[0] as unknown as Record<string, unknown>).token).toBeUndefined();
     expect((parsed[0] as unknown as Record<string, unknown>).encryptedToken).toBeUndefined();
+  });
+
+  it('parses a mixed list of github- and linear-tracked projects', () => {
+    const parsed = ManagedProjectListResponseSchema.parse([
+      {
+        id: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+        project: 'acme-web',
+        repo: 'acme/web',
+        trackerType: 'github',
+        credentialSet: true,
+        config: null,
+        createdAt: '2026-07-08T12:00:00.000Z',
+        updatedAt: '2026-07-08T12:00:00.000Z',
+      },
+      {
+        id: '4fa85f64-5717-4562-b3fc-2c963f66afa7',
+        project: 'acme-linear',
+        repo: 'acme/linear-tracked',
+        trackerType: 'linear',
+        linearTeamKey: 'ENG',
+        linearTriggerLabelId: 'label-uuid',
+        credentialSet: true,
+        linearCredentialSet: true,
+        config: null,
+        createdAt: '2026-07-08T12:00:00.000Z',
+        updatedAt: '2026-07-08T12:00:00.000Z',
+      },
+    ]);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[1].trackerType).toBe('linear');
   });
 });

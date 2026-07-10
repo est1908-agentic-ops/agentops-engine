@@ -24,8 +24,9 @@ export async function startDevCycleForIssue(
   // rejects starting one while the previous run is still open — which is
   // exactly the dedupe behavior a redelivered webhook needs.
   //
-  // Keyed by `project`, not `event.repo`: the registry (parseProjectRegistry)
-  // already guarantees project names are unique, whereas naively collapsing
+  // Keyed by `project`, not `event.repo`: the managed project registry's
+  // UNIQUE constraint on `project` already guarantees project names are
+  // unique, whereas naively collapsing
   // "owner/repo" into "owner-repo" is lossy and can collide across two
   // distinct registered repos (e.g. "foo-bar/baz" and "foo/bar-baz" both
   // become "foo-bar-baz"), which would silently swallow one project's events.

@@ -4,29 +4,40 @@ import { generateManagedProjectKeyPair, decryptForManagedProject } from './crede
 import { PostgresManagedProjectStore } from './postgres-managed-project-store';
 import type { Queryable } from './postgres-stats-store';
 
+interface FakeRow {
+  id: string;
+  project: string;
+  repo: string;
+  encrypted_token: string;
+  tracker_type: string;
+  encrypted_linear_token: string | null;
+  linear_team_key: string | null;
+  linear_trigger_label_id: string | null;
+  config: unknown;
+  created_at: Date;
+  updated_at: Date;
+}
+
 // A tiny fake Postgres that's just enough to exercise INSERT/SELECT/UPDATE/
 // DELETE/ON CONFLICT for this one table -- not a general SQL engine.
 function createFakeDb(): Queryable {
-  const rows: Array<{
-    id: string;
-    project: string;
-    repo: string;
-    encrypted_token: string;
-    config: unknown;
-    created_at: Date;
-    updated_at: Date;
-  }> = [];
+  const rows: FakeRow[] = [];
 
   return {
     async query(sql: string, params: unknown[] = []) {
       const normalized = sql.replace(/\s+/g, ' ').trim();
 
-      if (normalized.startsWith('CREATE TABLE')) {
+      if (normalized.startsWith('CREATE TABLE') || normalized.startsWith('ALTER TABLE') || normalized.startsWith('CREATE UNIQUE INDEX')) {
         return { rows: [] };
       }
       if (normalized.startsWith('SELECT * FROM managed_projects WHERE project')) {
         const [project] = params as [string];
         const found = rows.filter((r) => r.project === project);
+        return { rows: found };
+      }
+      if (normalized.startsWith('SELECT * FROM managed_projects WHERE linear_team_key')) {
+        const [teamKey] = params as [string];
+        const found = rows.filter((r) => r.linear_team_key === teamKey);
         return { rows: found };
       }
       if (normalized.startsWith('SELECT * FROM managed_projects WHERE repo')) {
@@ -37,21 +48,45 @@ function createFakeDb(): Queryable {
       if (normalized.startsWith('SELECT * FROM managed_projects ORDER BY project')) {
         return { rows: [...rows].sort((a, b) => a.project.localeCompare(b.project)) };
       }
+      // getRow scans the whole (small) table and matches on the normalized repo
+      // form in JS -- see PostgresManagedProjectStore.getRow.
+      if (normalized === 'SELECT * FROM managed_projects') {
+        return { rows: [...rows] };
+      }
       if (normalized.startsWith('INSERT INTO managed_projects')) {
-        const [project, repo, encryptedToken, config] = params as [string, string, string, unknown];
+        const [project, repo, encryptedToken, config, trackerType, encryptedLinearToken, linearTeamKey, linearTriggerLabelId] = params as [
+          string,
+          string,
+          string,
+          unknown,
+          string,
+          string | null,
+          string | null,
+          string | null,
+        ];
         const existingIndex = rows.findIndex((r) => r.repo === repo);
         const now = new Date();
+        const patch = {
+          project,
+          encrypted_token: encryptedToken,
+          config,
+          tracker_type: trackerType,
+          encrypted_linear_token: encryptedLinearToken,
+          linear_team_key: linearTeamKey,
+          linear_trigger_label_id: linearTriggerLabelId,
+          updated_at: now,
+        };
         if (existingIndex >= 0) {
-          rows[existingIndex] = { ...rows[existingIndex], project, encrypted_token: encryptedToken, config, updated_at: now };
+          rows[existingIndex] = { ...rows[existingIndex], ...patch };
           return { rows: [rows[existingIndex]] };
         }
-        const row = { id: randomUUID(), project, repo, encrypted_token: encryptedToken, config, created_at: now, updated_at: now };
+        const row: FakeRow = { id: randomUUID(), repo, created_at: now, ...patch };
         rows.push(row);
         return { rows: [row] };
       }
       if (normalized.startsWith('DELETE FROM managed_projects')) {
-        const [repo] = params as [string];
-        const index = rows.findIndex((r) => r.repo === repo);
+        const [id] = params as [string]; // remove() deletes by primary key, resolved via getRow
+        const index = rows.findIndex((r) => r.id === id);
         if (index >= 0) {
           rows.splice(index, 1);
         }
@@ -154,5 +189,161 @@ describe('PostgresManagedProjectStore', () => {
 
     expect((await store.getByProject('acme-web'))?.repo).toBe('acme/web');
     expect(await store.getByProject('nope')).toBeNull();
+  });
+
+  // A managed project registered through the console/API can be stored with a
+  // full GitHub URL, but the gateway looks it up by the short `owner/repo` form
+  // from the webhook payload. Every repo lookup must match across those forms
+  // regardless of which one is stored -- otherwise a labeled issue is silently
+  // dropped with `no project registered for repo "..."`.
+  describe('repo lookups are form-insensitive (URL vs owner/repo)', () => {
+    it('resolves a URL-stored project when queried by the short owner/repo form', async () => {
+      const store = new PostgresManagedProjectStore(createFakeDb());
+      const { publicKey } = generateManagedProjectKeyPair();
+      await store.upsert({ project: 'acme-web', repo: 'https://github.com/acme/web', token: 'ghp_abc' }, publicKey);
+
+      expect((await store.get('acme/web'))?.project).toBe('acme-web');
+      expect(await store.getEncryptedToken('acme/web')).not.toBeNull();
+    });
+
+    it('resolves a short-form project when queried by a full URL (and .git / SSH forms)', async () => {
+      const store = new PostgresManagedProjectStore(createFakeDb());
+      const { publicKey } = generateManagedProjectKeyPair();
+      await store.upsert({ project: 'acme-web', repo: 'acme/web', token: 'ghp_abc' }, publicKey);
+
+      expect((await store.get('https://github.com/acme/web'))?.project).toBe('acme-web');
+      expect((await store.get('https://github.com/acme/web.git'))?.project).toBe('acme-web');
+      expect((await store.get('git@github.com:acme/web.git'))?.project).toBe('acme-web');
+    });
+
+    it('removes a URL-stored project addressed by the short owner/repo form', async () => {
+      const store = new PostgresManagedProjectStore(createFakeDb());
+      const { publicKey } = generateManagedProjectKeyPair();
+      await store.upsert({ project: 'acme-web', repo: 'https://github.com/acme/web', token: 'ghp_abc' }, publicKey);
+
+      await store.remove('acme/web');
+
+      expect(await store.get('acme/web')).toBeNull();
+    });
+
+    it('still returns null for a genuinely unregistered repo', async () => {
+      const store = new PostgresManagedProjectStore(createFakeDb());
+      const { publicKey } = generateManagedProjectKeyPair();
+      await store.upsert({ project: 'acme-web', repo: 'https://github.com/acme/web', token: 'ghp_abc' }, publicKey);
+
+      expect(await store.get('acme/other')).toBeNull();
+    });
+  });
+
+  describe('linear-tracked projects', () => {
+    it('creates a linear-tracked project with both credentials', async () => {
+      const store = new PostgresManagedProjectStore(createFakeDb());
+      const { publicKey, privateKey } = generateManagedProjectKeyPair();
+
+      const created = await store.upsert(
+        {
+          project: 'acme-linear',
+          repo: 'acme/linear-tracked',
+          token: 'ghp_abc',
+          trackerType: 'linear',
+          linearTeamKey: 'ENG',
+          linearTriggerLabelId: 'label-uuid',
+          linearToken: 'lin_abc',
+        },
+        publicKey,
+      );
+
+      expect(created.trackerType).toBe('linear');
+      if (created.trackerType === 'linear') {
+        expect(created.linearTeamKey).toBe('ENG');
+        expect(created.linearCredentialSet).toBe(true);
+      }
+      const encryptedLinearToken = await store.getEncryptedLinearToken('acme/linear-tracked');
+      expect(decryptForManagedProject(privateKey, encryptedLinearToken!)).toBe('lin_abc');
+    });
+
+    it('throws when creating a linear-tracked project missing any linear field', async () => {
+      const store = new PostgresManagedProjectStore(createFakeDb());
+      const { publicKey } = generateManagedProjectKeyPair();
+      await expect(
+        store.upsert({ project: 'acme-linear', repo: 'acme/linear-tracked', token: 'ghp_abc', trackerType: 'linear' }, publicKey),
+      ).rejects.toThrow(/linearTeamKey, linearTriggerLabelId, and linearToken are all required/);
+    });
+
+    it('rotates the linear token independently of the github token', async () => {
+      const store = new PostgresManagedProjectStore(createFakeDb());
+      const { publicKey, privateKey } = generateManagedProjectKeyPair();
+      await store.upsert(
+        {
+          project: 'acme-linear',
+          repo: 'acme/linear-tracked',
+          token: 'ghp_abc',
+          trackerType: 'linear',
+          linearTeamKey: 'ENG',
+          linearTriggerLabelId: 'label-uuid',
+          linearToken: 'lin_old',
+        },
+        publicKey,
+      );
+
+      await store.upsert({ project: 'acme-linear', repo: 'acme/linear-tracked', linearToken: 'lin_new' }, publicKey);
+
+      const encryptedGithubToken = await store.getEncryptedToken('acme/linear-tracked');
+      const encryptedLinearToken = await store.getEncryptedLinearToken('acme/linear-tracked');
+      expect(decryptForManagedProject(privateKey, encryptedGithubToken!)).toBe('ghp_abc'); // unchanged
+      expect(decryptForManagedProject(privateKey, encryptedLinearToken!)).toBe('lin_new');
+    });
+
+    it('finds a linear-tracked project by its team key', async () => {
+      const store = new PostgresManagedProjectStore(createFakeDb());
+      const { publicKey } = generateManagedProjectKeyPair();
+      await store.upsert(
+        {
+          project: 'acme-linear',
+          repo: 'acme/linear-tracked',
+          token: 'ghp_abc',
+          trackerType: 'linear',
+          linearTeamKey: 'ENG',
+          linearTriggerLabelId: 'label-uuid',
+          linearToken: 'lin_abc',
+        },
+        publicKey,
+      );
+
+      expect((await store.getByLinearTeamKey('ENG'))?.repo).toBe('acme/linear-tracked');
+      expect(await store.getByLinearTeamKey('OTHER')).toBeNull();
+    });
+
+    it('rejects setting linear fields on a github-tracked project', async () => {
+      const store = new PostgresManagedProjectStore(createFakeDb());
+      const { publicKey } = generateManagedProjectKeyPair();
+      await store.upsert({ project: 'acme-web', repo: 'acme/web', token: 'ghp_abc' }, publicKey);
+
+      await expect(store.upsert({ project: 'acme-web', repo: 'acme/web', linearTeamKey: 'ENG' }, publicKey)).rejects.toThrow(
+        /is not linear-tracked/,
+      );
+    });
+
+    it('trackerType is immutable once created, even if input omits/changes it', async () => {
+      const store = new PostgresManagedProjectStore(createFakeDb());
+      const { publicKey } = generateManagedProjectKeyPair();
+      await store.upsert(
+        {
+          project: 'acme-linear',
+          repo: 'acme/linear-tracked',
+          token: 'ghp_abc',
+          trackerType: 'linear',
+          linearTeamKey: 'ENG',
+          linearTriggerLabelId: 'label-uuid',
+          linearToken: 'lin_abc',
+        },
+        publicKey,
+      );
+
+      // Default trackerType ('github') on this update input must not override the existing row's tracker.
+      const updated = await store.upsert({ project: 'acme-linear', repo: 'acme/linear-tracked', config: null }, publicKey);
+
+      expect(updated.trackerType).toBe('linear');
+    });
   });
 });

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MemoryWorkspaceManager, WorkspaceManager } from '@agentops/activities';
 import { MemoryScmPort, MemoryTrackerPort } from '@agentops/ports';
-import { assertLiveBackendConfig, buildActivityDependencies, mergeStaticAndManagedRegistries, resolveWorkspacesDir } from './main';
+import { assertLiveBackendConfig, buildActivityDependencies, resolveWorkspacesDir } from './main';
 
 const validLiveEnv: NodeJS.ProcessEnv = {
   AGENT_RUNNER_IMAGE: 'gitactions.est1908.top/agentic-ops/agent-runner:abc123',
@@ -51,9 +51,7 @@ describe('assertLiveBackendConfig', () => {
   });
 });
 
-const registry = [
-  { project: 'demo', repo: 'octocat/demo', trackerType: 'github' as const, tokenEnvVar: 'GITHUB_TOKEN__DEMO', token: 'fake-token' },
-];
+const registry = [{ project: 'demo', repo: 'octocat/demo', trackerType: 'github' as const, token: 'fake-token' }];
 
 describe('buildActivityDependencies', () => {
   it('uses in-memory ports and workspace manager when the registry is empty', () => {
@@ -70,6 +68,46 @@ describe('buildActivityDependencies', () => {
     expect(deps.scm).not.toBeInstanceOf(MemoryScmPort);
     expect(deps.tracker).not.toBeInstanceOf(MemoryTrackerPort);
     expect(deps.workspaces).toBeInstanceOf(WorkspaceManager);
+  });
+
+  it('builds a LinearTrackerPort for a linear-tracked entry, still with a GitHub-backed scm', () => {
+    const linearRegistry = [
+      {
+        project: 'project-linear',
+        repo: 'octocat/linear-demo',
+        trackerType: 'linear' as const,
+        linearTeamKey: 'ENG',
+        linearTriggerLabelId: 'label-uuid',
+        token: 'ghp_fake',
+        linearToken: 'lin_fake',
+      },
+    ];
+
+    const deps = buildActivityDependencies(linearRegistry);
+
+    // The dispatch-by-ref-shape logic itself (github repo vs. linear team key)
+    // is covered by project-scoped-ports's own tests; this just confirms the
+    // worker's wiring builds a working, non-memory tracker/scm for a linear
+    // entry without throwing.
+    expect(deps.tracker).not.toBeInstanceOf(MemoryTrackerPort);
+    expect(deps.scm).not.toBeInstanceOf(MemoryScmPort);
+  });
+
+  it('throws a clear error when a linear entry is missing its resolved linearToken', () => {
+    // Deliberately missing linearToken (a defensive runtime guard, not a
+    // type-system-enforceable case) -- cast past the type to construct it.
+    const linearRegistryWithoutToken = [
+      {
+        project: 'project-linear',
+        repo: 'octocat/linear-demo',
+        trackerType: 'linear' as const,
+        linearTeamKey: 'ENG',
+        linearTriggerLabelId: 'label-uuid',
+        token: 'ghp_fake',
+      },
+    ] as unknown as Parameters<typeof buildActivityDependencies>[0];
+
+    expect(() => buildActivityDependencies(linearRegistryWithoutToken)).toThrow(/no resolved linearToken/);
   });
 
   describe('workspacesDir wiring', () => {
@@ -113,27 +151,5 @@ describe('resolveWorkspacesDir', () => {
 
   it('resolves to undefined outside the cluster, so WorkspaceManager keeps its home-dir default', () => {
     expect(resolveWorkspacesDir(false)).toBeUndefined();
-  });
-});
-
-describe('mergeStaticAndManagedRegistries', () => {
-  it('returns the static registry unchanged when there are no managed projects', () => {
-    const staticEntry = { project: 'legacy', repo: 'acme/legacy', trackerType: 'github' as const, tokenEnvVar: 'X', token: 'static' };
-    expect(mergeStaticAndManagedRegistries([staticEntry], [])).toEqual([staticEntry]);
-  });
-
-  it('includes managed projects alongside distinct static entries', () => {
-    const staticEntry = { project: 'legacy', repo: 'acme/legacy', trackerType: 'github' as const, tokenEnvVar: 'X', token: 'static' };
-    const managedEntry = { project: 'acme-web', repo: 'acme/web', trackerType: 'github' as const, tokenEnvVar: 'Y', token: 'db' };
-    const merged = mergeStaticAndManagedRegistries([staticEntry], [managedEntry]);
-    expect(merged).toHaveLength(2);
-    expect(merged).toEqual(expect.arrayContaining([staticEntry, managedEntry]));
-  });
-
-  it('lets a managed project win over a static entry for the same repo', () => {
-    const staticEntry = { project: 'old-name', repo: 'acme/web', trackerType: 'github' as const, tokenEnvVar: 'X', token: 'static' };
-    const managedEntry = { project: 'acme-web', repo: 'acme/web', trackerType: 'github' as const, tokenEnvVar: 'Y', token: 'db' };
-    const merged = mergeStaticAndManagedRegistries([staticEntry], [managedEntry]);
-    expect(merged).toEqual([managedEntry]);
   });
 });

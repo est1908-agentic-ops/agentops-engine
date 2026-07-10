@@ -1,16 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { encryptForManagedProject, generateManagedProjectKeyPair, loadProjectConfig, type PostgresManagedProjectStore } from '@agentops/activities';
 import { GithubScmPort, MemoryScmPort } from '@agentops/ports';
-import {
-  buildControlRequest,
-  buildStartScmPort,
-  buildStartScmPortWithManagedProjects,
-  cmdProject,
-  controlBaseUrl,
-  controlCrudHeaders,
-  parseFlags,
-  seedDemoAgentopsConfig,
-} from './main';
+import { buildControlRequest, buildStartScmPort, cmdProject, controlBaseUrl, controlCrudHeaders, parseFlags, seedDemoAgentopsConfig } from './main';
 
 describe('seedDemoAgentopsConfig', () => {
   it('produces a config that keeps every stage on the stub backend', async () => {
@@ -42,91 +33,58 @@ describe('parseFlags', () => {
 });
 
 describe('buildStartScmPort', () => {
-  it('returns a seeded MemoryScmPort when the registry is empty', async () => {
-    const scm = buildStartScmPort([], 'demo', 'demo/repo');
+  it('returns a seeded MemoryScmPort when no managed-project DB is configured', async () => {
+    const scm = await buildStartScmPort(undefined, 'demo', 'demo/repo');
 
     expect(scm).toBeInstanceOf(MemoryScmPort);
     const config = await loadProjectConfig(scm, 'demo/repo');
     expect(config.routing.implement).toEqual({ backend: 'stub', model: 'stub-v1' });
   });
 
-  it('returns a GithubScmPort for a repo registered under the given project', () => {
-    const registry = [
-      {
-        project: 'my-project',
-        repo: 'octocat/demo',
-        trackerType: 'github' as const,
-        tokenEnvVar: 'GITHUB_TOKEN__MY_PROJECT',
-        token: 'fake-token',
+  it('returns a GithubScmPort for a repo registered under the given project', async () => {
+    const { publicKey, privateKey } = generateManagedProjectKeyPair();
+    const store = {
+      async get(repo: string) {
+        return repo === 'octocat/demo' ? { id: '1', project: 'my-project', repo, credentialSet: true, config: null, createdAt: '', updatedAt: '' } : null;
       },
-    ];
+      async getEncryptedToken(repo: string) {
+        return repo === 'octocat/demo' ? encryptForManagedProject(publicKey, 'fake-token') : null;
+      },
+    } as unknown as PostgresManagedProjectStore;
 
-    const scm = buildStartScmPort(registry, 'my-project', 'octocat/demo');
+    const scm = await buildStartScmPort({ store, privateKey }, 'my-project', 'octocat/demo');
 
     expect(scm).toBeInstanceOf(GithubScmPort);
   });
 
-  it('throws when the repo is not registered', () => {
-    const registry = [
-      {
-        project: 'my-project',
-        repo: 'octocat/demo',
-        trackerType: 'github' as const,
-        tokenEnvVar: 'GITHUB_TOKEN__MY_PROJECT',
-        token: 'fake-token',
-      },
-    ];
-
-    expect(() => buildStartScmPort(registry, 'my-project', 'octocat/other')).toThrow(/no project registered/);
-  });
-
-  it('throws when the repo is registered under a different project', () => {
-    const registry = [
-      {
-        project: 'my-project',
-        repo: 'octocat/demo',
-        trackerType: 'github' as const,
-        tokenEnvVar: 'GITHUB_TOKEN__MY_PROJECT',
-        token: 'fake-token',
-      },
-    ];
-
-    expect(() => buildStartScmPort(registry, 'wrong-project', 'octocat/demo')).toThrow(
-      /registered under project "my-project"/,
-    );
-  });
-});
-
-describe('buildStartScmPortWithManagedProjects', () => {
-  it('builds a GithubScmPort from a DB-registered project when the static registry has nothing', async () => {
-    const { publicKey, privateKey } = generateManagedProjectKeyPair();
+  it('throws when the repo is not registered', async () => {
     const store = {
-      async get(repo: string) {
-        return repo === 'acme/web' ? { id: '1', project: 'acme-web', repo, credentialSet: true, config: null, createdAt: '', updatedAt: '' } : null;
+      async get() {
+        return null;
       },
-      async getEncryptedToken(repo: string) {
-        return repo === 'acme/web' ? encryptForManagedProject(publicKey, 'db-token') : null;
+      async getEncryptedToken() {
+        return null;
       },
     } as unknown as PostgresManagedProjectStore;
 
-    const scm = await buildStartScmPortWithManagedProjects({ store, privateKey }, [], 'acme-web', 'acme/web');
-
-    expect(scm).toBeDefined(); // real assertion: doesn't throw "no project registered", proving the DB path was used
-  });
-
-  it('falls back to the static registry when the repo is not DB-managed', async () => {
-    const registry = [{ project: 'legacy', repo: 'acme/legacy', trackerType: 'github' as const, tokenEnvVar: 'X', token: 'static-token' }];
-    const store = { async get() { return null; }, async getEncryptedToken() { return null; } } as unknown as PostgresManagedProjectStore;
-
-    const scm = await buildStartScmPortWithManagedProjects({ store, privateKey: 'unused' }, registry, 'legacy', 'acme/legacy');
-
-    expect(scm).toBeDefined();
-  });
-
-  it('throws when neither the DB nor the static registry has the repo', async () => {
-    const store = { async get() { return null; }, async getEncryptedToken() { return null; } } as unknown as PostgresManagedProjectStore;
-    await expect(buildStartScmPortWithManagedProjects({ store, privateKey: 'unused' }, [], 'nope', 'acme/nope')).rejects.toThrow(
+    await expect(buildStartScmPort({ store, privateKey: 'unused' }, 'my-project', 'octocat/other')).rejects.toThrow(
       /no project registered/,
+    );
+  });
+
+  it('throws when the repo is registered under a different project', async () => {
+    const { publicKey, privateKey } = generateManagedProjectKeyPair();
+    const store = {
+      async get(repo: string) {
+        return repo === 'octocat/demo' ? { id: '1', project: 'my-project', repo, credentialSet: true, config: null, createdAt: '', updatedAt: '' } : null;
+      },
+      async getEncryptedToken(repo: string) {
+        return repo === 'octocat/demo' ? encryptForManagedProject(publicKey, 'fake-token') : null;
+      },
+    } as unknown as PostgresManagedProjectStore;
+
+    await expect(buildStartScmPort({ store, privateKey }, 'wrong-project', 'octocat/demo')).rejects.toThrow(
+      /registered under project "my-project"/,
     );
   });
 });
@@ -173,6 +131,43 @@ describe('engine project (control HTTP client)', () => {
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('http://control.test:3001/api/projects');
     expect(init.method).toBe('POST');
+  });
+
+  it('add passes tracker-type/linear-* flags through to the request body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 201 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await cmdProject([
+      'add',
+      '--project',
+      'acme-linear',
+      '--repo',
+      'acme/linear-tracked',
+      '--token',
+      'ghp_x',
+      '--tracker-type',
+      'linear',
+      '--linear-team-key',
+      'ENG',
+      '--linear-trigger-label-id',
+      'label-uuid',
+      '--linear-token',
+      'lin_x',
+    ]);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body as string)).toMatchObject({
+      trackerType: 'linear',
+      linearTeamKey: 'ENG',
+      linearTriggerLabelId: 'label-uuid',
+      linearToken: 'lin_x',
+    });
+  });
+
+  it('update passes linear-* flags through to the request body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+    await cmdProject(['update', '--repo', 'acme/linear-tracked', '--linear-token', 'lin_new']);
+    const [, init] = fetchMock.mock.calls[0];
+    expect(JSON.parse(init.body as string)).toEqual({ linearToken: 'lin_new' });
   });
 
   it('list GETs /api/projects', async () => {
