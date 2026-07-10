@@ -397,6 +397,7 @@ describe('createActivities — workspace error translation', () => {
       .catch((e) => e);
 
     expect(err).toBeInstanceOf(ApplicationFailure);
+    expect((err as ApplicationFailure).type).toBe('WorkspaceError');
     expect((err as ApplicationFailure).nonRetryable).toBe(false);
   });
 
