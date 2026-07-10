@@ -1,4 +1,5 @@
 import { ManagedProjectSchema, UpsertManagedProjectRequestSchema, type ManagedProject, type UpsertManagedProjectRequest } from '@agentops/contracts';
+import { normalizeRepo } from '@agentops/ports';
 import { encryptForManagedProject } from './credential-crypto';
 import type { Queryable } from './postgres-stats-store';
 
@@ -77,9 +78,23 @@ export class PostgresManagedProjectStore {
     }
   }
 
+  // Match on the canonical `owner/repo` form (normalizeRepo) rather than raw
+  // string equality. A managed project registered through the /api/projects
+  // CRUD can be stored as a full browser/clone URL
+  // ("https://github.com/owner/repo") or SSH URL, but every lookup key -- the
+  // gateway's `event.repo` from a GitHub/Linear webhook, issue refs, the static
+  // PROJECT_REGISTRY_JSON -- is the short form. An exact-match `WHERE repo = $1`
+  // misses those rows and the miss surfaces as `no project registered for repo
+  // "..."`, silently dropping the webhook (a labeled issue never starts a
+  // devCycle). This is the same normalize-both-sides rule createProjectScopedPorts
+  // already applies to the in-memory registry; centralizing it here means every
+  // caller (get / getEncryptedToken / getEncryptedLinearToken / upsert's
+  // existing-row check / remove) inherits it. The table holds one row per
+  // managed project, so the full scan is cheap and needs no data migration.
   private async getRow(repo: string): Promise<ManagedProjectRow | null> {
-    const { rows } = await this.db.query('SELECT * FROM managed_projects WHERE repo = $1', [repo]);
-    return (rows[0] as ManagedProjectRow | undefined) ?? null;
+    const target = normalizeRepo(repo);
+    const { rows } = await this.db.query('SELECT * FROM managed_projects');
+    return (rows as ManagedProjectRow[]).find((row) => normalizeRepo(row.repo) === target) ?? null;
   }
 
   async get(repo: string): Promise<ManagedProject | null> {
@@ -173,6 +188,11 @@ export class PostgresManagedProjectStore {
   }
 
   async remove(repo: string): Promise<void> {
-    await this.db.query('DELETE FROM managed_projects WHERE repo = $1', [repo]);
+    // Resolve via getRow so a short-form arg deletes a URL-stored row (and vice
+    // versa) -- delete by the primary key, not a raw `repo` match.
+    const row = await this.getRow(repo);
+    if (row) {
+      await this.db.query('DELETE FROM managed_projects WHERE id = $1', [row.id]);
+    }
   }
 }
