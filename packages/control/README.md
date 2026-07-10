@@ -18,9 +18,9 @@ TEMPORAL_UI_BASE_URL=http://localhost:8233 pnpm --filter @agentops/control run s
 - `TEMPORAL_ADDRESS` (default `localhost:7233`)
 - `TEMPORAL_NAMESPACE` (default `default`)
 - `TASK_QUEUE` (default `agentops-devcycle`)
-- `PROJECT_REGISTRY_JSON` (optional) — same format the worker/gateway use; only `repo` slugs are read, no tokens required
 - `TEMPORAL_UI_BASE_URL` (required) — e.g. `http://localhost:8233` locally, or the cluster's Temporal Web UI host
 - `PORT` (default `3001`)
+- `ENGINE_DB_HOST`/`PORT`/`NAME`/`USER`/`PASSWORD`, `PROJECT_CREDENTIAL_PUBLIC_KEY`, `CONTROL_CRUD_TOKEN` (all optional together) — enable the `/api/projects` managed-project CRUD routes and the `/api/registry/repos` hint-repos picker (sourced from the managed-project list; empty with no store configured)
 
 ## Production
 

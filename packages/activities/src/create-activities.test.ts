@@ -376,7 +376,11 @@ describe('createActivities — workspace error translation', () => {
     expect((err as ApplicationFailure).nonRetryable).toBe(true);
   });
 
-  it('converts a retryable WorkspaceError into a retryable ApplicationFailure', async () => {
+  it('wraps a retryable WorkspaceError in an ApplicationFailure too, with nonRetryable: false', async () => {
+    // Both retryable and non-retryable WorkspaceErrors must become an
+    // ApplicationFailure -- a raw thrown Error left Temporal unable to tell
+    // retryable activity failures apart from a hung/crashed process, which
+    // caused workflows to hang instead of retrying (fixed alongside this test).
     const deps = buildDeps();
     deps.workspaces = {
       prepare: async () => {
@@ -502,7 +506,6 @@ describe('createActivities — resolveRepoConfig', () => {
         project: 'engine',
         repo: 'flair-hr/agentops-engine',
         trackerType: 'github',
-        tokenEnvVar: 'X',
         token: 'fake',
       },
     ];

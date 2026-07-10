@@ -1,5 +1,4 @@
 export * from './load-env';
-export * from './load-project-registry';
 export * from './stats-store';
 export * from './postgres-stats-store';
 export * from './stage-result-store';

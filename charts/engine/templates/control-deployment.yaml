@@ -37,8 +37,6 @@ spec:
               value: {{ .Values.taskQueue | quote }}
             - name: TEMPORAL_UI_BASE_URL
               value: {{ .Values.temporalUiBaseUrl | quote }}
-            - name: PROJECT_REGISTRY_JSON
-              value: {{ include "engine.projectRegistryJson" . | quote }}
             {{- if .Values.engineDb.host }}
             - name: ENGINE_DB_HOST
               value: {{ .Values.engineDb.host | quote }}

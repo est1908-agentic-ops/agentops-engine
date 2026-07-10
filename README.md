@@ -15,14 +15,22 @@ pnpm lint && pnpm typecheck && pnpm test && pnpm test:policies-coverage && pnpm 
 
 ## Run locally
 
-Requires a running Temporal dev server and `agentops.json` in the target repo. For a real (non-demo) run, register at least one project via a repo-root `.env` file — see [project-registry-design.md](docs/superpowers/specs/2026-07-06-project-registry-design.md):
+Requires a running Temporal dev server, a Postgres instance, and `agentops.json` in the target repo (or a config registered directly on the project). Projects are registered exclusively in the DB-backed managed project registry (`managed_projects` table) — see [managed-project-registry-design.md](docs/superpowers/specs/2026-07-08-managed-project-registry-design.md) and the [Linear trigger design's DB-only addendum](docs/superpowers/specs/2026-07-09-linear-trigger-design.md). Set up the encryption keypair + DB connection in `.env`:
 
 ```
-PROJECT_REGISTRY_JSON=[{"project":"my-project","repo":"owner/repo","trackerType":"github","tokenEnvVar":"GITHUB_TOKEN__MY_PROJECT"}]
-GITHUB_TOKEN__MY_PROJECT=ghp_xxx
+ENGINE_DB_HOST=localhost
+PROJECT_CREDENTIAL_PRIVATE_KEY=<base64 PKCS8 DER, from generateManagedProjectKeyPair()>
+PROJECT_CREDENTIAL_PUBLIC_KEY=<base64 SPKI DER, same keypair>
+CONTROL_CRUD_TOKEN=dev-token
 ```
 
-No `.env` at all → DEMO mode (in-memory ports + stub backend, no tokens spent). `--project` must match the registered project for the given `--repo` once a registry is configured.
+Then register a project through `control`'s API (the CLI is a thin HTTP client of it):
+
+```bash
+pnpm engine project add --project my-project --repo owner/repo --token ghp_xxx
+```
+
+No DB configured at all → DEMO mode (in-memory ports + stub backend, no tokens spent). `--project` must match the registered project for the given `--repo` once one is registered.
 
 ```bash
 # terminal 1
@@ -31,7 +39,10 @@ temporal server start-dev
 # terminal 2
 pnpm worker
 
-# terminal 3
+# terminal 3 (control, for the `engine project` commands above)
+pnpm --filter @agentops/control run start
+
+# terminal 4
 pnpm engine start \
   --issue owner/repo#42 --repo owner/repo --project my-project --goal "..."
 ```
@@ -40,7 +51,7 @@ pnpm engine start \
 
 Add the **`agentops`** label to an issue on a registered repo to start `devCycle` automatically — no CLI command. The [gateway](packages/gateway/README.md) handles GitHub `issues` / `labeled` webhooks and starts the same workflow as `engine start` (`goal` = issue title). Override the trigger label with `TRIGGER_LABEL` (default `agentops`).
 
-Requires worker + Temporal (above), `PROJECT_REGISTRY_JSON`, and the gateway running with `GITHUB_WEBHOOK_SECRET`:
+Requires worker + Temporal (above), a project registered via `engine project add`, and the gateway running with `GITHUB_WEBHOOK_SECRET`:
 
 ```bash
 # terminal 3 (instead of engine start)
@@ -60,6 +71,42 @@ pnpm engine signal <task-id> resume
 ```
 
 **Opens a real PR and spends real tokens** — use a disposable test repo and check routing in `agentops.json` first.
+
+### Start via Linear label
+
+Linear issues start `devCycle` the same way GitHub issues do — by adding a label — but the wiring differs because Linear's webhook payload carries label *IDs* (UUIDs), not names. There is no GitHub-style `TRIGGER_LABEL` default: each Linear-tracked project is configured with its own trigger-label UUID (`linearTriggerLabelId`).
+
+A Linear-tracked project still needs a GitHub repo + token (SCM stays GitHub-only — the PR lands in a GitHub repo regardless of which tracker filed the task). Register one with:
+
+```bash
+pnpm engine project add \
+  --project my-project \
+  --repo owner/repo \
+  --token ghp_xxx \
+  --tracker-type linear \
+  --linear-team-key ENG \
+  --linear-trigger-label-id <label-uuid> \
+  --linear-token lin_api_xxx
+```
+
+- `--tracker-type linear` switches this project off the GitHub webhook path onto the Linear one (immutable once set — changing tracker means `engine project remove` + re-add).
+- `--linear-team-key` is the prefix of every issue identifier in the team (`ENG-123` → `ENG`). The gateway routes a webhook to this project by matching it.
+- `--linear-trigger-label-id` is the Linear label **UUID**, not its name. Find it once via Linear's GraphQL API (query `teams { labels { nodes { id name } } }`) or the label's settings URL. This is a one-time manual step, the same shape as configuring a webhook secret.
+- `--linear-token` is a Linear API key (`lin_api_…`) used to read the issue and post the PR link back as a comment.
+
+Then run the gateway with `LINEAR_WEBHOOK_SECRET` set (the route 404s entirely when it's unset — a deployment with no Linear projects needs no new secret):
+
+```bash
+GITHUB_WEBHOOK_SECRET=gh-secret \
+LINEAR_WEBHOOK_SECRET=lin-secret \
+pnpm --filter @agentops/gateway run start
+```
+
+In Linear, register a workspace webhook pointing at `POST https://<gateway-host>/webhooks/linear` with the same shared secret. The signature is `Linear-Signature` (raw hex HMAC-SHA256 over the raw body, no `sha256=` prefix) plus a 5-minute freshness window on `webhookTimestamp` — both verified server-side, so set them once and leave them.
+
+Add the trigger label to an issue in the configured team and `devCycle` starts with workflow id `linear-<project>-<identifier>` (`linear-my-project-ENG-123`) — `goal` = issue title. Re-adding the label while running is a no-op; re-labeling after completion starts a fresh run.
+
+Mission Control's create/edit form doesn't yet expose Linear fields — use `engine project add`/`update` until it does.
 
 ## Images & chart (M2/M3)
 

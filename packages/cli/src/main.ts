@@ -3,7 +3,6 @@ import { Client, Connection } from '@temporalio/client';
 import { Pool } from 'pg';
 import {
   loadEnv,
-  loadProjectRegistry,
   PostgresManagedProjectStore,
   resolveManagedProjectEntry,
   resolveProjectConfig,
@@ -12,7 +11,7 @@ import {
 } from '@agentops/activities';
 
 loadEnv();
-import type { ResolvedProjectEntry, TaskInput } from '@agentops/contracts';
+import type { TaskInput } from '@agentops/contracts';
 import { createGithubPorts, MemoryScmPort, type ScmPort } from '@agentops/ports';
 import { cancelSignal, clarifySignal, devCycle, resumeSignal, stateQuery, stopSignal } from '@agentops/workflows';
 
@@ -57,52 +56,27 @@ export function seedDemoAgentopsConfig(scm: MemoryScmPort, repo: string): void {
   );
 }
 
-export function resolveProjectEntry(
-  registry: ResolvedProjectEntry[],
-  project: string,
-  repo: string,
-): ResolvedProjectEntry {
-  const entry = registry.find((candidate) => candidate.repo === repo);
-  if (!entry) {
-    throw new Error(`no project registered for repo "${repo}" — check the project registry`);
-  }
-  if (entry.project !== project) {
-    throw new Error(`repo "${repo}" is registered under project "${entry.project}", not "${project}" — check --project`);
-  }
-  return entry;
-}
-
-export function buildStartScmPort(registry: ResolvedProjectEntry[], project: string, repo: string): ScmPort {
-  if (registry.length === 0) {
-    const scm = new MemoryScmPort();
-    seedDemoAgentopsConfig(scm, repo);
-    return scm;
-  }
-  const entry = resolveProjectEntry(registry, project, repo);
-  const git = new SpawnGitCommandRunner({ authToken: () => entry.token });
-  return createGithubPorts(entry.token, git).scm;
-}
-
 /**
- * DB-first variant of buildStartScmPort: tries the managed-project registry
- * before the static one. `managedProjectDeps` is undefined when
- * ENGINE_DB_HOST/PROJECT_CREDENTIAL_PRIVATE_KEY aren't set -- falls straight
- * through to today's behavior in that case.
+ * DB-only (managed_projects table) -- no static-registry fallback exists
+ * anymore (see the Linear trigger design doc's DB-only addendum). Falls
+ * back to an in-memory demo mode only when no DB is configured at all
+ * (ENGINE_DB_HOST/PROJECT_CREDENTIAL_PRIVATE_KEY unset), not when a DB is
+ * configured but simply doesn't have this repo -- that case throws, same as
+ * gateway/worker's resolution flow.
  */
-export async function buildStartScmPortWithManagedProjects(
+export async function buildStartScmPort(
   managedProjectDeps: ManagedProjectRegistryDeps | undefined,
-  registry: ResolvedProjectEntry[],
   project: string,
   repo: string,
 ): Promise<ScmPort> {
-  if (registry.length === 0 && !managedProjectDeps) {
+  if (!managedProjectDeps) {
     const scm = new MemoryScmPort();
     seedDemoAgentopsConfig(scm, repo);
     return scm;
   }
-  const entry = await resolveManagedProjectEntry(managedProjectDeps, registry, repo);
+  const entry = await resolveManagedProjectEntry(managedProjectDeps, repo);
   if (!entry) {
-    throw new Error(`no project registered for repo "${repo}" — check the project registry`);
+    throw new Error(`no project registered for repo "${repo}" — check the managed project registry (engine project list)`);
   }
   if (entry.project !== project) {
     throw new Error(`repo "${repo}" is registered under project "${entry.project}", not "${project}" — check --project`);
@@ -135,7 +109,7 @@ async function getClient(): Promise<Client> {
 async function cmdStart(taskId: string, goal: string, project: string, repo: string, issueRef?: string): Promise<void> {
   const client = await getClient();
   const managedProjectDeps = buildCliManagedProjectDeps();
-  const scm = await buildStartScmPortWithManagedProjects(managedProjectDeps, loadProjectRegistry(), project, repo);
+  const scm = await buildStartScmPort(managedProjectDeps, project, repo);
   const config = await resolveProjectConfig(managedProjectDeps, scm, repo);
   const input: TaskInput = { taskId, project, repo, issueRef, goal, config };
   const handle = await client.workflow.start(devCycle, { taskQueue: TASK_QUEUE, workflowId: taskId, args: [input] });
@@ -210,11 +184,32 @@ function parseConfigArg(configJson: string | undefined): unknown {
 }
 
 async function cmdProjectAdd(flags: Record<string, string>): Promise<void> {
-  const { project, repo, token, config: configJson } = flags;
+  const {
+    project,
+    repo,
+    token,
+    config: configJson,
+    'tracker-type': trackerType,
+    'linear-team-key': linearTeamKey,
+    'linear-trigger-label-id': linearTriggerLabelId,
+    'linear-token': linearToken,
+  } = flags;
   if (!project || !repo || !token) {
-    throw new Error('usage: engine project add --project <name> --repo <owner/repo> --token <token> [--config <json>]');
+    throw new Error(
+      'usage: engine project add --project <name> --repo <owner/repo> --token <token> [--config <json>] ' +
+        '[--tracker-type github|linear --linear-team-key <key> --linear-trigger-label-id <uuid> --linear-token <token>]',
+    );
   }
-  const { status, body } = await buildControlRequest('POST', '/api/projects', { project, repo, token, config: parseConfigArg(configJson) });
+  const { status, body } = await buildControlRequest('POST', '/api/projects', {
+    project,
+    repo,
+    token,
+    config: parseConfigArg(configJson),
+    trackerType,
+    linearTeamKey,
+    linearTriggerLabelId,
+    linearToken,
+  });
   console.log(`status ${status}`);
   console.log(JSON.stringify(body, null, 2));
 }
@@ -236,16 +231,29 @@ async function cmdProjectShow(flags: Record<string, string>): Promise<void> {
 }
 
 async function cmdProjectUpdate(flags: Record<string, string>): Promise<void> {
-  const { repo, token, config: configJson } = flags;
+  const {
+    repo,
+    token,
+    config: configJson,
+    'linear-team-key': linearTeamKey,
+    'linear-trigger-label-id': linearTriggerLabelId,
+    'linear-token': linearToken,
+  } = flags;
   if (!repo) {
-    throw new Error('usage: engine project update --repo <owner/repo> [--token <token>] [--config <json>|null]');
+    throw new Error(
+      'usage: engine project update --repo <owner/repo> [--token <token>] [--config <json>|null] ' +
+        '[--linear-team-key <key>] [--linear-trigger-label-id <uuid>] [--linear-token <token>]',
+    );
   }
-  if (token === undefined && configJson === undefined) {
-    throw new Error('usage: engine project update needs at least one of --token or --config');
+  if ([token, configJson, linearTeamKey, linearTriggerLabelId, linearToken].every((value) => value === undefined)) {
+    throw new Error('usage: engine project update needs at least one field to change');
   }
   const payload: Record<string, unknown> = {};
   if (token !== undefined) payload.token = token;
   if (configJson !== undefined) payload.config = parseConfigArg(configJson);
+  if (linearTeamKey !== undefined) payload.linearTeamKey = linearTeamKey;
+  if (linearTriggerLabelId !== undefined) payload.linearTriggerLabelId = linearTriggerLabelId;
+  if (linearToken !== undefined) payload.linearToken = linearToken;
   const { status, body } = await buildControlRequest('PUT', `/api/projects/${encodeURIComponent(repo)}`, payload);
   console.log(`status ${status}`);
   console.log(JSON.stringify(body, null, 2));

@@ -22,7 +22,6 @@ export interface ControlDeps {
   taskQueue: string;
   namespace: string;
   temporalUiBaseUrl: string;
-  registry: string[];
   uiDistPath?: string;
   // Managed-project CRUD (design §7). The store encrypts tokens internally
   // with `projectCredentialPublicKey`; control holds ONLY the public key and
@@ -182,8 +181,13 @@ async function handleGetRun(deps: ControlDeps, workflowId: string): Promise<Hand
   return { status: 200, body: RunDetailSchema.parse({ ...base, error: `workflow ended with status ${status}` }) };
 }
 
-function handleListRepos(deps: ControlDeps): HandlerResponse {
-  return { status: 200, body: RepoListResponseSchema.parse({ repos: deps.registry }) };
+// The "known repos" hint list is now just the managed-project list's repos
+// -- the static PROJECT_REGISTRY_JSON registry this used to read no longer
+// exists (see the Linear trigger design doc's DB-only addendum). No store
+// configured means no hints, same as before.
+async function handleListRepos(deps: ControlDeps): Promise<HandlerResponse> {
+  const repos = deps.managedProjectStore ? (await deps.managedProjectStore.list()).map((project) => project.repo) : [];
+  return { status: 200, body: RepoListResponseSchema.parse({ repos }) };
 }
 
 function isProjectCrudEnabled(deps: ControlDeps): boolean {
@@ -220,15 +224,25 @@ async function handleCreateProject(deps: ControlDeps, req: IncomingMessage): Pro
   if (!parsed.success) {
     return { status: 400, body: { error: parsed.error.issues.map((issue) => issue.message).join('; ') } };
   }
-  const { project, repo, token, config } = parsed.data;
+  const { project, repo, token, config, trackerType, linearTeamKey, linearTriggerLabelId, linearToken } = parsed.data;
   if (await deps.managedProjectStore!.get(repo)) {
     return { status: 409, body: { error: `a managed project for repo "${repo}" already exists` } };
   }
   if (await deps.managedProjectStore!.getByProject(project)) {
     return { status: 409, body: { error: `a managed project with project "${project}" already exists` } };
   }
-  const created = await deps.managedProjectStore!.upsert({ project, repo, token, config }, deps.projectCredentialPublicKey!);
-  return { status: 201, body: created };
+  if (trackerType === 'linear' && linearTeamKey && (await deps.managedProjectStore!.getByLinearTeamKey(linearTeamKey))) {
+    return { status: 409, body: { error: `a managed project with linearTeamKey "${linearTeamKey}" already exists` } };
+  }
+  try {
+    const created = await deps.managedProjectStore!.upsert(
+      { project, repo, token, config, trackerType, linearTeamKey, linearTriggerLabelId, linearToken },
+      deps.projectCredentialPublicKey!,
+    );
+    return { status: 201, body: created };
+  } catch (err) {
+    return { status: 400, body: { error: err instanceof Error ? err.message : 'failed to create managed project' } };
+  }
 }
 
 async function handleUpdateProject(deps: ControlDeps, repo: string, req: IncomingMessage): Promise<HandlerResponse> {
@@ -246,13 +260,28 @@ async function handleUpdateProject(deps: ControlDeps, repo: string, req: Incomin
   if (!parsed.success) {
     return { status: 400, body: { error: parsed.error.issues.map((issue) => issue.message).join('; ') } };
   }
-  // repo/project are immutable identity -- pass the existing values through;
-  // only token/config come from the body (token rotates, config set/clear/keep).
-  const updated = await deps.managedProjectStore!.upsert(
-    { project: existing.project, repo: existing.repo, token: parsed.data.token, config: parsed.data.config },
-    deps.projectCredentialPublicKey!,
-  );
-  return { status: 200, body: updated };
+  // repo/project/trackerType are immutable identity -- pass the existing
+  // values through; only token/config/linear-* come from the body (token
+  // rotates, config set/clear/keep, linear-* only meaningful if already
+  // linear-tracked -- the store rejects them otherwise).
+  try {
+    const updated = await deps.managedProjectStore!.upsert(
+      {
+        project: existing.project,
+        repo: existing.repo,
+        trackerType: existing.trackerType,
+        token: parsed.data.token,
+        config: parsed.data.config,
+        linearTeamKey: parsed.data.linearTeamKey,
+        linearTriggerLabelId: parsed.data.linearTriggerLabelId,
+        linearToken: parsed.data.linearToken,
+      },
+      deps.projectCredentialPublicKey!,
+    );
+    return { status: 200, body: updated };
+  } catch (err) {
+    return { status: 400, body: { error: err instanceof Error ? err.message : 'failed to update managed project' } };
+  }
 }
 
 async function handleDeleteProject(deps: ControlDeps, repo: string): Promise<HandlerResponse> {

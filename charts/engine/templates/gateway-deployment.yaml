@@ -39,15 +39,13 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.gateway.webhookSecretName }}
                   key: GITHUB_WEBHOOK_SECRET
-            {{- range $project, $cfg := .Values.projects }}
-            - name: {{ printf "GITHUB_TOKEN__%s" (upper (replace "-" "_" $project)) }}
+            {{- if .Values.gateway.linearWebhookSecretName }}
+            - name: LINEAR_WEBHOOK_SECRET
               valueFrom:
                 secretKeyRef:
-                  name: {{ $cfg.githubTokenSecretName }}
-                  key: GITHUB_TOKEN
+                  name: {{ .Values.gateway.linearWebhookSecretName }}
+                  key: LINEAR_WEBHOOK_SECRET
             {{- end }}
-            - name: PROJECT_REGISTRY_JSON
-              value: {{ include "engine.projectRegistryJson" . | quote }}
             {{- if .Values.engineDb.host }}
             - name: ENGINE_DB_HOST
               value: {{ .Values.engineDb.host | quote }}

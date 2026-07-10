@@ -1,5 +1,6 @@
 export * from './tracker-port';
 export * from './scm-port';
+export * from './tracker-ref';
 export * from './memory/memory-tracker';
 export * from './memory/memory-scm';
 export * from './git/git-command-runner';
@@ -10,3 +11,5 @@ export * from './github/github-scm-port';
 export * from './github/build-github-ports';
 export * from './github/clone-url';
 export * from './github/project-scoped-ports';
+export * from './linear/linear-client';
+export * from './linear/linear-tracker-port';
