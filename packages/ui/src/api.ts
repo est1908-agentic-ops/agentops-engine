@@ -53,11 +53,16 @@ function crudHeaders(hasBody: boolean): Record<string, string> {
   return headers;
 }
 
-async function parseJsonResponse<S extends z.ZodTypeAny>(res: Response, schema: S): Promise<z.output<S>> {
+async function parseJsonResponse<S extends z.ZodTypeAny>(
+  res: Response,
+  schema: S,
+): Promise<z.output<S>> {
   const body: unknown = await res.json();
   if (!res.ok) {
     const message =
-      typeof body === 'object' && body !== null && 'error' in body ? String((body as { error: unknown }).error) : res.statusText;
+      typeof body === 'object' && body !== null && 'error' in body
+        ? String((body as { error: unknown }).error)
+        : res.statusText;
     throw new Error(message);
   }
   return schema.parse(body);
@@ -151,11 +156,24 @@ export interface CreateProjectInput {
   repo: string;
   token: string;
   configJson?: string;
+  // `trackerType` + Linear fields mirror the contract's
+  // CreateManagedProjectRequestSchema (control-projects-api.ts). trackerType
+  // is GitHub by default; when 'linear', linearTeamKey/linearTriggerLabelId/
+  // linearToken are required (server-side superRefine; client mirrors it).
+  trackerType?: 'github' | 'linear';
+  linearTeamKey?: string;
+  linearTriggerLabelId?: string;
+  linearToken?: string;
 }
 
 export interface UpdateProjectInput {
   token?: string;
   configJson?: string;
+  // trackerType is immutable identity (like repo/project) -- it never
+  // appears on update. The Linear fields rotate/keep like `token`.
+  linearTeamKey?: string;
+  linearTriggerLabelId?: string;
+  linearToken?: string;
 }
 
 function parseConfigJson(configJson: string | undefined): unknown {
@@ -175,28 +193,52 @@ export async function listProjects(): Promise<ManagedProject[]> {
 }
 
 export async function getProject(repo: string): Promise<ManagedProject> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(repo)}`, { headers: crudHeaders(false) });
-  return parseJsonResponse(res, ManagedProjectSchema);
-}
-
-export async function createProject(input: CreateProjectInput): Promise<ManagedProject> {
-  const res = await fetch('/api/projects', {
-    method: 'POST',
-    headers: crudHeaders(true),
-    body: JSON.stringify({
-      project: input.project,
-      repo: input.repo,
-      token: input.token,
-      config: parseConfigJson(input.configJson),
-    }),
+  const res = await fetch(`/api/projects/${encodeURIComponent(repo)}`, {
+    headers: crudHeaders(false),
   });
   return parseJsonResponse(res, ManagedProjectSchema);
 }
 
-export async function updateProject(repo: string, input: UpdateProjectInput): Promise<ManagedProject> {
+export async function createProject(input: CreateProjectInput): Promise<ManagedProject> {
+  const body: Record<string, unknown> = {
+    project: input.project,
+    repo: input.repo,
+    token: input.token,
+    config: parseConfigJson(input.configJson),
+  };
+  // Only send tracker/Linear keys when present -- the server defaults
+  // trackerType to 'github' and runs the linear-required superRefine.
+  if (input.trackerType) {
+    body.trackerType = input.trackerType;
+  }
+  if (input.linearTeamKey) {
+    body.linearTeamKey = input.linearTeamKey;
+  }
+  if (input.linearTriggerLabelId) {
+    body.linearTriggerLabelId = input.linearTriggerLabelId;
+  }
+  if (input.linearToken) {
+    body.linearToken = input.linearToken;
+  }
+  const res = await fetch('/api/projects', {
+    method: 'POST',
+    headers: crudHeaders(true),
+    body: JSON.stringify(body),
+  });
+  return parseJsonResponse(res, ManagedProjectSchema);
+}
+
+export async function updateProject(
+  repo: string,
+  input: UpdateProjectInput,
+): Promise<ManagedProject> {
   const payload: Record<string, unknown> = {};
   if (input.token !== undefined) payload.token = input.token;
   if (input.configJson !== undefined) payload.config = parseConfigJson(input.configJson);
+  if (input.linearTeamKey !== undefined) payload.linearTeamKey = input.linearTeamKey;
+  if (input.linearTriggerLabelId !== undefined)
+    payload.linearTriggerLabelId = input.linearTriggerLabelId;
+  if (input.linearToken !== undefined) payload.linearToken = input.linearToken;
   const res = await fetch(`/api/projects/${encodeURIComponent(repo)}`, {
     method: 'PUT',
     headers: crudHeaders(true),
