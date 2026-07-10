@@ -9,7 +9,7 @@ import {
   setHandler,
   sleep,
 } from '@temporalio/workflow';
-import type { BlockReason, Brakes, ModelRef, Routing, Stage, TaskInput, TaskStatus, VerdictKind } from '@agentops/contracts';
+import type { Brakes, DevCycleState, ModelRef, ProjectConfig, Routing, TaskInput, VerdictKind } from '@agentops/contracts';
 import { feedbackHash } from '@agentops/contracts';
 import { babysitDecision, nextRepairAction, parseVerdict, preImplementStages, resolveStageLimits } from '@agentops/policies';
 import type { DevCycleActivities } from './activities-api';
@@ -37,19 +37,9 @@ export const clarifySignal = defineSignal<[string]>('clarify');
 export const resumeSignal = defineSignal('resume');
 export const stateQuery = defineQuery<DevCycleState>('state');
 
-export interface DevCycleState {
-  taskId: string;
-  stage: Stage;
-  status: TaskStatus;
-  blockReason: BlockReason | null;
-  implementAttempts: number;
-  iterations: number;
-  cumulativeTokens: number;
-  babysitRounds: number;
-  prRef: string | null;
-  workspaceRef: string;
-  branch: string;
-}
+// Re-exported so existing importers (e2e/helpers.ts, control) keep resolving
+// DevCycleState from @agentops/workflows; the schema lives in contracts.
+export type { DevCycleState } from '@agentops/contracts';
 
 const MAX_VERDICT_CALLS = 2;
 const DEFAULT_BABYSIT_POLL_MS = 5000;
@@ -95,7 +85,10 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
 
   let cancelled = false;
   let stopRequested = false;
-  let effectiveBrakes: Brakes = { ...input.config.brakes };
+  // Assigned right after config resolution below. Only the signal handlers
+  // close over it before then, and none can meaningfully fire before the
+  // first stage can possibly block.
+  let effectiveBrakes: Brakes;
 
   setHandler(stopSignal, () => {
     stopRequested = true;
@@ -123,10 +116,32 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
   });
   setHandler(stateQuery, () => state);
 
+  // Prompt-started runs (control BFF) pass no config -- resolve it here on
+  // the worker, which holds the credential private key and the merged
+  // static+managed registry (prompt-devcycle design §3/§5). Gateway, CLI,
+  // and platform-children keep pre-resolving and passing config as before.
+  let config: ProjectConfig;
+  if (input.config) {
+    config = input.config;
+  } else {
+    const resolved = await activities.resolveRepoConfig(input.repo);
+    if (!resolved.registered) {
+      // Repo unknown to this worker's registry -- e.g. registered in the
+      // console after the worker last booted (design §7). Fail fast with an
+      // explicit reason instead of crashing later in prepareWorkspace.
+      state.stage = 'failed';
+      state.status = 'failed';
+      state.blockReason = 'unregistered-repo';
+      return state;
+    }
+    config = resolved.config;
+  }
+  effectiveBrakes = { ...config.brakes };
+
   const prepared = await activities.prepareWorkspace({
     taskId: input.taskId,
     repo: input.repo,
-    initCommands: input.config.initCommands,
+    initCommands: config.initCommands,
   });
   state.workspaceRef = prepared.workspaceRef;
   state.branch = prepared.branch;
@@ -151,7 +166,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     modelOverride?: ModelRef,
     extraContext: Record<string, unknown> = {},
   ): Promise<string> => {
-    const routed = input.config.routing[stage];
+    const routed = config.routing[stage];
     const model = modelOverride ?? routed;
     const backend = model?.backend ?? 'stub';
     const modelName = model?.model ?? 'stub';
@@ -167,12 +182,12 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
           backend,
           model: modelName,
           effort: model?.effort,
-          image: input.config.image,
-          services: input.config.services,
+          image: config.image,
+          services: config.services,
           promptRef: `${stage}.md`,
           promptContext: { taskId: input.taskId, goal: input.goal, ...extraContext },
           workspaceRef: state.workspaceRef,
-          limits: { maxTokens: input.config.brakes.maxTokens, ...resolveStageLimits(input.config, stage) },
+          limits: { maxTokens: config.brakes.maxTokens, ...resolveStageLimits(config, stage) },
         });
         break;
       } catch (err) {
@@ -240,7 +255,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
   // right after each call site are untouched; this only catches the new
   // DevCycleCancelledError path.
   try {
-    for (const stage of preImplementStages({ config: input.config, hasHumanDesign: false, hasHumanPlan: false })) {
+    for (const stage of preImplementStages({ config, hasHumanDesign: false, hasHumanPlan: false })) {
       state.stage = stage;
       const extraContext = stage === 'context' ? { issueBody } : {};
       await runStageAgent(stage as RoutableStage, 1, 1, undefined, extraContext);
@@ -267,7 +282,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
 
     while (true) {
       state.stage = 'implement';
-      const implementModel = useEscalation ? input.config.escalation : undefined;
+      const implementModel = useEscalation ? config.escalation : undefined;
       const implementOutput = await runStageAgent('implement', implementAttempt, 1, implementModel, {
         fullVerifyFindings: lastFullVerifyOutput,
         reviewFindings: lastReviewOutput,
@@ -278,7 +293,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
 
       state.stage = 'full_verify';
       const verifyCommands =
-        [...(input.config.fastVerifyCommands ?? []), ...(input.config.fullVerifyCommands ?? [])].join('\n') ||
+        [...(config.fastVerifyCommands ?? []), ...(config.fullVerifyCommands ?? [])].join('\n') ||
         '(none configured — use your own judgment on the diff)';
       const fullVerifyResult = await runVerdictStage('full_verify', implementAttempt, 'FULL:', { verifyCommands });
       fullVerifyVerdict = fullVerifyResult.kind;
@@ -303,7 +318,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
           review: reviewVerdict ?? 'unparseable',
           diffEmpty,
           brakes: effectiveBrakes,
-          hasEscalationModel: input.config.escalation != null,
+          hasEscalationModel: config.escalation != null,
         });
 
       let action = evaluate();

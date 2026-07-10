@@ -1,4 +1,5 @@
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
+import { DevCycleRunDetailPage } from './pages/DevCycleRunDetailPage';
 import { HomePage } from './pages/HomePage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { RunDetailPage } from './pages/RunDetailPage';
@@ -13,6 +14,7 @@ export function App() {
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/runs/:workflowId" element={<RunDetailPage />} />
+        <Route path="/dev-runs/:workflowId" element={<DevCycleRunDetailPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
       </Routes>
     </BrowserRouter>

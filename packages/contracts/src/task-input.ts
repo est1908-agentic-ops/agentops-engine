@@ -7,6 +7,9 @@ export const TaskInputSchema = z.object({
   repo: z.string().min(1),
   issueRef: z.string().optional(),
   goal: z.string().min(1),
-  config: ProjectConfigSchema,
+  // Optional since the prompt-devcycle design (2026-07-09): when absent, the
+  // devCycle workflow resolves it on the worker via resolveRepoConfig.
+  // Gateway/CLI/platform-children keep pre-resolving and passing it.
+  config: ProjectConfigSchema.optional(),
 });
 export type TaskInput = z.infer<typeof TaskInputSchema>;

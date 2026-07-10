@@ -32,4 +32,14 @@ describe('TaskInputSchema', () => {
     });
     expect(parsed.issueRef).toBeUndefined();
   });
+
+  it('accepts an input with no config (prompt-started run)', () => {
+    const parsed = TaskInputSchema.parse({
+      taskId: 't-1',
+      project: 'demo',
+      repo: 'demo/repo',
+      goal: 'Add a widget',
+    });
+    expect(parsed.config).toBeUndefined();
+  });
 });
