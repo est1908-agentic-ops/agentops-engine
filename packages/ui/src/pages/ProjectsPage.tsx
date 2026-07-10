@@ -8,10 +8,25 @@ import {
   listProjects,
   setCrudToken,
   updateProject,
-  type CreateProjectInput,
 } from '../api';
 
-type Mode = 'add' | { repo: string; project: string } | null;
+type TrackerType = 'github' | 'linear';
+
+// A flat bag of every field the form can collect. The page handlers project
+// this down to CreateProjectInput / UpdateProjectInput depending on mode, so
+// the form itself stays tracker-agnostic about request shapes.
+interface ProjectFormValues {
+  project: string;
+  repo: string;
+  trackerType: TrackerType;
+  token: string; // GitHub/SCM token (always required on create, regardless of tracker)
+  configJson: string;
+  linearTeamKey: string;
+  linearTriggerLabelId: string;
+  linearToken: string;
+}
+
+type Mode = 'add' | { project: ManagedProject } | null;
 
 export function ProjectsPage() {
   const [hasToken, setHasToken] = useState<boolean>(() => getCrudToken().length > 0);
@@ -54,11 +69,22 @@ export function ProjectsPage() {
     setMode(null);
   }
 
-  async function handleCreate(input: CreateProjectInput): Promise<void> {
+  async function handleCreate(values: ProjectFormValues): Promise<void> {
     setBusy(true);
     setFormError(null);
     try {
-      await createProject(input);
+      await createProject({
+        project: values.project,
+        repo: values.repo,
+        token: values.token,
+        configJson: values.configJson.trim() || undefined,
+        ...(values.trackerType === 'linear' && {
+          trackerType: 'linear',
+          linearTeamKey: values.linearTeamKey.trim(),
+          linearTriggerLabelId: values.linearTriggerLabelId.trim(),
+          linearToken: values.linearToken.trim(),
+        }),
+      });
       setMode(null);
       await refresh();
     } catch (err) {
@@ -69,11 +95,17 @@ export function ProjectsPage() {
     }
   }
 
-  async function handleUpdate(repo: string, token: string | undefined, configJson: string | undefined): Promise<void> {
+  async function handleUpdate(repo: string, values: ProjectFormValues): Promise<void> {
     setBusy(true);
     setFormError(null);
     try {
-      await updateProject(repo, { token: token || undefined, configJson });
+      await updateProject(repo, {
+        token: values.token.trim() || undefined,
+        configJson: values.configJson.trim() || undefined,
+        linearTeamKey: values.linearTeamKey.trim() || undefined,
+        linearTriggerLabelId: values.linearTriggerLabelId.trim() || undefined,
+        linearToken: values.linearToken.trim() || undefined,
+      });
       setMode(null);
       await refresh();
     } catch (err) {
@@ -85,7 +117,9 @@ export function ProjectsPage() {
   }
 
   async function handleRemove(repo: string): Promise<void> {
-    if (!window.confirm(`Remove managed project for ${repo}? This deletes its stored credential.`)) {
+    if (
+      !window.confirm(`Remove managed project for ${repo}? This deletes its stored credential.`)
+    ) {
       return;
     }
     setBusy(true);
@@ -106,8 +140,9 @@ export function ProjectsPage() {
         <h1>Managed Projects</h1>
         <div className="section">
           <p className="muted-text">
-            The project-management routes require an operator bearer token (<code>CONTROL_CRUD_TOKEN</code>). Paste it
-            below — it is stored only in this browser (localStorage) and sent as an X-Control-Crud-Token header on each request.
+            The project-management routes require an operator bearer token (
+            <code>CONTROL_CRUD_TOKEN</code>). Paste it below — it is stored only in this browser
+            (localStorage) and sent as an X-Control-Crud-Token header on each request.
           </p>
           <label className="field-label" htmlFor="crud-token">
             Control CRUD token
@@ -121,7 +156,12 @@ export function ProjectsPage() {
             onChange={(event) => setTokenDraft(event.target.value)}
           />
           <div className="actions">
-            <button type="button" className="run-button" disabled={!tokenDraft.trim()} onClick={handleSaveToken}>
+            <button
+              type="button"
+              className="run-button"
+              disabled={!tokenDraft.trim()}
+              onClick={handleSaveToken}
+            >
               Save token
             </button>
           </div>
@@ -140,7 +180,12 @@ export function ProjectsPage() {
       <div className="projects-header">
         <h1>Managed Projects</h1>
         <div className="header-actions">
-          <button type="button" className="ghost-button" onClick={() => void refresh()} disabled={loading}>
+          <button
+            type="button"
+            className="ghost-button"
+            onClick={() => void refresh()}
+            disabled={loading}
+          >
             {loading ? 'Refreshing…' : 'Refresh'}
           </button>
           <button type="button" className="ghost-button" onClick={handleClearToken}>
@@ -175,17 +220,18 @@ export function ProjectsPage() {
 
       {mode && typeof mode === 'object' && (
         <ProjectForm
-          key={mode.repo}
-          title={`Edit ${mode.project} (${mode.repo})`}
+          key={mode.project.repo}
+          title={`Edit ${mode.project.project} (${mode.project.repo})`}
           submitLabel="Save"
           isUpdate
+          existing={mode.project}
           disabled={busy}
           onCancel={() => {
             setMode(null);
             setFormError(null);
           }}
           onSubmit={async (values) => {
-            await handleUpdate(mode.repo, values.token, values.configJson);
+            await handleUpdate(mode.project.repo, values);
           }}
         />
       )}
@@ -196,6 +242,7 @@ export function ProjectsPage() {
           <tr>
             <th>Project</th>
             <th>Repo</th>
+            <th>Tracker</th>
             <th>Credential</th>
             <th>Config</th>
             <th>Updated</th>
@@ -210,9 +257,16 @@ export function ProjectsPage() {
                 <code>{project.repo}</code>
               </td>
               <td>
-                <span className="status-badge" style={{ backgroundColor: project.credentialSet ? '#16a34a' : '#9ca3af' }}>
-                  {project.credentialSet ? 'set' : 'none'}
-                </span>
+                {project.trackerType === 'linear' ? (
+                  <span>
+                    Linear · <code>{project.linearTeamKey}</code>
+                  </span>
+                ) : (
+                  'GitHub'
+                )}
+              </td>
+              <td>
+                <CredentialBadges project={project} />
               </td>
               <td>{project.config ? 'custom' : 'file'}</td>
               <td>{formatTimestamp(project.updatedAt)}</td>
@@ -221,7 +275,7 @@ export function ProjectsPage() {
                   type="button"
                   className="link-button"
                   disabled={busy}
-                  onClick={() => setMode({ repo: project.repo, project: project.project })}
+                  onClick={() => setMode({ project })}
                 >
                   Edit
                 </button>
@@ -238,7 +292,7 @@ export function ProjectsPage() {
           ))}
           {projects.length === 0 && !loading && (
             <tr>
-              <td colSpan={6} className="muted-text">
+              <td colSpan={7} className="muted-text">
                 No managed projects yet. Click “Add project” to register a repo.
               </td>
             </tr>
@@ -255,28 +309,98 @@ export function ProjectsPage() {
   );
 }
 
+function CredentialBadges({ project }: { project: ManagedProject }) {
+  if (project.trackerType === 'linear') {
+    // A linear project carries both a GitHub SCM credential and a Linear
+    // API credential; show both. Never the token value itself.
+    return (
+      <>
+        <CredentialBadge set={project.credentialSet} label="GH" />
+        <CredentialBadge set={project.linearCredentialSet} label="Linear" />
+      </>
+    );
+  }
+  return <CredentialBadge set={project.credentialSet} label="GitHub" />;
+}
+
+function CredentialBadge({ set, label }: { set: boolean; label: string }) {
+  return (
+    <span
+      className="status-badge"
+      style={{ backgroundColor: set ? '#16a34a' : '#9ca3af', marginRight: 4 }}
+      title={set ? `${label} credential set` : `no ${label} credential`}
+    >
+      {label} {set ? '✓' : '—'}
+    </span>
+  );
+}
+
 interface ProjectFormProps {
   title: string;
   submitLabel: string;
   isUpdate?: boolean;
+  /** Present iff isUpdate — the project being edited. */
+  existing?: ManagedProject;
   disabled: boolean;
   onCancel: () => void;
-  onSubmit: (values: CreateProjectInput) => Promise<void>;
+  onSubmit: (values: ProjectFormValues) => Promise<void>;
 }
 
-function ProjectForm({ title, submitLabel, isUpdate, disabled, onCancel, onSubmit }: ProjectFormProps) {
+function ProjectForm({
+  title,
+  submitLabel,
+  isUpdate,
+  existing,
+  disabled,
+  onCancel,
+  onSubmit,
+}: ProjectFormProps) {
+  // trackerType is chosen on create (default github) and immutable on update
+  // (derived from the existing project, never sent in the PUT body).
+  const existingTracker: TrackerType = existing?.trackerType ?? 'github';
+  const [trackerType, setTrackerType] = useState<TrackerType>(existingTracker);
   const [project, setProject] = useState('');
   const [repo, setRepo] = useState('');
+  // `token` is the GitHub/SCM token (always present, required on create; on
+  // update blank means "keep"). Labelled "GitHub token" to disambiguate from
+  // the Linear token below.
   const [token, setToken] = useState('');
   const [configJson, setConfigJson] = useState('');
+  // Linear fields are pre-filled from the existing project on update (the
+  // non-secret ones); linearToken is never echoed back, blank = keep/rotate.
+  const [linearTeamKey, setLinearTeamKey] = useState(
+    existing?.trackerType === 'linear' ? existing.linearTeamKey : '',
+  );
+  const [linearTriggerLabelId, setLinearTriggerLabelId] = useState(
+    existing?.trackerType === 'linear' ? existing.linearTriggerLabelId : '',
+  );
+  const [linearToken, setLinearToken] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
-  // For an update, repo/project are immutable -- no inputs for them; the
-  // only editable fields are token (rotate) and config (set/clear/keep).
-  const canSubmit = isUpdate
-    ? (token.trim().length > 0 || configJson.trim().length > 0) && !submitting
-    : project.trim().length > 0 && repo.trim().length > 0 && token.trim().length > 0 && !submitting;
+  const isLinear = trackerType === 'linear';
+
+  // Client-side validation mirrors the contract's superRefine: when the
+  // tracker is linear, the three linear fields are required (on create);
+  // repo/project/token are always required on create. On update at least one
+  // field must change; tracker/repo/project are immutable.
+  const trimmed = {
+    project: project.trim(),
+    repo: repo.trim(),
+    token: token.trim(),
+    linearTeamKey: linearTeamKey.trim(),
+    linearTriggerLabelId: linearTriggerLabelId.trim(),
+    linearToken: linearToken.trim(),
+    configJson: configJson.trim(),
+  };
+  const linearReady = trimmed.linearTeamKey && trimmed.linearTriggerLabelId && trimmed.linearToken;
+  const createReady =
+    trimmed.project && trimmed.repo && trimmed.token && (!isLinear || linearReady);
+  const hasUpdateChange =
+    trimmed.token ||
+    trimmed.configJson ||
+    (isLinear && (trimmed.linearTeamKey || trimmed.linearTriggerLabelId || trimmed.linearToken));
+  const canSubmit = isUpdate ? !!hasUpdateChange && !submitting : !!createReady && !submitting;
 
   async function handleSubmit() {
     setError(null);
@@ -284,14 +408,18 @@ function ProjectForm({ title, submitLabel, isUpdate, disabled, onCancel, onSubmi
     try {
       // Validate config JSON up front so the user gets a clear local error
       // rather than a 400 from the server.
-      if (configJson.trim() && configJson.trim() !== 'null') {
-        JSON.parse(configJson.trim());
+      if (trimmed.configJson && trimmed.configJson !== 'null') {
+        JSON.parse(trimmed.configJson);
       }
       await onSubmit({
-        project: project.trim(),
-        repo: repo.trim(),
-        token: token.trim(),
-        configJson: configJson.trim() || undefined,
+        project: trimmed.project,
+        repo: trimmed.repo,
+        trackerType,
+        token: trimmed.token,
+        configJson: trimmed.configJson,
+        linearTeamKey: trimmed.linearTeamKey,
+        linearTriggerLabelId: trimmed.linearTriggerLabelId,
+        linearToken: trimmed.linearToken,
       });
     } catch (err) {
       if (err instanceof SyntaxError) {
@@ -307,6 +435,25 @@ function ProjectForm({ title, submitLabel, isUpdate, disabled, onCancel, onSubmi
   return (
     <div className="card form-card section">
       <h3>{title}</h3>
+      {/* Tracker selector: create = editable, update = read-only (immutable identity). */}
+      <label className="field-label" htmlFor="form-tracker">
+        Tracker
+      </label>
+      <select
+        id="form-tracker"
+        className="text-input"
+        value={trackerType}
+        onChange={(event) => setTrackerType(event.target.value as TrackerType)}
+        disabled={isUpdate}
+      >
+        <option value="github">GitHub</option>
+        <option value="linear">Linear</option>
+      </select>
+      {isUpdate && (
+        <p className="muted-text" style={{ marginTop: 4 }}>
+          Immutable — delete and recreate to change tracker.
+        </p>
+      )}
       {!isUpdate && (
         <>
           <label className="field-label" htmlFor="form-project">
@@ -332,7 +479,7 @@ function ProjectForm({ title, submitLabel, isUpdate, disabled, onCancel, onSubmi
         </>
       )}
       <label className="field-label" htmlFor="form-token">
-        {isUpdate ? 'Rotate token (leave blank to keep)' : 'GitHub token'}
+        {isUpdate ? 'GitHub token (rotate — leave blank to keep)' : 'GitHub token'}
       </label>
       <input
         id="form-token"
@@ -342,6 +489,50 @@ function ProjectForm({ title, submitLabel, isUpdate, disabled, onCancel, onSubmi
         value={token}
         onChange={(event) => setToken(event.target.value)}
       />
+      {isLinear && (
+        <>
+          <label className="field-label" htmlFor="form-linear-team-key">
+            Linear team key
+          </label>
+          <input
+            id="form-linear-team-key"
+            className="text-input"
+            placeholder="ENG"
+            value={linearTeamKey}
+            onChange={(event) => setLinearTeamKey(event.target.value)}
+          />
+          <label className="field-label" htmlFor="form-linear-trigger-label">
+            Linear trigger label ID
+          </label>
+          <input
+            id="form-linear-trigger-label"
+            className="text-input"
+            placeholder="550e8400-e29b-41d4-a716-446655440000"
+            value={linearTriggerLabelId}
+            onChange={(event) => setLinearTriggerLabelId(event.target.value)}
+          />
+          <p className="muted-text" style={{ marginTop: 4 }}>
+            A Linear label <strong>UUID</strong>, not its name — find it via the label settings URL
+            or Linear’s GraphQL API (
+            <code>
+              query &#123; team(key: "ENG") &#123; labels &#123; nodes &#123; id name &#125; &#125;
+              &#125;
+            </code>
+            ).
+          </p>
+          <label className="field-label" htmlFor="form-linear-token">
+            {isUpdate ? 'Linear API token (rotate — leave blank to keep)' : 'Linear API token'}
+          </label>
+          <input
+            id="form-linear-token"
+            className="text-input"
+            type="password"
+            placeholder={isUpdate ? 'lin_api_… (optional)' : 'lin_api_…'}
+            value={linearToken}
+            onChange={(event) => setLinearToken(event.target.value)}
+          />
+        </>
+      )}
       <label className="field-label" htmlFor="form-config">
         Config JSON (optional — {isUpdate ? 'null clears to file-based' : 'omit = file-based'})
       </label>
@@ -349,13 +540,20 @@ function ProjectForm({ title, submitLabel, isUpdate, disabled, onCancel, onSubmi
         id="form-config"
         className="prompt-input"
         rows={3}
-        placeholder={'{\n  "fastVerifyCommands": ["pnpm lint"],\n  "fullVerifyCommands": ["pnpm test"]\n}'}
+        placeholder={
+          '{\n  "fastVerifyCommands": ["pnpm lint"],\n  "fullVerifyCommands": ["pnpm test"]\n}'
+        }
         value={configJson}
         onChange={(event) => setConfigJson(event.target.value)}
       />
       {error && <p className="error-text">{error}</p>}
       <div className="actions">
-        <button type="button" className="run-button" disabled={!canSubmit || disabled} onClick={() => void handleSubmit()}>
+        <button
+          type="button"
+          className="run-button"
+          disabled={!canSubmit || disabled}
+          onClick={() => void handleSubmit()}
+        >
           {submitting ? 'Saving…' : submitLabel}
         </button>
         <button type="button" className="ghost-button" onClick={onCancel} disabled={disabled}>
