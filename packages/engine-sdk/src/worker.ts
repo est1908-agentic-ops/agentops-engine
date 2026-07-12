@@ -1,9 +1,33 @@
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Worker, type NativeConnection } from '@temporalio/worker';
 // defaultPayloadConverter and PROJECT_HEADER_KEY reserved for inbound header decode if project-side auditing added
 /* eslint-disable @typescript-eslint/no-unused-vars */
 import { defaultPayloadConverter } from '@temporalio/common';
 import { PROJECT_HEADER_KEY } from '@agentops/contracts';
 /* eslint-enable @typescript-eslint/no-unused-vars */
+
+function sdkEntryPath(): string {
+  if (typeof __filename !== 'undefined') {
+    return __filename;
+  }
+  // ESM bundle (worker.js): CJS __filename is absent.
+  // @ts-expect-error import.meta is only emitted in the ESM tsup target
+  return fileURLToPath(import.meta.url);
+}
+
+/** Absolute path to the SDK workflow interceptor module (see createEngineWorker). */
+function workflowInterceptorModule(): string {
+  const entry = sdkEntryPath();
+  const req = createRequire(entry);
+  try {
+    return req.resolve('./workflow');
+  } catch {
+    // Vitest imports src/worker.ts directly; published/runtime builds resolve ./workflow from dist/.
+    return join(dirname(entry), 'workflow.ts');
+  }
+}
 
 export interface CreateEngineWorkerOptions {
   taskQueue: string;
@@ -42,7 +66,7 @@ export function createEngineWorker(options: CreateEngineWorkerOptions) {
           },
         }),
       ],
-      workflowModules: [(() => { try { return require.resolve('./workflow'); } catch { return './workflow'; } })()], // the workflow entry also exports interceptors but Temporal loads modules for outbound
+      workflowModules: [workflowInterceptorModule()],
     },
   });
 }

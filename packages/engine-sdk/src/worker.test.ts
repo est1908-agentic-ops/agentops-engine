@@ -10,5 +10,7 @@ describe('createEngineWorker', () => {
     expect(opts.taskQueue).toBe('proj-acme');
     expect(opts.interceptors.activity).toHaveLength(1);
     expect(opts.interceptors.workflowModules).toHaveLength(1);
+    expect(opts.interceptors.workflowModules[0]).not.toBe('./workflow');
+    expect(opts.interceptors.workflowModules[0]).toMatch(/workflow\.(ts|js|cjs)$/);
   });
 });
