@@ -146,10 +146,17 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
   state.workspaceRef = prepared.workspaceRef;
   state.branch = prepared.branch;
 
+  const dropAgentWorking = async (): Promise<void> => {
+    if (input.issueRef) {
+      await activities.unlabelIssue(input.issueRef, 'agent:working');
+    }
+  };
+
   let issueBody = '';
   if (input.issueRef) {
     const issue = await activities.getIssue(input.issueRef);
     issueBody = issue.body;
+    await activities.labelIssue(input.issueRef, 'agent:working');
   }
 
   const waitForResumeOrCancel = async (): Promise<boolean> => {
@@ -262,6 +269,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
       if (cancelled) {
         state.stage = 'failed';
         state.status = 'failed';
+        await dropAgentWorking();
         await activities.cleanupWorkspace(state.workspaceRef, input.repo);
         return state;
       }
@@ -328,6 +336,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
         if (await waitForResumeOrCancel()) {
           state.stage = 'failed';
           state.status = 'failed';
+          await dropAgentWorking();
           await activities.cleanupWorkspace(state.workspaceRef, input.repo);
           return state;
         }
@@ -358,6 +367,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
       body: prBody,
     });
     state.prRef = prRef;
+    await dropAgentWorking();
     if (exhausted) {
       await activities.commentOnIssue(input.issueRef ?? input.taskId, prBody);
     }
@@ -385,6 +395,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
         if (await waitForResumeOrCancel()) {
           state.stage = 'failed';
           state.status = 'failed';
+          await dropAgentWorking();
           await activities.cleanupWorkspace(state.workspaceRef, input.repo);
           return state;
         }
@@ -421,6 +432,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     }
     state.stage = 'failed';
     state.status = 'failed';
+    await dropAgentWorking();
     await activities.cleanupWorkspace(state.workspaceRef, input.repo);
     return state;
   }
