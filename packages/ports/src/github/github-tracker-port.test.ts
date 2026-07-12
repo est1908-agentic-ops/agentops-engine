@@ -9,6 +9,7 @@ function fakeClient(overrides: Partial<GithubClient['rest']> = {}): GithubClient
         get: vi.fn(),
         createComment: vi.fn(),
         addLabels: vi.fn(),
+        removeLabel: vi.fn(),
         create: vi.fn(),
         ...overrides.issues,
       },
@@ -82,6 +83,14 @@ describe('GithubTrackerPort', () => {
 
     await expect(tracker.getIssue('not-a-ref')).rejects.toThrow(/expected "owner\/repo#number"/);
     expect(client.rest.issues.get).not.toHaveBeenCalled();
+  });
+
+  it('removeLabel calls issues.removeLabel with owner/repo/number/name', async () => {
+    const removeLabel = vi.fn().mockResolvedValue({});
+    const client = fakeClient({ issues: { removeLabel } as never });
+    const port = new GithubTrackerPort(client);
+    await port.removeLabel('o/r#7', 'agent:working');
+    expect(removeLabel).toHaveBeenCalledWith({ owner: 'o', repo: 'r', issue_number: 7, name: 'agent:working' });
   });
 
   it('createIssue calls issues.create and returns owner/repo#number + html_url', async () => {

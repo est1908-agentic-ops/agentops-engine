@@ -857,3 +857,65 @@ describe('createControlServer managed-project CRUD', () => {
     expect((await getJsonWithHeaders(port, '/api/projects', CRUD_HEADERS)).status).toBe(503);
   });
 });
+
+describe('createControlServer agents API', () => {
+  let server: ReturnType<typeof createControlServer>;
+  let port: number;
+  let trigger: ReturnType<typeof vi.fn>;
+  let deps: ControlDeps;
+
+  beforeEach(() => {
+    trigger = vi.fn().mockResolvedValue(undefined);
+    const list = async function* () {
+      yield {
+        scheduleId: 'agent:acme:nb',
+        memo: { project: 'acme', agentName: 'nb', workflowType: 'whiteboxBugHunt' },
+        schedule: { spec: { cron: { cronString: '0 2 * * *' } } },
+        info: { paused: false },
+      };
+      yield { scheduleId: 'reconcile:all' };
+    };
+    deps = {
+      client: {
+        workflow: { start: vi.fn(), list: async function* () {}, getHandle: vi.fn() },
+        schedule: { list, getHandle: () => ({ trigger }) },
+      } as never,
+      taskQueue: 'agentops-engine',
+      namespace: 'default',
+      temporalUiBaseUrl: 'https://temporal.example',
+      projectCrudAuthToken: CRUD_TOKEN,
+    };
+    server = createControlServer(deps);
+    return new Promise<void>((resolve) => {
+      server.listen(0, () => {
+        port = (server.address() as AddressInfo).port;
+        resolve();
+      });
+    });
+  });
+
+  afterEach(() => {
+    server?.close();
+  });
+
+  it('GET /api/agents lists agent:* schedules (ungated)', async () => {
+    const { status, body } = await getJson(port, '/api/agents');
+    expect(status).toBe(200);
+    expect((body as { agents: Array<{ project: string }> }).agents).toHaveLength(1);
+    expect((body as { agents: Array<{ project: string }> }).agents[0].project).toBe('acme');
+  });
+
+  it('POST /api/agents/:id/run triggers the schedule (gated: 401 without token)', async () => {
+    const unauth = await fetch(`http://127.0.0.1:${port}/api/agents/${encodeURIComponent('agent:acme:nb')}/run`, {
+      method: 'POST',
+    });
+    expect(unauth.status).toBe(401);
+
+    const ok = await fetch(`http://127.0.0.1:${port}/api/agents/${encodeURIComponent('agent:acme:nb')}/run`, {
+      method: 'POST',
+      headers: CRUD_HEADERS,
+    });
+    expect(ok.status).toBe(202);
+    expect(trigger).toHaveBeenCalled();
+  });
+});

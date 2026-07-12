@@ -32,6 +32,18 @@ describe('MemoryTrackerPort', () => {
     expect(tracker.getLabels('issue-1')).toEqual(['needs-triage']);
   });
 
+  it('removeLabel drops a label; getLabels reflects it', async () => {
+    const t = new MemoryTrackerPort();
+    await t.label('o/r#1', 'agent:working');
+    await t.removeLabel('o/r#1', 'agent:working');
+    expect(t.getLabels('o/r#1')).not.toContain('agent:working');
+  });
+
+  it('removeLabel on a missing label is a no-op', async () => {
+    const t = new MemoryTrackerPort();
+    await expect(t.removeLabel('o/r#1', 'nope')).resolves.toBeUndefined();
+  });
+
   it('createIssue stores the issue and returns a ref retrievable via getIssue', async () => {
     const t = new MemoryTrackerPort();
     const created = await t.createIssue({ repo: 'o/r', title: 'Bug', body: 'b', labels: ['bug'] });

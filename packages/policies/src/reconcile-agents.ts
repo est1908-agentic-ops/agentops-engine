@@ -21,7 +21,7 @@ export function reconcileAgents(declared: AgentSpec[], existing: ExistingSchedul
     declaredIds.add(id);
     const cur = byId.get(id);
     if (!cur) { plan.toCreate.push(spec); continue; }
-    const desiredQueue = ENGINE_QUEUE; // built-in scheduled workflows always run on the engine queue
+    const desiredQueue = spec.taskQueue ?? ENGINE_QUEUE;
     if (cur.scheduleSpec !== spec.schedule || cur.workflow !== spec.workflow || (cur.taskQueue !== undefined && cur.taskQueue !== desiredQueue)) {
       plan.toUpdate.push(spec);
     }

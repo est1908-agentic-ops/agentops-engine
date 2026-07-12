@@ -605,6 +605,40 @@ describe('createActivities — resolveRepoConfig', () => {
     ).rejects.toThrow(/ProjectAuthorizationError|not authorized/);
   });
 
+  it('unlabelIssue delegates to tracker.removeLabel', async () => {
+    const removeLabel = vi.fn().mockResolvedValue(undefined);
+    const deps = { ...buildDeps(), tracker: { removeLabel } as any };
+    const activities = createActivities(deps);
+    await activities.unlabelIssue('o/r#1', 'agent:working');
+    expect(removeLabel).toHaveBeenCalledWith('o/r#1', 'agent:working');
+  });
+
+  it('listManagedProjects returns registry {project,repo} pairs', async () => {
+    const deps = {
+      ...buildDeps(),
+      registry: [{ project: 'acme', repo: 'acme/web', token: 't', trackerType: 'github' as const }],
+    };
+    const activities = createActivities(deps);
+    expect(await activities.listManagedProjects()).toEqual([{ project: 'acme', repo: 'acme/web' }]);
+  });
+
+  it('applyScheduleChanges uses the agent taskQueue for a scheduled Tier-2 agent', async () => {
+    const create = vi.fn().mockResolvedValue({});
+    const deps = {
+      ...buildDeps(),
+      scheduleClient: { create, getHandle: () => ({}) } as any,
+      taskQueue: 'agentops-engine',
+      registry: [],
+    } as any;
+    const activities = createActivities(deps);
+    const plan = {
+      toCreate: [{ name: 'nightly', workflow: 'projectScan', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip', taskQueue: 'proj-acme' }],
+      toUpdate: [], toDelete: [], toPause: [], toResume: [],
+    } as any;
+    await activities.applyScheduleChanges('acme', 'acme/web', plan);
+    expect(create.mock.calls[0][0].action.taskQueue).toBe('proj-acme');
+  });
+
   it('applyScheduleChanges stamps repo + project/agentName/workflowType and search attributes', async () => {
     const create = vi.fn().mockResolvedValue({});
     const getHandle = vi.fn(() => ({}));

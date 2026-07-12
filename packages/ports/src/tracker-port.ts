@@ -17,5 +17,6 @@ export interface TrackerPort {
   getIssue(ref: string): Promise<Issue>;
   comment(ref: string, body: string): Promise<void>;
   label(ref: string, label: string): Promise<void>;
+  removeLabel(ref: string, label: string): Promise<void>;
   createIssue(req: CreateIssueRequest): Promise<CreatedIssue>;
 }

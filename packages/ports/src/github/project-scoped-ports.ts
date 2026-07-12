@@ -79,6 +79,7 @@ export function createProjectScopedPorts(entries: ProjectScopedPortsEntry[]): Pr
       getIssue: async (ref) => resolveByTrackerRef(ref).tracker.getIssue(ref),
       comment: async (ref, body) => resolveByTrackerRef(ref).tracker.comment(ref, body),
       label: async (ref, label) => resolveByTrackerRef(ref).tracker.label(ref, label),
+      removeLabel: async (ref, label) => resolveByTrackerRef(ref).tracker.removeLabel(ref, label),
       createIssue: async (req) => resolve(req.repo).tracker.createIssue(req),
     },
     resolveGit: (repo) => resolve(repo).git,

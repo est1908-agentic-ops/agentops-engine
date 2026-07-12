@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
+import { WorkflowExecutionAlreadyStartedError, WorkflowIdReusePolicy } from '@temporalio/client';
 import type { ProjectConfig } from '@agentops/contracts';
 import type { IssueLabeledEvent } from './parse-issue-labeled';
 import { startDevCycleForIssue } from './start-dev-cycle';
@@ -33,7 +33,8 @@ describe('startDevCycleForIssue', () => {
       expect.anything(),
       expect.objectContaining({
         taskQueue: 'agentops-devcycle',
-        workflowId: 'issue-my-project-42',
+        workflowId: 'devcycle:my-project:42',
+        workflowIdReusePolicy: expect.anything(),
         args: [
           {
             taskId: 'issue-my-project-42',
@@ -62,6 +63,15 @@ describe('startDevCycleForIssue', () => {
     const resultB = await startDevCycleForIssue(client, 'agentops-devcycle', 'project-b', eventB, config);
 
     expect(resultA.taskId).not.toEqual(resultB.taskId);
+  });
+
+  it('uses devcycle:<project>:<issueNumber> and AllowDuplicateFailedOnly', async () => {
+    const start = vi.fn().mockResolvedValue(undefined);
+    const client = fakeClient(start);
+    await startDevCycleForIssue(client, 'agentops-engine', 'acme', event, config);
+    const opts = start.mock.calls[0][1];
+    expect(opts.workflowId).toBe('devcycle:acme:42');
+    expect(opts.workflowIdReusePolicy).toBe(WorkflowIdReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY);
   });
 
   it('treats an already-started workflow as an idempotent no-op, not an error', async () => {

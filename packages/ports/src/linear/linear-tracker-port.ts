@@ -48,6 +48,10 @@ export class LinearTrackerPort implements TrackerPort {
     await this.client.setLabelIds(issue.id, [...issue.labelIds, labelId]);
   }
 
+  async removeLabel(_ref: string, _label: string): Promise<void> {
+    throw new Error('LinearTrackerPort.removeLabel not implemented (SP1 focuses on GitHub trackers)');
+  }
+
   async createIssue(_req: CreateIssueRequest): Promise<CreatedIssue> {
     throw new Error('LinearTrackerPort.createIssue not implemented (SP1 focuses on GitHub trackers)');
   }

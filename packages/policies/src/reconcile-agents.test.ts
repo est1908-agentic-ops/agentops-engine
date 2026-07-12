@@ -45,6 +45,19 @@ describe('reconcileAgents', () => {
     const plan = reconcileAgents(declared as any, existing, 'p'); // eslint-disable-line @typescript-eslint/no-explicit-any
     expect(plan.toUpdate).toHaveLength(0);
   });
+
+  it('re-points a scheduled Tier-2 agent to its own taskQueue', () => {
+    const declared = [{ name: 'nightly', workflow: 'projectScan', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' as const, taskQueue: 'proj-acme' }];
+    const existing = [{ id: scheduleId('acme', 'nightly'), scheduleSpec: '0 2 * * *', workflow: 'projectScan', paused: false, taskQueue: ENGINE_QUEUE }];
+    const plan = reconcileAgents(declared as any, existing, 'acme'); // eslint-disable-line @typescript-eslint/no-explicit-any
+    expect(plan.toUpdate.map((s) => s.name)).toContain('nightly');
+  });
+
+  it('leaves a built-in scheduled agent on ENGINE_QUEUE (no taskQueue set)', () => {
+    const declared = [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' as const }];
+    const existing = [{ id: scheduleId('acme', 'nb'), scheduleSpec: '0 2 * * *', workflow: 'whiteboxBugHunt', paused: false, taskQueue: ENGINE_QUEUE }];
+    expect(reconcileAgents(declared as any, existing, 'acme').toUpdate).toHaveLength(0); // eslint-disable-line @typescript-eslint/no-explicit-any
+  });
 });
 
 const cont = (name: string) => ({ name, workflow: 'rollbarMonitor', schedule: 'continuous' as const, input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' as const, taskQueue: 'proj-acme' });

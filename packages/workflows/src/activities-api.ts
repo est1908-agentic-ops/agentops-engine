@@ -45,6 +45,7 @@ export interface DevCycleActivities {
   getIssue(ref: string): Promise<Issue>;
   commentOnIssue(ref: string, body: string): Promise<void>;
   labelIssue(ref: string, label: string): Promise<void>;
+  unlabelIssue(ref: string, label: string): Promise<void>;
   openPr(req: OpenPrRequest): Promise<OpenPrResult>;
   getPrFeedback(prRef: string): Promise<PrFeedback>;
   pushBranch(repo: string, workspaceRef: string, branch: string, contentHash: string): Promise<void>;
@@ -56,6 +57,7 @@ export interface DevCycleActivities {
 }
 
 export interface ConfigSyncActivities {
+  listManagedProjects(): Promise<Array<{ project: string; repo: string }>>;
   loadAgentsManifest(project: string, repo: string): Promise<AgentSpec[]>;
   listAgentSchedules(project: string): Promise<ExistingSchedule[]>;
   applyScheduleChanges(project: string, repo: string, plan: ReconcilePlan): Promise<void>;

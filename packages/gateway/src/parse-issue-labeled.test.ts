@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseIssueLabeledEvent } from './parse-issue-labeled';
+import { parseIssueLabeledEvent, parseIssueTriggerEvent } from './parse-issue-labeled';
 
 const TRIGGER_LABEL = 'agentops';
 
@@ -32,6 +32,34 @@ describe('parseIssueLabeledEvent', () => {
   it('ignores issues events whose action is not "labeled"', () => {
     expect(parseIssueLabeledEvent('issues', labeledPayload({ action: 'opened' }), TRIGGER_LABEL)).toBeNull();
     expect(parseIssueLabeledEvent('issues', labeledPayload({ action: 'closed' }), TRIGGER_LABEL)).toBeNull();
+  });
+});
+
+describe('parseIssueTriggerEvent', () => {
+  const base = { repository: { full_name: 'o/r' }, issue: { number: 5, title: 'T' }, label: { name: 'agent:fix' } };
+
+  it('matches issues.opened carrying the trigger label', () => {
+    expect(
+      parseIssueTriggerEvent(
+        'issues',
+        { ...base, action: 'opened', issue: { number: 5, title: 'T', labels: [{ name: 'agent:fix' }] } },
+        'agent:fix',
+      )?.issueNumber,
+    ).toBe(5);
+  });
+
+  it('still matches issues.labeled with the trigger label', () => {
+    expect(parseIssueTriggerEvent('issues', { ...base, action: 'labeled' }, 'agent:fix')?.issueNumber).toBe(5);
+  });
+
+  it('ignores opened without the trigger label', () => {
+    expect(
+      parseIssueTriggerEvent(
+        'issues',
+        { ...base, action: 'opened', issue: { number: 5, title: 'T', labels: [{ name: 'bug' }] } },
+        'agent:fix',
+      ),
+    ).toBeNull();
   });
 
   it('ignores a labeled event for a different label', () => {

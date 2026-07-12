@@ -53,6 +53,7 @@ import {
 import { PromptPack } from '@agentops/prompts';
 import type { DevCycleActivities, PlatformActivities } from '@agentops/workflows';
 import { createWorker } from './create-worker';
+import { ensureReconcileSchedule, type ScheduleClientLike } from './ensure-reconcile-schedule';
 import { ensureSearchAttributes, type OperatorConnectionLike } from './ensure-search-attributes';
 import { setupTracing } from './tracing';
 
@@ -425,6 +426,12 @@ async function main(): Promise<void> {
       console.log('agentops worker: custom search attributes ensured (project, agentName, workflowType)');
     } catch (err) {
       console.warn('agentops worker: failed to ensure search attributes — reconcile may reject Schedule creates', err);
+    }
+    try {
+      await ensureReconcileSchedule(tc.schedule as unknown as ScheduleClientLike, ENGINE_QUEUE);
+      console.log('agentops worker: reconcile:all periodic schedule ensured');
+    } catch (err) {
+      console.warn('agentops worker: failed to ensure reconcile:all schedule', err);
     }
   } catch {
     // In test or no Temporal, schedule ops will no-op or be injected by tests.
