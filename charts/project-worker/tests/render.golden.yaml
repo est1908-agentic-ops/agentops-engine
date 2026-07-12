@@ -1,0 +1,50 @@
+---
+# Source: project-worker/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: broccoli-worker
+  namespace: dev-agents
+---
+# Source: project-worker/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: broccoli-worker
+  namespace: dev-agents
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: broccoli-worker
+  template:
+    metadata:
+      labels:
+        app: broccoli-worker
+    spec:
+      serviceAccountName: broccoli-worker
+      imagePullSecrets:
+        - name: registry-credentials
+      containers:
+        - name: worker
+          image: "gitactions.est1908.top/broccoli/agentops-worker:testsha"
+          imagePullPolicy: IfNotPresent
+          env:
+            - name: TEMPORAL_ADDRESS
+              value: "temporal-frontend.platform.svc.cluster.local:7233"
+            - name: TEMPORAL_NAMESPACE
+              value: "dev-agents"
+            - name: PROJECT_TASK_QUEUE
+              value: "proj-broccoli"
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: "http://alloy.platform.svc.cluster.local:4317"
+          envFrom:
+            - secretRef:
+                name: "rollbar-token"
+          resources:
+            limits:
+              cpu: "1"
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 128Mi

@@ -42,6 +42,23 @@ app_text, n = re.subn(
 if n != 1:
     raise SystemExit("expected exactly one engine chart targetRevision to update")
 app.write_text(app_text)
+
+# project-worker ApplicationSet chart pin (docs/superpowers/specs/2026-07-12-
+# project-worker-onboarding-design.md SP-a). Guarded: inert until the platform
+# ApplicationSet exists, so this is safe to land in the engine repo first.
+appset = pathlib.Path("clusters/ops/project-workers/applicationset.yaml")
+if appset.exists():
+    appset_text = appset.read_text()
+    appset_text, m = re.subn(
+        r"(repoURL: oci://gitactions\.est1908\.top/agentic-ops/project-worker\n\s*chart: project-worker\n\s*targetRevision:\s*).*$",
+        rf'\g<1>"0.0.0-{sha}"',
+        appset_text,
+        count=1,
+        flags=re.M,
+    )
+    if m != 1:
+        raise SystemExit("expected exactly one project-worker chart targetRevision to update")
+    appset.write_text(appset_text)
 PY
 
 if git diff --quiet; then
@@ -50,6 +67,6 @@ if git diff --quiet; then
 fi
 
 short_sha="${ENGINE_SHA:0:7}"
-git add clusters/ops/engine/values.yaml clusters/ops/engine/application.yaml
+git add clusters/ops/engine/values.yaml clusters/ops/engine/application.yaml clusters/ops/project-workers/applicationset.yaml
 git commit -m "chore(engine): bump worker images to ${short_sha}"
 git push origin main
