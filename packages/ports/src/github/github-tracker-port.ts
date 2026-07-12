@@ -26,6 +26,13 @@ export class GithubTrackerPort implements TrackerPort {
     await this.client.rest.issues.addLabels({ owner, repo, issue_number: number, labels: [label] });
   }
 
+  async removeLabel(ref: string, label: string): Promise<void> {
+    const { owner, repo, number } = parseRef(ref);
+    await this.client.rest.issues.removeLabel({ owner, repo, issue_number: number, name: label }).catch((err) => {
+      if ((err as { status?: number }).status !== 404) throw err;
+    });
+  }
+
   async createIssue(req: CreateIssueRequest): Promise<CreatedIssue> {
     const { owner, repo } = parseRepoSlug(req.repo);
     const { data } = await this.client.rest.issues.create({ owner, repo, title: req.title, body: req.body, labels: req.labels });

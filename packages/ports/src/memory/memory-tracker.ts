@@ -31,6 +31,10 @@ export class MemoryTrackerPort implements TrackerPort {
     this.labels.set(ref, existing);
   }
 
+  async removeLabel(ref: string, label: string): Promise<void> {
+    this.labels.get(ref)?.delete(label);
+  }
+
   async createIssue(req: CreateIssueRequest): Promise<CreatedIssue> {
     this.seq += 1;
     const ref = `${req.repo}#${this.seq}`;
