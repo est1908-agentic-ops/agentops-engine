@@ -18,4 +18,5 @@ export * from './agents-manifest';
 export * from './whitebox-finding';
 export * from './sha256';
 export * from './engine-queue';
+export * from './project-identity';
 export { z } from 'zod';
