@@ -257,13 +257,13 @@ describe('buildAgentJob', () => {
   it('uses req.image instead of spec.image when the request declares one', () => {
     const paths = agentOpsArtifactPaths(baseRequest);
     const job = buildAgentJob(
-      { ...baseRequest, image: 'gitactions.est1908.top/broccoli/agentops:latest' },
+      { ...baseRequest, image: 'gitactions.est1908.top/acme/agentops:latest' },
       createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
       { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
       paths,
     );
     const container = job.spec?.template?.spec?.containers?.[0];
-    expect(container?.image).toBe('gitactions.est1908.top/broccoli/agentops:latest');
+    expect(container?.image).toBe('gitactions.est1908.top/acme/agentops:latest');
   });
 
   it('has no initContainers when the request declares no services', () => {
@@ -286,8 +286,8 @@ describe('buildAgentJob', () => {
           {
             name: 'postgres',
             image: 'pgvector/pgvector:pg18',
-            env: { POSTGRES_USER: 'broccoli', POSTGRES_PASSWORD: 'broccoli' },
-            readiness: { type: 'exec', command: ['pg_isready', '-U', 'broccoli'] },
+            env: { POSTGRES_USER: 'acme', POSTGRES_PASSWORD: 'acme' },
+            readiness: { type: 'exec', command: ['pg_isready', '-U', 'acme'] },
           },
           {
             name: 'redis',
@@ -307,10 +307,10 @@ describe('buildAgentJob', () => {
         image: 'pgvector/pgvector:pg18',
         restartPolicy: 'Always',
         env: [
-          { name: 'POSTGRES_USER', value: 'broccoli' },
-          { name: 'POSTGRES_PASSWORD', value: 'broccoli' },
+          { name: 'POSTGRES_USER', value: 'acme' },
+          { name: 'POSTGRES_PASSWORD', value: 'acme' },
         ],
-        readinessProbe: { exec: { command: ['pg_isready', '-U', 'broccoli'] } },
+        readinessProbe: { exec: { command: ['pg_isready', '-U', 'acme'] } },
       },
       {
         name: 'redis',

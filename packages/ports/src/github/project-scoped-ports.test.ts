@@ -47,11 +47,11 @@ describe('createProjectScopedPorts', () => {
   it('resolves an entry registered with a full URL via a short-form lookup', async () => {
     // Managed projects registered through the CRUD can be stored as a full URL;
     // the runtime looks them up by the short owner/repo form.
-    const entry = buildEntry('https://github.com/broccoli-hr/broccoli');
+    const entry = buildEntry('https://github.com/acme/webapp');
     const { scm, resolveGit } = createProjectScopedPorts([entry]);
 
-    await scm.openPr({ repo: 'broccoli-hr/broccoli', branch: 'b', title: 't', body: 'b' });
-    expect(() => resolveGit('broccoli-hr/broccoli')).not.toThrow();
+    await scm.openPr({ repo: 'acme/webapp', branch: 'b', title: 't', body: 'b' });
+    expect(() => resolveGit('acme/webapp')).not.toThrow();
     expect(entry.scm.openPr).toHaveBeenCalledTimes(1);
   });
 
