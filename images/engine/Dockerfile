@@ -55,12 +55,16 @@ FROM deps AS worker
 # — without it, git clone fails with `spawn git ENOENT` and (pre-fix) retries
 # forever. See images/agent-runner/Dockerfile for the same pattern.
 # Cache the apt index and downloaded archives across builds (persists in the
-# self-hosted runners' long-lived buildkitd). No `rm -rf /var/lib/apt/lists/*`:
-# cache-mount contents are never committed to the image layer, so they don't
-# bloat it, and removing them would wipe the cache this is meant to keep.
+# self-hosted runners' long-lived buildkitd). node:slim ships a `docker-clean`
+# apt hook that deletes /var/cache/apt/*.deb after each install — remove it in
+# the same RUN (before apt reads its config) or the archive cache mount is a
+# no-op. No `rm -rf /var/lib/apt/lists/*`: cache-mount contents are never
+# committed to the image layer, so they don't bloat it, and removing them
+# would wipe the very cache this is meant to keep.
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    apt-get update \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates
 COPY --chown=1000:1000 . .
 # Numeric, not the name "node": kubelet can't verify a pod's runAsNonRoot
