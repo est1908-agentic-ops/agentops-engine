@@ -26,8 +26,14 @@ COPY packages/workflows/package.json ./packages/workflows/
 RUN --mount=type=cache,target=/pnpm-store,sharing=locked \
     pnpm install --frozen-lockfile --store-dir /pnpm-store --package-import-method copy
 
+# Chown once here, not once per final stage. node_modules is the expensive
+# part of this walk; every stage forking from `deps` (worker, base, and
+# base's children gateway/control) inherits this single cached layer instead
+# of each re-running its own `chown -R` over the whole tree.
+RUN chown -R node:node /app
+
 FROM deps AS base
-COPY . .
+COPY --chown=1000:1000 . .
 
 # worker forks from `deps` (before the source COPY), not `base`, so this
 # apt-get's cache key only depends on the manifest/lockfile chain, not on
@@ -43,8 +49,7 @@ FROM deps AS worker
 RUN apt-get update \
     && apt-get install -y --no-install-recommends git ca-certificates \
     && rm -rf /var/lib/apt/lists/*
-COPY . .
-RUN chown -R node:node /app
+COPY --chown=1000:1000 . .
 # Numeric, not the name "node": kubelet can't verify a pod's runAsNonRoot
 # against a named image user without a matching explicit runAsUser in the
 # pod spec (see charts/engine's podSecurityContext/containerSecurityContext).
@@ -52,12 +57,13 @@ USER 1000
 CMD ["pnpm", "--filter", "@agentops/worker", "run", "start"]
 
 FROM base AS gateway
-RUN chown -R node:node /app
 USER 1000
 CMD ["pnpm", "--filter", "@agentops/gateway", "run", "start"]
 
 FROM base AS control
-RUN pnpm --filter @agentops/ui run build
-RUN chown -R node:node /app
+# Build as uid 1000, not root: /app is already fully owned by node:node
+# (chowned once in `deps`, copied with --chown in `base`), so there's no
+# need for another whole-tree `chown -R` after this writes new files.
 USER 1000
+RUN pnpm --filter @agentops/ui run build
 CMD ["pnpm", "--filter", "@agentops/control", "run", "start"]

@@ -43,7 +43,57 @@ jobs:
 
       - run: bash charts/engine/tests/run.sh
 
-  build-images:
+  # Split across two jobs (engine images vs. agent-runner) so both self-hosted
+  # runners in the pool build concurrently instead of one runner working
+  # through all four images as sequential steps.
+  build-engine-images:
+    runs-on: self-hosted
+    needs: build
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+        with:
+          driver: docker
+
+      - uses: docker/login-action@v3
+        if: github.ref == 'refs/heads/main'
+        with:
+          registry: gitactions.est1908.top
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      # One buildx invocation for worker/gateway/control (docker-bake.hcl) so
+      # BuildKit builds their shared deps/base stages once and builds the
+      # three divergent targets concurrently, instead of three separate
+      # `docker build` calls serialized as workflow steps.
+      - uses: docker/bake-action@v7
+        with:
+          push: ${{ github.ref == 'refs/heads/main' }}
+          set: |
+            worker.tags=gitactions.est1908.top/agentic-ops/worker:${{ github.sha }}
+            gateway.tags=gitactions.est1908.top/agentic-ops/gateway:${{ github.sha }}
+            control.tags=gitactions.est1908.top/agentic-ops/control:${{ github.sha }}
+
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.2
+
+      - name: Package and push the engine chart (OCI)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          helm registry login gitactions.est1908.top \
+            -u "${{ secrets.REGISTRY_USERNAME }}" -p "${{ secrets.REGISTRY_PASSWORD }}"
+          helm package charts/engine \
+            --version "0.0.0-${{ github.sha }}" \
+            --app-version "${{ github.sha }}" \
+            --destination /tmp/chart
+          helm push "/tmp/chart/engine-0.0.0-${{ github.sha }}.tgz" \
+            oci://gitactions.est1908.top/agentic-ops
+
+  build-agent-runner-image:
     runs-on: self-hosted
     needs: build
     permissions:
@@ -64,14 +114,6 @@ jobs:
 
       - uses: docker/build-push-action@v6
         with:
-          context: .
-          file: images/engine/Dockerfile
-          target: worker
-          push: ${{ github.ref == 'refs/heads/main' }}
-          tags: gitactions.est1908.top/agentic-ops/worker:${{ github.sha }}
-
-      - uses: docker/build-push-action@v6
-        with:
           context: images/agent-runner
           file: images/agent-runner/Dockerfile
           push: ${{ github.ref == 'refs/heads/main' }}
@@ -79,41 +121,9 @@ jobs:
             gitactions.est1908.top/agentic-ops/agent-runner:${{ github.sha }}
             gitactions.est1908.top/agentic-ops/agent-runner:latest
 
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: images/engine/Dockerfile
-          target: gateway
-          push: ${{ github.ref == 'refs/heads/main' }}
-          tags: gitactions.est1908.top/agentic-ops/gateway:${{ github.sha }}
-
-      - uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: images/engine/Dockerfile
-          target: control
-          push: ${{ github.ref == 'refs/heads/main' }}
-          tags: gitactions.est1908.top/agentic-ops/control:${{ github.sha }}
-
-      - uses: azure/setup-helm@v4
-        with:
-          version: v4.2.2
-
-      - name: Package and push the engine chart (OCI)
-        if: github.ref == 'refs/heads/main'
-        run: |
-          helm registry login gitactions.est1908.top \
-            -u "${{ secrets.REGISTRY_USERNAME }}" -p "${{ secrets.REGISTRY_PASSWORD }}"
-          helm package charts/engine \
-            --version "0.0.0-${{ github.sha }}" \
-            --app-version "${{ github.sha }}" \
-            --destination /tmp/chart
-          helm push "/tmp/chart/engine-0.0.0-${{ github.sha }}.tgz" \
-            oci://gitactions.est1908.top/agentic-ops
-
   bump-platform:
     runs-on: self-hosted
-    needs: build-images
+    needs: [build-engine-images, build-agent-runner-image]
     if: github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@v4
