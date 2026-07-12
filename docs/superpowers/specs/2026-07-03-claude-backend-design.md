@@ -126,20 +126,24 @@ export class ClaudeBackend implements AgentBackend {
 **Invocation:**
 
 ```
-claude -p --output-format json --model <req.model> --max-turns <maxTurns> --dangerously-skip-permissions [--effort <req.effort>]
+claude -p --output-format stream-json --verbose --model <req.model> --dangerously-skip-permissions [--effort <req.effort>]
 ```
+
+> Updated from the original `--output-format json --max-turns <maxTurns>` shape: `--max-turns` was removed upstream (silently ignored, so dropped in code) and the buffered `json` output was switched to streaming `stream-json` — see **Output parsing** below for the reason.
 
 spawned with `cwd: req.workspaceRef`, `env` merged from `opts.env`. The prompt is **piped via stdin**, not passed as an argv string — `implement`/`design` prompts can carry large prior-stage context and argv has OS length limits; stdin has none. `child.stdin.write(req.prompt); child.stdin.end()`.
 
 **Timeout:** a timer fires `child.kill('SIGTERM')` at `req.limits.timeoutMs`; if the process hasn't exited 5s later, `SIGKILL`. Timer is cleared on normal exit.
 
-**Output parsing:** `--output-format json` emits one JSON object on stdout at the end:
+**Output parsing:** the invocation now uses `--output-format stream-json --verbose` (see the invocation note above; changed from buffered `--output-format json`). This emits newline-delimited JSON events during the run — a leading `system`/`init` event, per-turn `assistant`/`user` events, then a terminal `result` event carrying the same shape the buffered mode produced at the end:
 
 ```json
-{ "is_error": false, "result": "<final text>", "usage": {"input_tokens": N, "output_tokens": M}, "duration_ms": D }
+{ "type": "result", "is_error": false, "result": "<final text>", "usage": {"input_tokens": N, "output_tokens": M}, "duration_ms": D }
 ```
 
-Mapped to `AgentRunResult`: `output = result`, `tokensIn = usage.input_tokens`, `tokensOut = usage.output_tokens`, `wallMs = duration_ms` (fallback: measured wall-clock if the field is absent).
+`parseOutput` scans the stream and takes the `type: "result"` event (falling back, for back-compat with a single buffered object, to the last event that carries a string `result`). Mapped to `AgentRunResult`: `output = result`, `tokensIn = usage.input_tokens`, `tokensOut = usage.output_tokens`, `wallMs = duration_ms` (fallback: measured wall-clock if the field is absent).
+
+> **Why streaming (changed 2026-07-12, reason per repo convention):** `K8sJobRunner`'s liveness check is file-growth of the CLI's output file; buffered `json` writes nothing until the whole run finishes, so a long call (high-effort `full_verify` over a large diff) shows zero growth and trips the runner's `idleTimeoutMs` (default 5 min) mid-run — deterministically on every retry, exhausting the activity's retry budget and failing the workflow (**issue-broccoli-94**, 2026-07-10). Streaming grows the file continuously so idle-detection sees real progress, while still firing on a genuinely wedged CLI (no events at all). Brings `claude` to parity with `pi`, whose `--mode json` was already JSONL and so was never affected.
 
 **Error taxonomy** (this is the part most worth scrutinizing):
 

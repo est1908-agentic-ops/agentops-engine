@@ -15,10 +15,44 @@ export interface ClaudeCliSpecOptions {
 }
 
 interface ClaudeJsonResult {
+  type?: string;
   is_error?: boolean;
   result?: string;
   usage?: { input_tokens?: number; output_tokens?: number };
   duration_ms?: number;
+}
+
+// `--output-format stream-json` emits newline-delimited JSON events as the run
+// progresses (a `system`/`init` event up front, then per-turn `assistant`/`user`
+// events, then one final `{"type":"result", ...}` carrying the same shape the old
+// buffered `--output-format json` produced). The authoritative one is the
+// `result` event; a plain single-object `json` blob (older images, unit fixtures)
+// has no `type` but still carries a string `result`, so fall back to that. Parsing
+// per line -- not the whole blob -- is what lets both coexist.
+function extractResultEvent(stdout: string): ClaudeJsonResult | undefined {
+  let resultEvent: ClaudeJsonResult | undefined;
+  let fallback: ClaudeJsonResult | undefined;
+  for (const line of stdout.split('\n')) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    let obj: ClaudeJsonResult;
+    try {
+      obj = JSON.parse(trimmed) as ClaudeJsonResult;
+    } catch {
+      continue;
+    }
+    if (obj === null || typeof obj !== 'object') {
+      continue;
+    }
+    if (obj.type === 'result') {
+      resultEvent = obj;
+    } else if (typeof obj.result === 'string') {
+      fallback = obj;
+    }
+  }
+  return resultEvent ?? fallback;
 }
 
 // Matches an auth failure however the CLI phrases it. Kept deliberately broad
@@ -47,19 +81,33 @@ export function createClaudeCliSpec(opts: ClaudeCliSpecOptions = {}): CliSpec {
       // `--max-budget-usd` is a real flag on the current CLI and the likely
       // replacement if a per-call cap is wanted again, but that's a product
       // decision (what budget?) left for whoever picks this up next.
-      const args = ['-p', '--output-format', 'json', '--model', req.model, '--dangerously-skip-permissions'];
+      //
+      // `stream-json` (not plain `json`): the K8sJobRunner's liveness check is
+      // purely file-growth -- it kills the Job when the output file hasn't grown
+      // for `idleTimeoutMs` (default 5 min). Buffered `--output-format json`
+      // writes nothing until the whole run finishes, so a long call (a
+      // high-effort `full_verify` over a big diff) shows zero growth and trips
+      // the idle timeout mid-run, every retry, deterministically -- see
+      // issue-broccoli-94. Streaming emits events as the run progresses, so the
+      // file grows continuously and idle-detection sees real progress while
+      // still firing on a genuinely wedged CLI (no events at all). `--verbose`
+      // is required by the CLI to enable `stream-json` under `-p`.
+      const args = [
+        '-p',
+        '--output-format',
+        'stream-json',
+        '--verbose',
+        '--model',
+        req.model,
+        '--dangerously-skip-permissions',
+      ];
       if (req.effort) {
         args.push('--effort', req.effort);
       }
       return args;
     },
     parseOutput(stdout: string, stderr: string, elapsedMs: number): AgentRunResult {
-      let parsed: ClaudeJsonResult | undefined;
-      try {
-        parsed = JSON.parse(stdout) as ClaudeJsonResult;
-      } catch {
-        parsed = undefined;
-      }
+      const parsed = extractResultEvent(stdout);
 
       if (!parsed || typeof parsed.result !== 'string') {
         throw new ProcessCliProcessError(`claude produced no parseable JSON result: ${(stdout || stderr).slice(0, 500)}`);

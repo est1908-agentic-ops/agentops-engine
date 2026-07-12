@@ -17,6 +17,19 @@ const baseRequest: BackendRunRequest = {
   prompt: 'do the thing',
 };
 
+// `--output-format stream-json` writes newline-delimited events: some leading
+// progress events, then the authoritative `{"type":"result", ...}`. Builds that
+// wire shape from a result payload so the parseOutput tests exercise the real
+// stream, not a single buffered object.
+function streamJson(
+  result: Record<string, unknown>,
+  leading: Record<string, unknown>[] = [{ type: 'system', subtype: 'init', session_id: 's1' }],
+): string {
+  return [...leading, { type: 'result', subtype: 'success', ...result }]
+    .map((event) => JSON.stringify(event))
+    .join('\n');
+}
+
 function fakeChildProcess() {
   const child = new EventEmitter() as EventEmitter & {
     stdout: PassThrough;
@@ -61,7 +74,8 @@ describe('ClaudeBackend', () => {
     expect(calls[0].args).toEqual([
       '-p',
       '--output-format',
-      'json',
+      'stream-json',
+      '--verbose',
       '--model',
       'claude-sonnet-5',
       '--dangerously-skip-permissions',
@@ -89,12 +103,18 @@ describe('ClaudeBackend', () => {
     expect(calls[0][calls[0].indexOf('--effort') + 1]).toBe('high');
   });
 
-  it('maps valid JSON output to AgentRunResult', async () => {
+  it('maps the streamed result event to AgentRunResult', async () => {
     const { child } = fakeChildProcess();
     const spawnFn = vi.fn(() => {
       queueMicrotask(() => {
         child.stdout.end(
-          JSON.stringify({ is_error: false, result: 'final text', usage: { input_tokens: 12, output_tokens: 34 }, duration_ms: 999 }),
+          streamJson(
+            { is_error: false, result: 'final text', usage: { input_tokens: 12, output_tokens: 34 }, duration_ms: 999 },
+            [
+              { type: 'system', subtype: 'init', session_id: 's1' },
+              { type: 'assistant', message: { content: [{ type: 'text', text: 'final text' }] } },
+            ],
+          ),
         );
         child.stderr.end('');
         child.emit('close', 0);
@@ -108,11 +128,36 @@ describe('ClaudeBackend', () => {
     expect(result).toEqual({ output: 'final text', tokensIn: 12, tokensOut: 34, wallMs: 999 });
   });
 
-  it('throws ClaudeBackendProcessError when stdout is not valid JSON', async () => {
+  it('still parses a single buffered json object (back-compat with --output-format json)', async () => {
     const { child } = fakeChildProcess();
     const spawnFn = vi.fn(() => {
       queueMicrotask(() => {
-        child.stdout.end('not json at all');
+        child.stdout.end(
+          JSON.stringify({ is_error: false, result: 'buffered text', usage: { input_tokens: 5, output_tokens: 6 }, duration_ms: 42 }),
+        );
+        child.stderr.end('');
+        child.emit('close', 0);
+      });
+      return child;
+    });
+    const backend = new ProcessCliRunner(createClaudeCliSpec(), { spawn: spawnFn as never });
+
+    const result = await backend.run(baseRequest);
+
+    expect(result).toEqual({ output: 'buffered text', tokensIn: 5, tokensOut: 6, wallMs: 42 });
+  });
+
+  it('throws ClaudeBackendProcessError when the stream carries no result event', async () => {
+    const { child } = fakeChildProcess();
+    const spawnFn = vi.fn(() => {
+      queueMicrotask(() => {
+        // Leading progress events but the run never emitted a terminal result.
+        child.stdout.end(
+          [
+            JSON.stringify({ type: 'system', subtype: 'init', session_id: 's1' }),
+            JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'partial' }] } }),
+          ].join('\n'),
+        );
         child.stderr.end('');
         child.emit('close', 0);
       });
@@ -128,7 +173,7 @@ describe('ClaudeBackend', () => {
     const spawnFn = vi.fn(() => {
       queueMicrotask(() => {
         child.stdout.end(
-          JSON.stringify({ is_error: true, result: 'hit an internal snag', usage: { input_tokens: 1, output_tokens: 1 }, duration_ms: 5 }),
+          streamJson({ is_error: true, result: 'hit an internal snag', usage: { input_tokens: 1, output_tokens: 1 }, duration_ms: 5 }),
         );
         child.stderr.end('');
         child.emit('close', 0);
@@ -153,7 +198,7 @@ describe('ClaudeBackend', () => {
     const spawnFn = vi.fn(() => {
       queueMicrotask(() => {
         child.stdout.end(
-          JSON.stringify({
+          streamJson({
             is_error: true,
             result: 'Failed to authenticate. API Error: 401 token expired or incorrect',
             usage: { input_tokens: 1, output_tokens: 1 },
