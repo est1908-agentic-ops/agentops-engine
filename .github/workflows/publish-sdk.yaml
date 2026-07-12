@@ -15,7 +15,6 @@ jobs:
     runs-on: self-hosted
     permissions:
       contents: read
-      id-token: write # npm provenance
     steps:
       - uses: actions/checkout@v4
 
@@ -46,4 +45,6 @@ jobs:
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: pnpm --filter @agentic-ops/engine-sdk publish --no-git-checks --access public --provenance
+        # No --provenance: npm provenance requires a public source repo, and
+        # agentops-engine is private. The published package is still public.
+        run: pnpm --filter @agentic-ops/engine-sdk publish --no-git-checks --access public
