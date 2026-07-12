@@ -31,4 +31,12 @@ describe('MemoryTrackerPort', () => {
     await tracker.label('issue-1', 'needs-triage');
     expect(tracker.getLabels('issue-1')).toEqual(['needs-triage']);
   });
+
+  it('createIssue stores the issue and returns a ref retrievable via getIssue', async () => {
+    const t = new MemoryTrackerPort();
+    const created = await t.createIssue({ repo: 'o/r', title: 'Bug', body: 'b', labels: ['bug'] });
+    expect(created.ref).toMatch(/^o\/r#\d+$/);
+    const issue = await t.getIssue(created.ref);
+    expect(issue).toMatchObject({ title: 'Bug', labels: ['bug'] });
+  });
 });

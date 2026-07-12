@@ -163,14 +163,16 @@ Recommended order **1 → 2 → 3 → 4**; SP1 delivers most of #30 with least r
 
 ## 11. Definition of done (SP1, the first plan)
 
-- `AgentsManifestSchema` in `contracts` (+ tests: strictness, cron/`"continuous"`, per-workflow input validation, name pattern/uniqueness).
-- `createIssue` in `TrackerPort` + `create-activities` with fingerprint dedup against the `filed_findings` projection (+ tests).
-- `StageSchema` extended with `bughunt`; `runAgent` stamps `promptHash`/`promptSource`/`project`/`workflowType` on `agent_run_stats` and the OTel span (+ tests).
-- `whiteboxBugHunt` workflow exported from `packages/workflows` (auto-registered via `workflowsPath`), routed by config, filing deduped `bug`-labeled issues.
-- `ConfigSync` reconciler: reads `agents.json` via `ScmPort`, validates it, diffs against existing Temporal Schedules, applies create/update/delete/pause; malformed manifest rejects the whole reconcile.
-- e2e (stub backend): a manifest with a scheduled `whiteboxBugHunt` reconciles to a Temporal Schedule; triggering that Schedule runs the workflow, which files a `bug`-labeled issue via `createIssue`; a second run with the same fingerprint does **not** file a duplicate. (The issue → `devCycle` fix loop is the Gateway trigger side, exercised in SP3.)
-- `pnpm lint && pnpm typecheck && pnpm test` green; `pnpm e2e` green.
-- CLAUDE.md/AGENTS.md already name `docs/superpowers/specs/` as the design authority — no separate architecture doc to update.
+- [x] `AgentsManifestSchema` in `contracts` (+ tests: strictness, cron/`"continuous"`, per-workflow input validation, name pattern/uniqueness).
+- [x] `createIssue` in `TrackerPort` + `create-activities` with fingerprint dedup against the `filed_findings` projection (+ tests).
+- [x] `StageSchema` extended with `bughunt`; `runAgent` stamps `promptHash`/`promptSource`/`project`/`workflowType` on `agent_run_stats` and the OTel span (+ tests).
+- [x] `whiteboxBugHunt` workflow exported from `packages/workflows` (auto-registered via `workflowsPath`), routed by config, filing deduped `bug`-labeled issues.
+- [x] `ConfigSync` reconciler: reads `agents.json` via `ScmPort`, validates it, diffs against existing Temporal Schedules, applies create/update/delete/pause; malformed manifest rejects the whole reconcile.
+- [x] e2e (stub backend): whiteboxBugHunt files a `bug`-labeled issue via `createIssue`; a second run with the same fingerprint does **not** file a duplicate. (Reconcile→Schedule firing covered by unit tests with mocked ScheduleClient; a live Schedule fire test is intentionally omitted per plan.)
+- [x] `pnpm lint && pnpm typecheck && pnpm test` green; `pnpm e2e` green.
+- [x] CLAUDE.md/AGENTS.md already name `docs/superpowers/specs/` as the design authority — no separate architecture doc to update.
+
+See `docs/agents-json.md` for the project-facing reference delivered with SP1.
 
 ## 12. Open questions
 

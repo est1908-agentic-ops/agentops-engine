@@ -1,6 +1,6 @@
-import type { Issue, TrackerPort } from '../tracker-port';
+import type { Issue, TrackerPort, CreateIssueRequest, CreatedIssue } from '../tracker-port';
 import type { GithubClient } from './github-client';
-import { parseRef } from './parse-ref';
+import { parseRef, parseRepoSlug } from './parse-ref';
 
 export class GithubTrackerPort implements TrackerPort {
   constructor(private readonly client: GithubClient) {}
@@ -24,5 +24,11 @@ export class GithubTrackerPort implements TrackerPort {
   async label(ref: string, label: string): Promise<void> {
     const { owner, repo, number } = parseRef(ref);
     await this.client.rest.issues.addLabels({ owner, repo, issue_number: number, labels: [label] });
+  }
+
+  async createIssue(req: CreateIssueRequest): Promise<CreatedIssue> {
+    const { owner, repo } = parseRepoSlug(req.repo);
+    const { data } = await this.client.rest.issues.create({ owner, repo, title: req.title, body: req.body, labels: req.labels });
+    return { ref: `${req.repo}#${data.number}`, url: data.html_url };
   }
 }

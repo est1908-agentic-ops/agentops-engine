@@ -86,3 +86,4 @@ function sha256Hex(message: string): string {
 }
 
 export { sha256Hex };
+export { sha256Hex as sha256 };

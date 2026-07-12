@@ -5,3 +5,5 @@ export * from './babysit-decision';
 export * from './pre-implement-stages';
 export * from './parse-platform-result';
 export * from './resolve-stage-limits';
+export * from './reconcile-agents';
+export * from './parse-findings';

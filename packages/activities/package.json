@@ -11,6 +11,7 @@
   "dependencies": {
     "dotenv": "^16.6.1",
     "@agentops/contracts": "workspace:*",
+    "@agentops/policies": "workspace:*",
     "@agentops/ports": "workspace:*",
     "@agentops/backends": "workspace:*",
     "@agentops/prompts": "workspace:*",

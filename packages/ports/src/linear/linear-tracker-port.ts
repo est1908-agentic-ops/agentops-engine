@@ -1,4 +1,4 @@
-import type { Issue, TrackerPort } from '../tracker-port';
+import type { Issue, TrackerPort, CreateIssueRequest, CreatedIssue } from '../tracker-port';
 import { parseTrackerRef } from '../tracker-ref';
 import type { LinearClient } from './linear-client';
 
@@ -46,5 +46,9 @@ export class LinearTrackerPort implements TrackerPort {
       return;
     }
     await this.client.setLabelIds(issue.id, [...issue.labelIds, labelId]);
+  }
+
+  async createIssue(_req: CreateIssueRequest): Promise<CreatedIssue> {
+    throw new Error('LinearTrackerPort.createIssue not implemented (SP1 focuses on GitHub trackers)');
   }
 }

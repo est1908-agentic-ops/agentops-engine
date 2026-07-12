@@ -1,4 +1,6 @@
 import type { AgentRunRequest, AgentRunResult, PrFeedback, ProjectConfig, RunStats, StageResult } from '@agentops/contracts';
+import type { AgentSpec } from '@agentops/contracts';
+import type { ExistingSchedule, ReconcilePlan } from '@agentops/policies';
 
 export interface Issue {
   ref: string;
@@ -38,7 +40,7 @@ export interface PreparedWorkspace {
 }
 
 export interface DevCycleActivities {
-  runAgent(req: AgentRunRequest): Promise<AgentRunResult>;
+  runAgent(req: AgentRunRequest): Promise<AgentRunResult & { promptHash: string; promptSource: string }>;
   resolveRepoConfig(repo: string): Promise<RepoConfigResolution>;
   getIssue(ref: string): Promise<Issue>;
   commentOnIssue(ref: string, body: string): Promise<void>;
@@ -50,4 +52,11 @@ export interface DevCycleActivities {
   recordRunStats(stats: RunStats): Promise<void>;
   prepareWorkspace(req: { taskId: string; repo: string; initCommands?: string[] }): Promise<PreparedWorkspace>;
   cleanupWorkspace(workspaceRef: string, repo: string): Promise<void>;
+  createIssue(req: { repo: string; project: string; title: string; body: string; labels: string[]; dedupeFingerprint?: string }): Promise<{ ref: string; url: string; deduped: boolean }>;
+}
+
+export interface ConfigSyncActivities {
+  loadAgentsManifest(project: string, repo: string): Promise<AgentSpec[]>;
+  listAgentSchedules(project: string): Promise<ExistingSchedule[]>;
+  applyScheduleChanges(project: string, plan: ReconcilePlan): Promise<void>;
 }
