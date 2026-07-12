@@ -165,12 +165,12 @@ describe('loadManagedProjectRegistry', () => {
   it('canonicalizes a full-URL repo to short owner/repo in the resolved entry', async () => {
     const { publicKey, privateKey } = generateManagedProjectKeyPair();
     const store = fakeStore([
-      { project: 'broccoli', repo: 'https://github.com/broccoli-hr/broccoli', encryptedToken: encryptForManagedProject(publicKey, 't') },
+      { project: 'webapp', repo: 'https://github.com/acme/webapp', encryptedToken: encryptForManagedProject(publicKey, 't') },
     ]);
 
     const entries = await loadManagedProjectRegistry({ store, privateKey });
 
-    expect(entries[0].repo).toBe('broccoli-hr/broccoli');
+    expect(entries[0].repo).toBe('acme/webapp');
   });
 
   it('skips managed projects that cannot be decrypted', async () => {

@@ -3,21 +3,21 @@ import { normalizeRepo, parseRef, parseRepoSlug } from './parse-ref';
 
 describe('normalizeRepo', () => {
   it('leaves a short owner/repo unchanged (idempotent)', () => {
-    expect(normalizeRepo('broccoli-hr/broccoli')).toBe('broccoli-hr/broccoli');
+    expect(normalizeRepo('acme/webapp')).toBe('acme/webapp');
   });
 
   it('strips an https browser/clone URL down to owner/repo', () => {
-    expect(normalizeRepo('https://github.com/broccoli-hr/broccoli')).toBe('broccoli-hr/broccoli');
-    expect(normalizeRepo('https://github.com/broccoli-hr/broccoli.git')).toBe('broccoli-hr/broccoli');
-    expect(normalizeRepo('https://github.com/broccoli-hr/broccoli/')).toBe('broccoli-hr/broccoli');
+    expect(normalizeRepo('https://github.com/acme/webapp')).toBe('acme/webapp');
+    expect(normalizeRepo('https://github.com/acme/webapp.git')).toBe('acme/webapp');
+    expect(normalizeRepo('https://github.com/acme/webapp/')).toBe('acme/webapp');
   });
 
   it('strips an SSH clone URL down to owner/repo', () => {
-    expect(normalizeRepo('git@github.com:broccoli-hr/broccoli.git')).toBe('broccoli-hr/broccoli');
+    expect(normalizeRepo('git@github.com:acme/webapp.git')).toBe('acme/webapp');
   });
 
   it('trims surrounding whitespace', () => {
-    expect(normalizeRepo('  broccoli-hr/broccoli  ')).toBe('broccoli-hr/broccoli');
+    expect(normalizeRepo('  acme/webapp  ')).toBe('acme/webapp');
   });
 });
 
