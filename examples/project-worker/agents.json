@@ -4,9 +4,12 @@
       "name": "rollbar-monitor",
       "workflow": "rollbarMonitor",
       "schedule": "continuous",
-      "taskQueue": "proj-acme",
       "input": { "repo": "acme/web", "project": "acme" },
       "enabled": true
     }
-  ]
+  ],
+  "worker": {
+    "image": "gitactions.est1908.top/acme/agentops-worker:abc1234",
+    "externalSecrets": ["rollbar-token"]
+  }
 }

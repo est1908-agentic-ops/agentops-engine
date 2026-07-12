@@ -21,13 +21,13 @@ import type {
   ResolvedProjectEntry,
   RunStats,
 } from '@agentops/contracts';
-import { parseProjectConfig, sha256, type AgentSpec } from '@agentops/contracts';
+import { parseProjectConfig, sha256, type AgentSpec, type AgentsManifest } from '@agentops/contracts';
 import { parseAgentsManifest, BUILTIN_WORKFLOW_INPUTS } from '@agentops/contracts';
 import type { FiledFindingStore } from './filed-finding-store';
 import type { ScheduleClientLike } from './schedule-ops';
 import { ENGINE_QUEUE } from '@agentops/contracts';
 import type { ReconcilePlan } from '@agentops/policies';
-import { scheduleId } from '@agentops/policies';
+import { scheduleId, resolveAgentQueue } from '@agentops/policies';
 import type { PromptPack } from '@agentops/prompts';
 import type { StageResultRecord, StageResultStore } from './stage-result-store';
 import type { StatsStore } from './stats-store';
@@ -247,17 +247,16 @@ export function createActivities(deps: ActivityDependencies) {
       return deps.registry.map((e) => ({ project: e.project, repo: e.repo }));
     },
 
-    async loadAgentsManifest(project: string, repo: string): Promise<AgentSpec[]> {
+    async loadAgentsManifest(project: string, repo: string): Promise<AgentsManifest> {
       const raw = await deps.scm.readFile(repo, 'agents.json');
-      if (raw === null) return [];
+      if (raw === null) return { agents: [] };
       let parsed: unknown;
       try {
         parsed = JSON.parse(raw);
       } catch {
         parsed = raw;
       }
-      const manifest = parseAgentsManifest(parsed, { workflowInputs: BUILTIN_WORKFLOW_INPUTS });
-      return manifest.agents;
+      return parseAgentsManifest(parsed, { workflowInputs: BUILTIN_WORKFLOW_INPUTS });
     },
 
     async listAgentSchedules(project: string): Promise<Array<{ id: string; scheduleSpec: string; workflow: string; paused: boolean; taskQueue?: string }>> {
@@ -289,7 +288,7 @@ export function createActivities(deps: ActivityDependencies) {
       /* eslint-disable @typescript-eslint/no-explicit-any */
       for (const spec of [...plan.toCreate, ...plan.toUpdate]) {
         if (spec.schedule === 'continuous') continue;
-        const actionQueue = spec.taskQueue ?? deps.taskQueue ?? ENGINE_QUEUE;
+        const actionQueue = resolveAgentQueue(spec, project, deps.taskQueue ?? ENGINE_QUEUE);
         const id = scheduleId(project, spec.name);
         const args = [{ repo, project, ...spec.input }];
         const memo = { project, agentName: spec.name, workflowType: spec.workflow };
@@ -344,7 +343,7 @@ export function createActivities(deps: ActivityDependencies) {
       try {
         await client.start(spec.workflow, {
           workflowId: id,
-          taskQueue: (spec as any).taskQueue ?? ENGINE_QUEUE,
+          taskQueue: resolveAgentQueue(spec, project),
           args: [{ repo, project, ...spec.input }],
           memo,
           searchAttributes: { project: [project], agentName: [spec.name], workflowType: [spec.workflow] },
