@@ -28,7 +28,7 @@ export class GithubTrackerPort implements TrackerPort {
 
   async removeLabel(ref: string, label: string): Promise<void> {
     const { owner, repo, number } = parseRef(ref);
-    await this.client.rest.issues.removeLabel({ owner, repo, issue_number: number, name: label }).catch((err) => {
+    await this.client.rest.issues.removeLabel({ owner, repo, issue_number: number, name: label }).catch((err: unknown) => {
       if ((err as { status?: number }).status !== 404) throw err;
     });
   }

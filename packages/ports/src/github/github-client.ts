@@ -10,6 +10,7 @@ export interface GithubClient {
       get(params: { owner: string; repo: string; issue_number: number }): Promise<{ data: GithubIssueData }>;
       createComment(params: { owner: string; repo: string; issue_number: number; body: string }): Promise<unknown>;
       addLabels(params: { owner: string; repo: string; issue_number: number; labels: string[] }): Promise<unknown>;
+      removeLabel(params: { owner: string; repo: string; issue_number: number; name: string }): Promise<unknown>;
       create(params: { owner: string; repo: string; title: string; body: string; labels?: string[] }): Promise<{ data: { number: number; html_url: string } }>;
     };
     pulls: {
