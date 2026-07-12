@@ -1,5 +1,5 @@
 import type { Client } from '@temporalio/client';
-import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
+import { WorkflowExecutionAlreadyStartedError, WorkflowIdReusePolicy } from '@temporalio/client';
 import type { ProjectConfig } from '@agentops/contracts';
 import { devCycle } from '@agentops/workflows';
 import type { IssueLabeledEvent } from './parse-issue-labeled';
@@ -31,10 +31,12 @@ export async function startDevCycleForIssue(
   // distinct registered repos (e.g. "foo-bar/baz" and "foo/bar-baz" both
   // become "foo-bar-baz"), which would silently swallow one project's events.
   const taskId = `issue-${project}-${event.issueNumber}`;
+  const workflowId = `devcycle:${project}:${event.issueNumber}`;
   try {
     await client.workflow.start(devCycle, {
       taskQueue,
-      workflowId: taskId,
+      workflowId,
+      workflowIdReusePolicy: WorkflowIdReusePolicy.ALLOW_DUPLICATE_FAILED_ONLY,
       args: [
         {
           taskId,
