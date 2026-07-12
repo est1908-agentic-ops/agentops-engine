@@ -43,6 +43,10 @@ jobs:
 
       - run: bash charts/engine/tests/run.sh
 
+      - run: helm lint charts/project-worker
+
+      - run: bash charts/project-worker/tests/run.sh
+
   # Split across two jobs (engine images vs. agent-runner) so both self-hosted
   # runners in the pool build concurrently instead of one runner working
   # through all four images as sequential steps.
@@ -91,6 +95,12 @@ jobs:
             --app-version "${{ github.sha }}" \
             --destination /tmp/chart
           helm push "/tmp/chart/engine-0.0.0-${{ github.sha }}.tgz" \
+            oci://gitactions.est1908.top/agentic-ops
+          helm package charts/project-worker \
+            --version "0.0.0-${{ github.sha }}" \
+            --app-version "${{ github.sha }}" \
+            --destination /tmp/chart
+          helm push "/tmp/chart/project-worker-0.0.0-${{ github.sha }}.tgz" \
             oci://gitactions.est1908.top/agentic-ops
 
   build-agent-runner-image:

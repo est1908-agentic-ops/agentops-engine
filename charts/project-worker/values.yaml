@@ -1,0 +1,42 @@
+# Identity of the project this worker serves. Drives resource names and the
+# default task queue (proj-<project>). Required.
+project: ""
+
+# The PROJECT-BUILT worker image ref (repo:tag or repo@digest). Set per release
+# by the project's own CI. Required.
+image: ""
+
+# Queue this worker polls. Empty -> defaults to proj-<project> in the template.
+# Must match the taskQueue the project's agents.json schedules onto (spec §7).
+taskQueue: ""
+
+replicas: 1
+
+# Temporal connection. This is the SHARED namespace the engine uses (spec §3/§9);
+# supplied by the platform ApplicationSet from cluster-wide values, not per project.
+temporal:
+  address: ""
+  namespace: ""
+
+# OTLP endpoint for the worker's own orchestration spans (shared platform value).
+otel:
+  endpoint: ""
+
+# K8s Secret names holding the project's OWN externals (e.g. a Rollbar token),
+# mounted as envFrom. NEVER engine credentials (spec §4.1).
+externalSecretRefs: []
+
+# Shared registry pull secret.
+imagePullSecretName: registry-credentials
+pullPolicy: IfNotPresent
+
+# K8s namespace the worker runs in — shared with the engine (spec §9).
+namespace: dev-agents
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: "1"
+    memory: 512Mi
