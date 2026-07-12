@@ -11,6 +11,15 @@ export const ModelRefSchema = z.object({
 });
 export type ModelRef = z.infer<typeof ModelRefSchema>;
 
+// A stage routes to a named tier (not a concrete model), with an optional
+// per-project effort override on top of the global tier. The tier resolves
+// to an ordered ModelRef[] (primary + session-limit fallback chain).
+export const StageRouteSchema = z.object({
+  tier: z.string().min(1),
+  effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
+});
+export type StageRoute = z.infer<typeof StageRouteSchema>;
+
 export const BrakesSchema = z.object({
   maxImplementAttempts: z.number().int().positive().default(3),
   maxIterations: z.number().int().positive(),
@@ -20,17 +29,17 @@ export const BrakesSchema = z.object({
 export type Brakes = z.infer<typeof BrakesSchema>;
 
 export const RoutingSchema = z.object({
-  context: ModelRefSchema.optional(),
-  assess: ModelRefSchema.optional(),
-  design: ModelRefSchema.optional(),
-  plan: ModelRefSchema.optional(),
-  implement: ModelRefSchema.optional(),
-  full_verify: ModelRefSchema.optional(),
-  review: ModelRefSchema.optional(),
-  pr: ModelRefSchema.optional(),
-  pr_babysit: ModelRefSchema.optional(),
-  bughunt: ModelRefSchema.optional(),
-  agent: ModelRefSchema.optional(),
+  context: StageRouteSchema.optional(),
+  assess: StageRouteSchema.optional(),
+  design: StageRouteSchema.optional(),
+  plan: StageRouteSchema.optional(),
+  implement: StageRouteSchema.optional(),
+  full_verify: StageRouteSchema.optional(),
+  review: StageRouteSchema.optional(),
+  pr: StageRouteSchema.optional(),
+  pr_babysit: StageRouteSchema.optional(),
+  bughunt: StageRouteSchema.optional(),
+  agent: StageRouteSchema.optional(),
 });
 export type Routing = z.infer<typeof RoutingSchema>;
 

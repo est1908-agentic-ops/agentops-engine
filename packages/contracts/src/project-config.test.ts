@@ -5,7 +5,7 @@ const validConfig = {
   fastVerifyCommands: ['pnpm lint'],
   fullVerifyCommands: ['pnpm test'],
   stages: { assess: false, triage: false },
-  routing: { implement: { backend: 'stub', model: 'stub-v1' } },
+  routing: { implement: { tier: 'implementation' } },
   brakes: { maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 },
 };
 
@@ -16,12 +16,12 @@ describe('ProjectConfigSchema', () => {
     expect(parsed.escalation).toBeUndefined();
   });
 
-  it('accepts an optional escalation model', () => {
+  it('accepts an optional escalation tier ref', () => {
     const parsed = ProjectConfigSchema.parse({
       ...validConfig,
-      escalation: { backend: 'claude', model: 'opus' },
+      escalation: { tier: 'escalation' },
     });
-    expect(parsed.escalation?.model).toBe('opus');
+    expect(parsed.escalation?.tier).toBe('escalation');
   });
 
   it('accepts an optional per-stage timeouts override', () => {
@@ -107,9 +107,9 @@ describe('parseProjectConfig', () => {
     const config = parseProjectConfig({});
     expect(config.fastVerifyCommands).toBeUndefined();
     expect(config.fullVerifyCommands).toBeUndefined();
-    expect(config.routing.implement).toEqual({ backend: 'pi', model: 'openrouter/deepseek-v4-flash', effort: 'high' });
+    expect(config.routing.implement).toEqual({ tier: 'implementation', effort: 'high' });
     expect(config.brakes).toEqual({ maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 });
-    expect(config.escalation).toBeUndefined();
+    expect(config.escalation).toEqual({ tier: 'escalation' });
   });
 
   it('passes verify commands through untouched when supplied', () => {
@@ -119,9 +119,9 @@ describe('parseProjectConfig', () => {
   });
 
   it('deep-merges a partial routing override, keeping other stages at default', () => {
-    const config = parseProjectConfig({ routing: { implement: { backend: 'pi', model: 'pi-default' } } });
-    expect(config.routing.implement).toEqual({ backend: 'pi', model: 'pi-default' });
-    expect(config.routing.context).toEqual({ backend: 'claude', model: 'claude-sonnet-5', effort: 'medium' });
+    const config = parseProjectConfig({ routing: { implement: { tier: 'custom' } } });
+    expect(config.routing.implement).toEqual({ tier: 'custom' });
+    expect(config.routing.context).toEqual({ tier: 'smart' });
   });
 
   it('deep-merges a partial brakes override, keeping other brake numbers at default', () => {

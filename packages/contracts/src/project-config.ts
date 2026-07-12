@@ -23,7 +23,11 @@ export const ProjectConfigSchema = z.object({
   fullVerifyCommands: z.array(z.string()).optional(),
   stages: StageToggleSchema,
   routing: RoutingSchema,
-  escalation: ModelRefSchema.optional(),
+  escalation: z.object({ tier: z.string().min(1) }).optional(),
+  // Project-local tier definitions. On a name collision with a global tier
+  // (SP3's DB table), the project-local entry wins -- mirrors how
+  // DEFAULT_PROJECT_CONFIG merges with per-project overrides.
+  tiers: z.record(z.string(), z.array(ModelRefSchema)).optional(),
   brakes: BrakesSchema,
   timeouts: TimeoutsSchema.optional(),
 });
@@ -35,14 +39,15 @@ export const DEFAULT_PROJECT_CONFIG: Omit<
 > = {
   stages: {},
   routing: {
-    context: { backend: 'claude', model: 'claude-sonnet-5', effort: 'medium' },
-    assess: { backend: 'claude', model: 'claude-sonnet-5', effort: 'medium' },
-    design: { backend: 'claude', model: 'claude-sonnet-5', effort: 'medium' },
-    plan: { backend: 'claude', model: 'claude-sonnet-5', effort: 'medium' },
-    implement: { backend: 'pi', model: 'openrouter/deepseek-v4-flash', effort: 'high' },
-    full_verify: { backend: 'claude', model: 'claude-sonnet-5', effort: 'high' },
-    review: { backend: 'claude', model: 'claude-sonnet-5', effort: 'high' },
+    context: { tier: 'smart' },
+    assess: { tier: 'smart' },
+    design: { tier: 'smart', effort: 'medium' },
+    plan: { tier: 'smart' },
+    implement: { tier: 'implementation', effort: 'high' },
+    full_verify: { tier: 'smart', effort: 'high' },
+    review: { tier: 'review' },
   },
+  escalation: { tier: 'escalation' },
   brakes: { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 },
 };
 
