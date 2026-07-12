@@ -19,29 +19,27 @@ Both are git-sourced, PR-reviewed, agent-improvable, and require **no engine reb
 
 | Tier | A project gets | Cost to the project | Engine rebuild? |
 |---|---|---|---|
-| **1. Config manifest** | schedule/trigger a **built-in** workflow (bughunt, PR-sweep, QA, issue-sweep, …), tuned via `ProjectConfig` + `agents.json` | none — runs on the shared fleet | never |
+| **1. Config manifest** | schedule/trigger a **built-in** workflow (`whiteboxBugHunt`, `qaProbe`) or `devCycle`, tuned via `ProjectConfig` + `agents.json` | none — runs on the shared fleet | never |
 | **2. Per-project worker** | **custom workflow structure in TS**, using `@agentops/engine-sdk`; heavy activities delegated to the engine | its own worker image + deploy in its namespace | never (project deploys its own worker) |
 
 All five #30 use-cases are covered by **Tier 1** except a project-specific external source (e.g. Rollbar), which is **Tier 2**. Build Tier 1 first.
 
 ## 3. Tier 1 — built-in workflows + `agents.json` manifest + reconciler
 
-**Built-in workflows** (`packages/workflows`), each a normal Temporal TS workflow parameterized by project + `ProjectConfig` (resolved via the existing `resolveRepoConfig`):
-- `whiteboxBugHunt({ repo, focus? })` — read-only agent over the source → structured findings → `createIssue(labels:['bug'])`.
-- `issueSweep({ repo, label })` — `listIssues` → for each, `executeChild(devCycle)` (labels one in-progress for idempotency).
-- `prReviewSweep({ repo })` — `listOpenPrs` → review agent → `mergePr` on pass / comment on fail.
-- `qaProbe({ repo, previewUrl })` — probe agent (Playwright/MailPit) → `createIssue` per finding.
+**The built-in catalog is exactly three workflows** (`packages/workflows`), each a normal Temporal TS workflow parameterized by project + `ProjectConfig` (resolved via the existing `resolveRepoConfig`):
+- `devCycle` — **already exists**: the Issue→PR pipeline (design→plan→implement→verify→review→PR→babysit-to-merge). It also already covers "review a PR to merge-ready" (its `pr_babysit` loop) and "fix an issue" — so no separate PR-sweep or issue-sweep workflow is needed.
+- `whiteboxBugHunt({ repo, focus? })` — **new**: read-only agent over the source → structured findings → `createIssue(labels:['bug'])`.
+- `qaProbe({ repo, previewUrl })` — **new**: probe agent (Playwright/MailPit against a preview) → `createIssue` per finding.
 
-These reuse `devCycle`/`platform` patterns (proxies, policies, `executeChild`) and record `agent_run_stats` with fixed-enum stages — no new observability plumbing.
+**The loop, without extra sweep workflows:** the finders (`whiteboxBugHunt`, `qaProbe`) file labeled issues; the **existing M3 Gateway trigger** (issue-labeled → `devCycle`) picks each up and drives it to a merged PR. So "sweep issues → fix" and "PR review → merge" are `devCycle` + the trigger layer, not new built-ins. The new workflows reuse `devCycle`/`platform` patterns (proxies, policies) and record `agent_run_stats` with fixed-enum stages — no new observability plumbing.
 
 **The manifest** — `agents.json` in the project repo (git-sourced, PR-reviewed):
 
 ```jsonc
 {
   "agents": [
-    { "name": "whitebox-bughunt", "workflow": "whiteboxBugHunt", "schedule": "0 2 * * *", "input": { "focus": "auth & billing" } },
-    { "name": "bug-fixer",        "workflow": "issueSweep",      "schedule": "*/30 * * * *", "input": { "label": "bug" } },
-    { "name": "pr-sweep",         "workflow": "prReviewSweep",   "schedule": "0 * * * *" }
+    { "name": "nightly-bughunt", "workflow": "whiteboxBugHunt", "schedule": "0 2 * * *", "input": { "focus": "auth & billing" } },
+    { "name": "nightly-qa",      "workflow": "qaProbe",         "schedule": "0 3 * * *", "input": { "previewUrl": "https://staging.acme.lab" } }
   ]
 }
 ```
@@ -66,18 +64,18 @@ The **compatibility contract** (semver'd): `EngineActivities` signatures, child-
 
 ## 5. Shared activities & prompts (engine-side, added once)
 
-New engine activities needed by the workflows above, added once and reusable by every project (via `TrackerPort`/`ScmPort` + `create-activities.ts`):
-- `createIssue({ repo, title, body, labels, dedupeFingerprint? })` — **new**; today's ports have `getIssue`/`commentOnIssue`/`labelIssue`/`openPr` but no create.
-- `listIssues({ repo, labels?, state })` — **new**.
-- `listOpenPrs({ repo })` / `mergePr({ repo, prRef })` — **new** (for `prReviewSweep`).
+One new engine activity is needed by the finders above, added once and reusable by every project (via `TrackerPort` + `create-activities.ts`):
+- `createIssue({ repo, title, body, labels, dedupeFingerprint? })` — **new**; today's ports have `getIssue`/`commentOnIssue`/`labelIssue`/`openPr` but no create. `dedupeFingerprint` collapses repeat findings into one issue.
+
+(No `listIssues`/`listOpenPrs`/`mergePr` — those were only for the dropped sweep workflows; `devCycle` + the Gateway trigger handle fix-and-merge.)
 
 Prompts (`whitebox-bughunt.md`, `investigate-rollbar.md`, …) live in the project repo (`agentops/prompts/`), resolved by the agent-runner — no code change to add a prompt.
 
 ## 6. Worked examples
 
 Condensed; full versions were validated during design.
-- **Tier 1 — nightly whitebox bughunt:** `agents.json` entry `{ workflow: "whiteboxBugHunt", schedule: "0 2 * * *" }`. No project code.
-- **Tier 1 — fix bug issues every 30m:** `{ workflow: "issueSweep", schedule: "*/30 * * * *", input: { label: "bug" } }` → each issue becomes a child `devCycle`. No project code.
+- **Tier 1 — nightly whitebox bughunt:** `agents.json` entry `{ workflow: "whiteboxBugHunt", schedule: "0 2 * * *" }` files `bug`-labeled issues; the Gateway trigger turns each into a `devCycle` PR. No project code.
+- **Tier 1 — nightly QA:** `{ workflow: "qaProbe", schedule: "0 3 * * *", input: { previewUrl } }` files issues per finding; same fix loop. No project code.
 - **Tier 2 — Rollbar monitor:** project `rollbarMonitor` workflow: its own `rollbarFetch` activity (its token) + durable cursor + `continueAsNew`; per finding, `engineAgent().runAgent(investigate)` in a workspace, then `engine.createIssue(labels:['bug'], dedupeFingerprint)`. Deployed by the project; engine untouched.
 
 ## 7. Architecture impact
@@ -90,19 +88,19 @@ Condensed; full versions were validated during design.
 
 | # | Sub-project | Delivers |
 |---|---|---|
-| **1** | **Tier 1: manifest + reconciler + first built-ins** | `AgentsManifestSchema` (contracts); the `ConfigSync` reconciler (reads `agents.json`, creates/updates/deletes Temporal Schedules); `createIssue`/`listIssues` activities; two built-in workflows (`whiteboxBugHunt`, `issueSweep`). Gate: an `agents.json` entry, once reconciled, runs a built-in on schedule that files an issue / spawns a child `devCycle` — proven e2e on the stub backend. |
+| **1** | **Tier 1: manifest + reconciler + `whiteboxBugHunt`** | `AgentsManifestSchema` (contracts); the `ConfigSync` reconciler (reads `agents.json`, creates/updates/deletes Temporal Schedules); the `createIssue` activity; the `whiteboxBugHunt` built-in. Gate: an `agents.json` entry, once reconciled, runs `whiteboxBugHunt` on schedule and files a `bug`-labeled issue via `createIssue` — proven e2e on the stub backend. (`qaProbe` waits for preview infra; it's SP3.) |
 | 2 | Tier 2: SDK + per-project worker | Publish `@agentops/engine-sdk` (public npmjs, tsup, `/workflow`+`/worker`); a reference per-project worker + task-queue routing; `createEngineWorker`. Gate: a project-repo workflow runs in its own worker and delegates activities + a child `devCycle` to the shared fleet. |
-| 3 | Remaining built-ins + triggers | `prReviewSweep`, `qaProbe`, `listOpenPrs`/`mergePr`; webhook/label + `workflowClosed` triggers (self-heal auto-start). |
+| 3 | `qaProbe` + triggers | `qaProbe` (needs preview deploys + Playwright/MailPit, M7); webhook/label + a `workflowClosed` trigger kind (self-heal auto-start on a `devCycle` ending `blocked`/`failed`). |
 | 4 | Mission Control | View/manage `agents.json`-derived agents, their Schedules, and runs. |
 
 Recommended order **1 → 2 → 3 → 4**; SP1 delivers most of #30 with least risk and no packaging work.
 
 ## 9. Definition of done (SP1, the first plan)
 
-- `AgentsManifestSchema` in `contracts` (+ tests); `createIssue`/`listIssues` in ports + `create-activities` (+ tests).
-- `whiteboxBugHunt` and `issueSweep` workflows exported from `packages/workflows` (auto-registered via `workflowsPath`).
+- `AgentsManifestSchema` in `contracts` (+ tests); `createIssue` in `TrackerPort` + `create-activities` (+ tests).
+- `whiteboxBugHunt` workflow exported from `packages/workflows` (auto-registered via `workflowsPath`).
 - `ConfigSync` reconciler: reads `agents.json` via `ScmPort`, diffs against existing Temporal Schedules, applies create/update/delete.
-- e2e (stub backend): a manifest with a scheduled `issueSweep` reconciles to a Temporal Schedule; triggering it lists a seeded issue and starts a child `devCycle`; a `whiteboxBugHunt` files an issue via `createIssue`.
+- e2e (stub backend): a manifest with a scheduled `whiteboxBugHunt` reconciles to a Temporal Schedule; triggering that Schedule runs the workflow, which files a `bug`-labeled issue via `createIssue`. (The filed issue → `devCycle` fix loop is the existing M3 Gateway trigger, exercised separately.)
 - `pnpm lint && pnpm typecheck && pnpm test` green; `pnpm e2e` green.
 - ARCHITECTURE.md §6.1 updated to point at this design.
 
@@ -110,5 +108,5 @@ Recommended order **1 → 2 → 3 → 4**; SP1 delivers most of #30 with least r
 
 - **Reconciler as workflow vs. service.** A Temporal `ConfigSync` workflow (durable, replayable) vs. a control-side loop. Lean workflow (ARCHITECTURE §6.1 says "a `ConfigSync` workflow"); settle in the plan.
 - **`agents.json` location + trigger to reconcile.** On Gateway push webhook and/or a periodic Schedule; pin in SP1's plan.
-- **Idempotency of sweeps.** `issueSweep` labels in-progress issues (`agent-working`); confirm the label lifecycle (who removes it) in the plan.
+- **Finding dedup.** `whiteboxBugHunt` must not re-file the same bug nightly; `createIssue`'s `dedupeFingerprint` (search existing open issues by fingerprint before creating) is the mechanism — pin the fingerprint scheme in the plan.
 - **Cross-repo `executeChild`** (`targetRepo`, ARCH §6.2) — SP3.
