@@ -7,6 +7,7 @@ import { PROJECT_HEADER_KEY, readProjectFromMemo } from '@agentops/contracts';
 // as a workflowModules entry on both the engine worker (createWorker) and the
 // SDK's createEngineWorker, so both built-in and project workflows propagate
 // identity uniformly. SP2 design §7.2.
+/* eslint-disable @typescript-eslint/no-explicit-any */
 class ProjectOutbound implements WorkflowOutboundCallsInterceptor {
   private project(): string | undefined {
     return readProjectFromMemo(workflowInfo().memo as Record<string, unknown> | undefined);
@@ -29,5 +30,6 @@ class ProjectOutbound implements WorkflowOutboundCallsInterceptor {
     return next(input);
   }
 }
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 export const interceptors: WorkflowInterceptorsFactory = () => ({ outbound: [new ProjectOutbound()] });

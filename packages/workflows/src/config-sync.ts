@@ -1,7 +1,6 @@
 import { proxyActivities } from '@temporalio/workflow';
 import { reconcileAgents, reconcileContinuous, type ReconcilePlan, type ContinuousPlan } from '@agentops/policies';
 import type { ConfigSyncActivities } from './activities-api';
-import type { AgentSpec } from '@agentops/contracts';
 
 const acts = proxyActivities<ConfigSyncActivities>({ startToCloseTimeout: '2 minutes', retry: { maximumAttempts: 5 } });
 

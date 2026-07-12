@@ -6,11 +6,13 @@ import { projectContext } from '@agentops/activities';
 import { PROJECT_HEADER_KEY } from '@agentops/contracts';
 import type { TracingSetup } from './tracing';
 
+/* eslint-disable @typescript-eslint/no-require-imports */
 const OTEL_WORKFLOW_INTERCEPTOR_MODULE = require.resolve(
   '@temporalio/interceptors-opentelemetry/lib/workflow-interceptors',
 );
 const wfMain = require.resolve('@agentops/workflows');
 const PROJECT_INTERCEPTOR_MODULE = require('path').join(require('path').dirname(wfMain), 'project-interceptor.ts');
+/* eslint-enable @typescript-eslint/no-require-imports */
 
 export interface CreateWorkerOptions {
   taskQueue: string;
@@ -26,7 +28,7 @@ export async function createWorker(options: CreateWorkerOptions): Promise<Worker
 
   function projectInbound() {
     return {
-      async execute(input: any, next: any) {
+      async execute(input: any, next: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
         const payload = input.headers?.[PROJECT_HEADER_KEY];
         const project = payload ? (defaultPayloadConverter.fromPayload(payload) as string) : undefined;
         return projectContext.run({ project }, () => next(input));
@@ -35,7 +37,7 @@ export async function createWorker(options: CreateWorkerOptions): Promise<Worker
   }
 
   const baseActivityInterceptors = tracing
-    ? [(ctx: any) => ({ inbound: new OpenTelemetryActivityInboundInterceptor(ctx, { tracer: tracing.tracer }) })]
+    ? [(_ctx: any) => ({ inbound: new OpenTelemetryActivityInboundInterceptor(_ctx, { tracer: tracing.tracer }) })] // eslint-disable-line @typescript-eslint/no-explicit-any
     : [];
   const baseWorkflowModules = tracing ? [OTEL_WORKFLOW_INTERCEPTOR_MODULE] : [];
 
@@ -48,7 +50,7 @@ export async function createWorker(options: CreateWorkerOptions): Promise<Worker
     sinks: tracing ? { exporter: tracing.workflowExporterSink } : undefined,
     interceptors: {
       activity: [
-        (ctx) => ({ inbound: projectInbound() }),
+        (_ctx) => ({ inbound: projectInbound() }),
         ...baseActivityInterceptors,
       ],
       workflowModules: [PROJECT_INTERCEPTOR_MODULE, ...baseWorkflowModules],

@@ -1,6 +1,9 @@
 import { Worker, type NativeConnection } from '@temporalio/worker';
+// defaultPayloadConverter and PROJECT_HEADER_KEY reserved for inbound header decode if project-side auditing added
+/* eslint-disable @typescript-eslint/no-unused-vars */
 import { defaultPayloadConverter } from '@temporalio/common';
 import { PROJECT_HEADER_KEY } from '@agentops/contracts';
+/* eslint-enable @typescript-eslint/no-unused-vars */
 
 export interface CreateEngineWorkerOptions {
   taskQueue: string;
@@ -29,7 +32,7 @@ export function createEngineWorker(options: CreateEngineWorkerOptions) {
       activity: [
         () => ({
           inbound: {
-            async execute(input: any, next: any) {
+            async execute(input: any, next: any) { // eslint-disable-line @typescript-eslint/no-explicit-any
               // Project workers do not consume the inbound project header
               // themselves (they hold no credentials); the engine's own worker
               // enforces it. This inbound is a no-op passthrough kept for

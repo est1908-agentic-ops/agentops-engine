@@ -1,6 +1,7 @@
-import { createEngineWorker } from '@agentops/engine-sdk/worker';
+import { createEngineWorker } from '@agentic-ops/engine-sdk/worker';
 import { NativeConnection } from '@temporalio/worker';
-import * as workflows from './workflows/rollbar-monitor';
+// import * as workflows from './workflows/rollbar-monitor'; // register if using path-based
+
 
 export async function run() {
   const connection = await NativeConnection.connect({ address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233' });

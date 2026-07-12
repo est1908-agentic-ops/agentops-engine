@@ -1,5 +1,5 @@
 {
-  "name": "@agentops/engine-sdk",
+  "name": "@agentic-ops/engine-sdk",
   "version": "0.1.0",
   "description": "Thin, secret-free facade for authoring Tier-2 agentops project workflows.",
   "license": "MIT",

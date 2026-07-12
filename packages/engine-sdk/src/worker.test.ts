@@ -6,7 +6,7 @@ describe('createEngineWorker', () => {
   it('registers the project header inbound interceptor + the outbound workflow module', async () => {
     const { Worker } = await import('@temporalio/worker');
     await createEngineWorker({ taskQueue: 'proj-acme', workflowsPath: '/x', activities: {} });
-    const opts = (Worker as any).create.mock.calls[0][0];
+    const opts = (Worker as any).create.mock.calls[0][0]; // eslint-disable-line @typescript-eslint/no-explicit-any
     expect(opts.taskQueue).toBe('proj-acme');
     expect(opts.interceptors.activity).toHaveLength(1);
     expect(opts.interceptors.workflowModules).toHaveLength(1);

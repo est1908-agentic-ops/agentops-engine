@@ -15,3 +15,4 @@ export * from './postgres-filed-finding-store';
 export * from './schedule-ops';
 export * from './resolve-managed-projects';
 export * from './resolve-project-config';
+export * from './project-context';

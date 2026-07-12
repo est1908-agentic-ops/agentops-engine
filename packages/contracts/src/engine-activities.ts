@@ -2,7 +2,7 @@ import type { AgentRunRequest, AgentRunResult } from './agent-run';
 import type { Issue, CreateIssueInput, CreateIssueResult } from './tracker-types';
 
 // The delegatable engine activity surface exposed to Tier-2 project workflows
-// via @agentops/engine-sdk/workflow. This interface + the child-workflow names
+// via @agentic-ops/engine-sdk/workflow. This interface + the child-workflow names
 // (devCycle) + ENGINE_QUEUE are the published semver compatibility contract
 // (SP2 design §3.2). Deliberately minimal — heavy SCM/workspace ops stay
 // internal to devCycle, reached via childDevCycle.

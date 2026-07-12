@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, it, expect, vi } from 'vitest';
 vi.mock('@temporalio/workflow', () => ({
   proxyActivities: (opts: any) => ({ __opts: opts }),
@@ -13,3 +14,4 @@ describe('engine-sdk/workflow', () => {
     expect((engineAgent() as any).__opts.taskQueue).toBe(ENGINE_QUEUE);
   });
 });
+/* eslint-enable @typescript-eslint/no-explicit-any */

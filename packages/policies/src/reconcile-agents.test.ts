@@ -35,14 +35,14 @@ describe('reconcileAgents', () => {
   it('re-points a schedule still on the legacy queue', () => {
     const declared = [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' as const }];
     const existing = [{ id: scheduleId('p', 'nb'), scheduleSpec: '0 2 * * *', workflow: 'whiteboxBugHunt', paused: false, taskQueue: LEGACY_ENGINE_QUEUE }];
-    const plan = reconcileAgents(declared as any, existing, 'p');
+    const plan = reconcileAgents(declared as any, existing, 'p'); // eslint-disable-line @typescript-eslint/no-explicit-any
     expect(plan.toUpdate.map((s) => s.name)).toContain('nb');
   });
 
   it('does not update a schedule already on the engine queue', () => {
     const declared = [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' as const }];
     const existing = [{ id: scheduleId('p', 'nb'), scheduleSpec: '0 2 * * *', workflow: 'whiteboxBugHunt', paused: false, taskQueue: ENGINE_QUEUE }];
-    const plan = reconcileAgents(declared as any, existing, 'p');
+    const plan = reconcileAgents(declared as any, existing, 'p'); // eslint-disable-line @typescript-eslint/no-explicit-any
     expect(plan.toUpdate).toHaveLength(0);
   });
 });

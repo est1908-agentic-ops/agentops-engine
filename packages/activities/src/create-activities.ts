@@ -58,8 +58,8 @@ export interface ActivityDependencies {
 }
 
 export interface WorkflowClientLike {
-  start?: (workflowType: string, opts: any) => Promise<any>;
-  list?: (query?: string) => AsyncIterable<any>;
+  start?: (workflowType: string, opts: any) => Promise<any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  list?: (query?: string) => AsyncIterable<any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   getHandle?: (id: string) => { terminate?: (reason?: string) => Promise<void> };
 }
 
@@ -315,7 +315,7 @@ export function createActivities(deps: ActivityDependencies) {
       }
       /* eslint-enable @typescript-eslint/no-explicit-any */
     },
-
+    /* eslint-disable @typescript-eslint/no-explicit-any */
     async listContinuousAgents(project: string): Promise<string[]> {
       const client = deps.workflowClient;
       if (!client?.list) return [];
@@ -349,6 +349,7 @@ export function createActivities(deps: ActivityDependencies) {
     async terminateContinuousAgent(id: string): Promise<void> {
       await deps.workflowClient?.getHandle?.(id)?.terminate?.('agent removed from manifest').catch(() => {});
     },
+    /* eslint-enable @typescript-eslint/no-explicit-any */
 
     async prepareScratchWorkspace(taskId: string): Promise<{ workspaceRef: string }> {
       try {
