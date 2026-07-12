@@ -1,0 +1,12 @@
+{
+  "agents": [
+    {
+      "name": "rollbar-monitor",
+      "workflow": "rollbarMonitor",
+      "schedule": "continuous",
+      "taskQueue": "proj-acme",
+      "input": { "repo": "acme/web", "project": "acme" },
+      "enabled": true
+    }
+  ]
+}
