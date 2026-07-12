@@ -368,3 +368,12 @@ export function createActivities(deps: ActivityDependencies) {
 }
 
 export type Activities = ReturnType<typeof createActivities>;
+
+import type { EngineActivities } from '@agentops/contracts';
+// Compile-time guarantee: the engine's activity implementation stays a
+// superset of the published EngineActivities surface. If a signature drifts,
+// typecheck fails here. SP2 design §3.2.
+type _Acts = ReturnType<typeof createActivities>;
+type _AssertEngineSurface = _Acts extends EngineActivities ? true : false;
+const _engineSurfaceOk: _AssertEngineSurface = true;
+void _engineSurfaceOk;
