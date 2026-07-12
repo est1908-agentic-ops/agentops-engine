@@ -3,6 +3,7 @@ import { WorkflowExecutionAlreadyStartedError, WorkflowIdReusePolicy } from '@te
 import type { ProjectConfig } from '@agentops/contracts';
 import { devCycle } from '@agentops/workflows';
 import type { IssueLabeledEvent } from './parse-issue-labeled';
+import { slugifyProject } from './slug';
 
 export interface StartDevCycleResult {
   taskId: string;
@@ -30,7 +31,12 @@ export async function startDevCycleForIssue(
   // "owner/repo" into "owner-repo" is lossy and can collide across two
   // distinct registered repos (e.g. "foo-bar/baz" and "foo/bar-baz" both
   // become "foo-bar-baz"), which would silently swallow one project's events.
-  const taskId = `issue-${project}-${event.issueNumber}`;
+  // The workflow id keeps the raw project name (Temporal accepts it and it reads
+  // cleanly in the UI). The taskId, though, becomes a git branch (`agentops/
+  // <taskId>`) and a workspace directory, so its project part must be slugified
+  // -- a name like "Artem private agents" otherwise yields the invalid branch
+  // `agentops/issue-Artem private agents-1`.
+  const taskId = `issue-${slugifyProject(project)}-${event.issueNumber}`;
   const workflowId = `devcycle:${project}:${event.issueNumber}`;
   try {
     await client.workflow.start(devCycle, {
