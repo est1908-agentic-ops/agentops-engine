@@ -28,7 +28,7 @@ describe('DevCycle e2e: project image and services reach every stage agent call'
     tracker.seedIssue({ ref: 'issue-1', title: 'Add widget', body: 'Please add a widget', labels: [] });
     scm.scriptFeedback('pr-1', [{ ciStatus: 'green', unresolvedThreads: 0, comments: [] }]);
 
-    const recordingRoute = { backend: 'recording', model: 'recording-v1' };
+    const recordingTier = [{ backend: 'recording', model: 'recording-v1' }];
     const input: TaskInput = {
       taskId: 'image-services-task',
       project: 'demo',
@@ -41,10 +41,11 @@ describe('DevCycle e2e: project image and services reach every stage agent call'
         fastVerifyCommands: [],
         fullVerifyCommands: [],
         stages: {},
+        tiers: { recording: recordingTier },
         routing: {
-          implement: recordingRoute,
-          full_verify: recordingRoute,
-          review: recordingRoute,
+          implement: { tier: 'recording' },
+          full_verify: { tier: 'recording' },
+          review: { tier: 'recording' },
         },
         brakes: { maxImplementAttempts: 3, maxIterations: 10, maxTokens: 1_000_000, maxBabysitRounds: 5 },
       },
