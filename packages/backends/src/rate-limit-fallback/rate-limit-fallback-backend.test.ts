@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentRunResult, BackendRunRequest } from '@agentops/contracts';
 import type { AgentBackend } from '../agent-backend';
-import { ProviderRateLimitedError } from '../provider-rate-limit';
+import { RateLimitError } from '../provider-rate-limit';
 import { RateLimitFallbackBackend } from './rate-limit-fallback-backend';
 
 const baseRequest: BackendRunRequest = {
@@ -45,10 +45,10 @@ describe('RateLimitFallbackBackend', () => {
     expect(heartbeat).not.toHaveBeenCalled();
   });
 
-  it('heartbeats and retries once against the fallback model on ProviderRateLimitedError', async () => {
+  it('heartbeats and retries once against the fallback model on RateLimitError', async () => {
     const run = vi
       .fn()
-      .mockRejectedValueOnce(new ProviderRateLimitedError('429 Fair Usage Policy'))
+      .mockRejectedValueOnce(new RateLimitError('429 Fair Usage Policy'))
       .mockResolvedValueOnce(successResult);
     const inner: AgentBackend = { run };
     const heartbeat = vi.fn();
@@ -75,7 +75,7 @@ describe('RateLimitFallbackBackend', () => {
     const fallbackErr = new Error('fallback also failed');
     const run = vi
       .fn()
-      .mockRejectedValueOnce(new ProviderRateLimitedError('429 Fair Usage Policy'))
+      .mockRejectedValueOnce(new RateLimitError('429 Fair Usage Policy'))
       .mockRejectedValueOnce(fallbackErr);
     const inner: AgentBackend = { run };
     const backend = new RateLimitFallbackBackend(inner, 'openrouter/deepseek-v4-pro', 'pi', () => {});

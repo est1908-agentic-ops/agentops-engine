@@ -191,7 +191,7 @@ function wrapWithRateWindow(
   return limiter ? new RateWindowedBackend(backend, limiter, name) : backend;
 }
 
-// Reacts to a real provider-side rate limit (ProviderRateLimitedError),
+// Reacts to a real provider-side rate limit (RateLimitError),
 // unlike wrapWithRateWindow's proactive local quota check -- see
 // docs/superpowers/specs/2026-07-08-provider-rate-limit-fallback-design.md.
 // Unset env var (the default) means no fallback, same "off by default"
