@@ -46,6 +46,14 @@ jobs:
       # `packages/*/src/**` globs match nothing ("No test files found").
       - run: pnpm test -- packages/engine-sdk
 
+      # TEMPORARY DIAGNOSTIC — IPv4 vs IPv6 egress + which family reaches npm.
+      - name: Diagnose egress family (temporary)
+        run: |
+          echo "IPv4 egress: $(curl -4 -s https://api.ipify.org || echo none)"
+          echo "IPv6 egress: $(curl -6 -s https://api64.ipify.org || echo none)"
+          echo "npm registry connection (server ip shows family used):"
+          curl -sS -o /dev/null -w '  remote_ip=%{remote_ip}\n' https://registry.npmjs.org/ || true
+
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
