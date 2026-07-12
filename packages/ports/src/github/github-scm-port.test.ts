@@ -224,6 +224,36 @@ describe('GithubScmPort — getPrFeedback', () => {
     expect(feedback.ciStatus).toBe('pending');
   });
 
+  it('degrades to pending (not a hard failure) when the token cannot read checks (403)', async () => {
+    const client = fakeClient();
+    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { head: { sha: 'abc123' } } });
+    (client.rest.checks.listForRef as ReturnType<typeof vi.fn>).mockRejectedValue({
+      status: 403,
+      message: 'Resource not accessible by personal access token',
+    });
+    (client.graphql as ReturnType<typeof vi.fn>).mockResolvedValue({
+      repository: { pullRequest: { reviewThreads: { nodes: [{ isResolved: false, comments: { nodes: [{ id: 'c1', body: 'fix this' }] } }] } } },
+    });
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
+
+    const feedback = await scm.getPrFeedback('octocat/hello-world#7');
+
+    // CI unknown -> pending (never merge_ready), but the rest of the feedback still comes through.
+    expect(feedback.ciStatus).toBe('pending');
+    expect(feedback.unresolvedThreads).toBe(1);
+  });
+
+  it('still propagates a non-403 error from the checks API', async () => {
+    const client = fakeClient();
+    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { head: { sha: 'abc123' } } });
+    (client.rest.checks.listForRef as ReturnType<typeof vi.fn>).mockRejectedValue({ status: 500, message: 'server error' });
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
+
+    await expect(scm.getPrFeedback('octocat/hello-world#7')).rejects.toMatchObject({ status: 500 });
+  });
+
   it('counts unresolved review threads via GraphQL, not REST', async () => {
     const scm = setupPrFeedback({
       checkRuns: [{ status: 'completed', conclusion: 'success' }],

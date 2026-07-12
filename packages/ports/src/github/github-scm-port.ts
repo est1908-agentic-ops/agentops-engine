@@ -77,8 +77,7 @@ export class GithubScmPort implements ScmPort {
   async getPrFeedback(prRef: string): Promise<PrFeedback> {
     const { owner, repo, number } = parseRef(prRef);
     const { data: pr } = await this.client.rest.pulls.get({ owner, repo, pull_number: number });
-    const { data: checksData } = await this.client.rest.checks.listForRef({ owner, repo, ref: pr.head.sha });
-    const ciStatus = mapCiStatus(checksData.check_runs);
+    const ciStatus = await this.readCiStatus(owner, repo, pr.head.sha);
 
     const graphqlResult = await this.client.graphql<GraphqlReviewThreadsResult>(REVIEW_THREADS_QUERY, {
       owner,
@@ -94,6 +93,39 @@ export class GithubScmPort implements ScmPort {
     }));
 
     return { ciStatus, unresolvedThreads, comments };
+  }
+
+  // A token without the Checks:Read permission gets 403 "Resource not accessible
+  // by personal access token" from the check-runs API. That's an environment
+  // limitation, not a CI failure -- treat CI status as unknown ('pending') so
+  // the PR-babysit loop keeps its normal bounded behavior (waiting -> braked
+  // after maxBabysitRounds) instead of hard-failing the whole workflow on a PR it
+  // already opened and pushed. 'pending' is never mergeable, so this can't
+  // launder an unknown CI state into a false merge. Any non-403 error (a real
+  // API/network failure) still propagates. See est1908/agents devcycle
+  // (getPrFeedback 403, 2026-07-13).
+  private async readCiStatus(
+    owner: string,
+    repo: string,
+    ref: string,
+  ): Promise<'pending' | 'green' | 'failed'> {
+    try {
+      const { data } = await this.client.rest.checks.listForRef({ owner, repo, ref });
+      return mapCiStatus(data.check_runs);
+    } catch (err) {
+      if ((err as { status?: number }).status !== 403) {
+        throw err;
+      }
+      console.warn(
+        JSON.stringify({
+          event: 'pr-feedback-checks-forbidden',
+          repo: `${owner}/${repo}`,
+          ref,
+          message: 'token lacks Checks:Read permission -- treating CI status as pending',
+        }),
+      );
+      return 'pending';
+    }
   }
 
   async push(_repo: string, workspaceRef: string, branch: string, _contentHash: string): Promise<void> {
