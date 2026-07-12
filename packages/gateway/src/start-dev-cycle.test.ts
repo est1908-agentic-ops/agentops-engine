@@ -49,6 +49,24 @@ describe('startDevCycleForIssue', () => {
     );
   });
 
+  it('slugifies a project name with spaces so the taskId is a valid git branch, keeping the raw name in the workflow id', async () => {
+    const start = vi.fn().mockResolvedValue(undefined);
+    const client = fakeClient(start);
+
+    const result = await startDevCycleForIssue(client, 'agentops-devcycle', 'Artem private agents', event, config);
+
+    // taskId becomes `agentops/<taskId>` and a workspace dir -> must be slug-safe.
+    expect(result.taskId).toBe('issue-artem-private-agents-42');
+    expect(start).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        // workflow id keeps the human-readable raw project name (Temporal allows it).
+        workflowId: 'devcycle:Artem private agents:42',
+        args: [expect.objectContaining({ taskId: 'issue-artem-private-agents-42', project: 'Artem private agents' })],
+      }),
+    );
+  });
+
   it('does not collide across two projects whose repos would collapse to the same slug', async () => {
     // "foo-bar/baz" and "foo/bar-baz" both naively collapse to "foo-bar-baz"
     // if you replace "/" with "-" — keying by the (registry-unique) project
