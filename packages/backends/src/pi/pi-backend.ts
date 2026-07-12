@@ -1,7 +1,7 @@
 import type { AgentRunResult, BackendRunRequest } from '@agentops/contracts';
 import type { CliSpec } from '../cli-spec';
 import { ProcessCliProcessError } from '../process-cli-runner';
-import { isProviderRateLimitMessage, ProviderRateLimitedError } from '../provider-rate-limit';
+import { isRateLimitMessage, RateLimitError } from '../provider-rate-limit';
 
 export interface PiCliSpecOptions {
   image?: string;
@@ -84,8 +84,8 @@ export function createPiCliSpec(opts: PiCliSpecOptions = {}): CliSpec {
       if (lastAssistantMessage?.stopReason === 'error' || lastAssistantMessage?.stopReason === 'aborted') {
         const message =
           lastAssistantMessage.errorMessage || `pi turn ended with stopReason "${lastAssistantMessage.stopReason}"`;
-        if (isProviderRateLimitMessage(message)) {
-          throw new ProviderRateLimitedError(message);
+        if (isRateLimitMessage(message)) {
+          throw new RateLimitError(message);
         }
         throw new ProcessCliProcessError(message);
       }

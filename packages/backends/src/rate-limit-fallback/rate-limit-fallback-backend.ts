@@ -1,11 +1,11 @@
 import { Context } from '@temporalio/activity';
 import type { AgentRunResult, BackendRunRequest } from '@agentops/contracts';
 import type { AgentBackend } from '../agent-backend';
-import { ProviderRateLimitedError } from '../provider-rate-limit';
+import { RateLimitError } from '../provider-rate-limit';
 
 // Wraps a subscription-lane backend (pi) to retry once against a known-good
 // fallback model on the same backend when the provider itself throttles a
-// call (ProviderRateLimitedError) -- distinct from RateWindowedBackend, which
+// call (RateLimitError) -- distinct from RateWindowedBackend, which
 // throws *before* ever calling the inner backend based on a locally-tracked
 // quota. Only reacts to a real provider response, and only retries once: if
 // the fallback also fails, the error propagates untouched into the same
@@ -26,7 +26,7 @@ export class RateLimitFallbackBackend implements AgentBackend {
     try {
       return await this.inner.run(req);
     } catch (err) {
-      if (!(err instanceof ProviderRateLimitedError)) {
+      if (!(err instanceof RateLimitError)) {
         throw err;
       }
       const details = {

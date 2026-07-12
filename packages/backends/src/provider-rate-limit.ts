@@ -1,4 +1,7 @@
-export class ProviderRateLimitedError extends Error {}
+// Self-clearing provider throttle (minutes): a 429 that names fair-usage /
+// rate-limit / request-frequency. The retry-it-out class -- SP2's activity
+// layer maps this to a retryable ApplicationFailure with a nextRetryDelay.
+export class RateLimitError extends Error {}
 
 // Account-wide subscription cap (e.g. the Claude Code CLI "You've hit your
 // session limit · resets 9:30am (UTC)" from issue-broccoli-94). Lasts hours,
@@ -11,8 +14,8 @@ export class SessionLimitError extends Error {}
 // Deliberately narrower than "contains 429" alone -- a bare 429 without one
 // of these phrases stays a generic backend error, since not every 429 a CLI
 // surfaces is this specific throttle-and-recover class of failure. See
-// docs/superpowers/specs/2026-07-08-provider-rate-limit-fallback-design.md.
-export function isProviderRateLimitMessage(message: string): boolean {
+// docs/superpowers/specs/2026-07-10-model-tiering-fallback-design.md (Section 4).
+export function isRateLimitMessage(message: string): boolean {
   return /\b429\b/.test(message) && /(fair usage policy|rate limit|request frequency)/i.test(message);
 }
 
