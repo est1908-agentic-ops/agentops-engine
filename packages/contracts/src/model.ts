@@ -29,6 +29,7 @@ export const RoutingSchema = z.object({
   review: ModelRefSchema.optional(),
   pr: ModelRefSchema.optional(),
   pr_babysit: ModelRefSchema.optional(),
+  bughunt: ModelRefSchema.optional(),
 });
 export type Routing = z.infer<typeof RoutingSchema>;
 
@@ -48,6 +49,7 @@ export const TimeoutsSchema = z.object({
   review: StageTimeoutSchema.optional(),
   pr: StageTimeoutSchema.optional(),
   pr_babysit: StageTimeoutSchema.optional(),
+  bughunt: StageTimeoutSchema.optional(),
 });
 export type Timeouts = z.infer<typeof TimeoutsSchema>;
 

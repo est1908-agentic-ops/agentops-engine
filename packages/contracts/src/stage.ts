@@ -13,6 +13,7 @@ export const StageSchema = z.enum([
   'done',
   'failed',
   'platform',
+  'bughunt',
 ]);
 export type Stage = z.infer<typeof StageSchema>;
 

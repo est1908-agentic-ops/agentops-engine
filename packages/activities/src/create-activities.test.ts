@@ -16,6 +16,7 @@ import { ApplicationFailure } from '@temporalio/common';
 import { createActivities } from './create-activities';
 import { InMemoryStatsStore } from './stats-store';
 import { InMemoryStageResultStore } from './stage-result-store';
+import { InMemoryFiledFindingStore } from './filed-finding-store';
 import { MemoryWorkspaceManager } from './workspace/memory-workspace-manager';
 import { WorkspaceError, type Workspaces } from './workspace/workspace-manager';
 
@@ -29,6 +30,7 @@ function buildDeps() {
     workspaces: new MemoryWorkspaceManager() as Workspaces,
     prompts: new PromptPack(),
     registry: [] as ResolvedProjectEntry[],
+    filedFindings: new InMemoryFiledFindingStore(),
     heartbeat: () => {},
   };
 }
@@ -179,6 +181,37 @@ describe('createActivities', () => {
     await expect(
       activities.pushBranch('demo/repo', '/some/workspace', 'branch', 'hash'),
     ).resolves.toBeUndefined();
+  });
+
+  it('createIssue dedups by fingerprint within a project', async () => {
+    const tracker = new MemoryTrackerPort();
+    const filedFindings = new InMemoryFiledFindingStore();
+    const deps = { ...buildDeps(), tracker, filedFindings };
+    const activities = createActivities(deps);
+    const a = await activities.createIssue({ repo: 'o/r', project: 'p', title: 'T', body: 'B', labels: ['bug'], dedupeFingerprint: 'fp1' });
+    const b = await activities.createIssue({ repo: 'o/r', project: 'p', title: 'T2', body: 'B2', labels: ['bug'], dedupeFingerprint: 'fp1' });
+    expect(a.deduped).toBe(false);
+    expect(b).toEqual({ ref: a.ref, url: '', deduped: true });
+  });
+
+  it('runAgent returns a stable promptHash and a promptSource', async () => {
+    const deps = buildDeps();
+    (deps.backends.stub as StubBackend).scriptResponse('bughunt', 1, { output: 'FINDINGS: []' });
+    const activities = createActivities(deps);
+    const r = await activities.runAgent({
+      taskId: 't1',
+      stage: 'bughunt',
+      attempt: 1,
+      callIndex: 1,
+      backend: 'stub',
+      model: 'stub-v1',
+      promptRef: 'implement.md',
+      promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' },
+      workspaceRef: 'demo/repo',
+      limits: { maxTokens: 1000, timeoutMs: 60_000 },
+    } as never);
+    expect(r.promptHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(r.promptSource).toContain('implement.md');
   });
 });
 

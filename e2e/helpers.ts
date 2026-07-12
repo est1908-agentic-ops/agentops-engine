@@ -3,6 +3,7 @@ import { Worker } from '@temporalio/worker';
 import type { WorkflowHandle } from '@temporalio/client';
 import {
   createActivities,
+  InMemoryFiledFindingStore,
   InMemoryStageResultStore,
   InMemoryStatsStore,
   MemoryWorkspaceManager,
@@ -57,6 +58,7 @@ export async function buildTestEnv(opts: BuildTestEnvOptions = {}): Promise<Test
     workspaces,
     prompts: new PromptPack(),
     registry: opts.registry ?? [],
+    filedFindings: new InMemoryFiledFindingStore(),
   });
 
   const taskQueue = nextTaskQueue();

@@ -9,6 +9,7 @@ function fakeClient(overrides: Partial<GithubClient['rest']> = {}): GithubClient
         get: vi.fn(),
         createComment: vi.fn(),
         addLabels: vi.fn(),
+        create: vi.fn(),
         ...overrides.issues,
       },
       pulls: { create: vi.fn(), get: vi.fn(), ...overrides.pulls },
@@ -81,5 +82,14 @@ describe('GithubTrackerPort', () => {
 
     await expect(tracker.getIssue('not-a-ref')).rejects.toThrow(/expected "owner\/repo#number"/);
     expect(client.rest.issues.get).not.toHaveBeenCalled();
+  });
+
+  it('createIssue calls issues.create and returns owner/repo#number + html_url', async () => {
+    const create = vi.fn().mockResolvedValue({ data: { number: 7, html_url: 'https://x/7' } });
+    const client = fakeClient({ issues: { create } as never });
+    const port = new GithubTrackerPort(client);
+    const res = await port.createIssue({ repo: 'o/r', title: 'T', body: 'B', labels: ['bug'] });
+    expect(create).toHaveBeenCalledWith({ owner: 'o', repo: 'r', title: 'T', body: 'B', labels: ['bug'] });
+    expect(res).toEqual({ ref: 'o/r#7', url: 'https://x/7' });
   });
 });

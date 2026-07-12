@@ -21,7 +21,12 @@ import type {
   ResolvedProjectEntry,
   RunStats,
 } from '@agentops/contracts';
-import { parseProjectConfig } from '@agentops/contracts';
+import { parseProjectConfig, sha256, type AgentSpec } from '@agentops/contracts';
+import { parseAgentsManifest, BUILTIN_WORKFLOW_INPUTS } from '@agentops/contracts';
+import type { FiledFindingStore } from './filed-finding-store';
+import type { ScheduleClientLike } from './schedule-ops';
+import type { ReconcilePlan } from '@agentops/policies';
+import { scheduleId } from '@agentops/policies';
 import type { PromptPack } from '@agentops/prompts';
 import type { StageResultRecord, StageResultStore } from './stage-result-store';
 import type { StatsStore } from './stats-store';
@@ -43,6 +48,9 @@ export interface ActivityDependencies {
   workspaces: Workspaces;
   prompts: PromptPack;
   registry: ResolvedProjectEntry[];
+  filedFindings?: FiledFindingStore;
+  scheduleClient?: ScheduleClientLike;
+  taskQueue?: string;
   heartbeat?: (details: unknown) => void;
 }
 
@@ -60,12 +68,14 @@ function rethrowWorkspaceError(err: unknown): never {
 export function createActivities(deps: ActivityDependencies) {
   const heartbeat = deps.heartbeat ?? ((details: unknown) => Context.current().heartbeat(details));
   return {
-    async runAgent(req: AgentRunRequest): Promise<AgentRunResult> {
+    async runAgent(req: AgentRunRequest): Promise<AgentRunResult & { promptHash: string; promptSource: string }> {
       const backend = deps.backends[req.backend];
       if (!backend) {
         throw new Error(`createActivities.runAgent: unknown backend "${req.backend}"`);
       }
       const prompt = deps.prompts.render(req.promptRef, req.promptContext);
+      const promptHash = sha256(prompt);
+      const promptSource = `builtin:${req.promptRef}`;
       heartbeat({
         phase: 'started',
         taskId: req.taskId,
@@ -102,8 +112,10 @@ export function createActivities(deps: ActivityDependencies) {
           'gen_ai.usage.output_tokens': result.tokensOut,
           'agentops.stage': req.stage,
           'agentops.attempt': req.attempt,
+          'agentops.prompt.hash': promptHash,
+          'agentops.prompt.source': promptSource,
         });
-        return result;
+        return { ...result, promptHash, promptSource };
       } catch (err) {
         // A LiteLLM virtual-key budget cap is definitive, not transient --
         // same "typed error at the boundary, non-retryable ApplicationFailure
@@ -141,6 +153,21 @@ export function createActivities(deps: ActivityDependencies) {
     },
     async labelIssue(ref: string, label: string): Promise<void> {
       await deps.tracker.label(ref, label);
+    },
+    async createIssue(req: { repo: string; project: string; title: string; body: string; labels: string[]; dedupeFingerprint?: string }): Promise<{ ref: string; url: string; deduped: boolean }> {
+      const filedFindings = deps.filedFindings;
+      if (req.dedupeFingerprint && filedFindings) {
+        const existing = await filedFindings.find(req.project, req.dedupeFingerprint);
+        if (existing) {
+          await filedFindings.record({ project: req.project, fingerprint: req.dedupeFingerprint, issueRef: existing.issueRef });
+          return { ref: existing.issueRef, url: '', deduped: true };
+        }
+      }
+      const created = await deps.tracker.createIssue({ repo: req.repo, title: req.title, body: req.body, labels: req.labels });
+      if (req.dedupeFingerprint && filedFindings) {
+        await filedFindings.record({ project: req.project, fingerprint: req.dedupeFingerprint, issueRef: created.ref });
+      }
+      return { ref: created.ref, url: created.url, deduped: false };
     },
     async openPr(req: OpenPrRequest): Promise<OpenPrResult> {
       return deps.scm.openPr(req);
@@ -196,6 +223,76 @@ export function createActivities(deps: ActivityDependencies) {
       }
       const config = await loadProjectConfig(deps.scm, repo);
       return { registered: true, project: entry.project, config };
+    },
+
+    async loadAgentsManifest(project: string, repo: string): Promise<AgentSpec[]> {
+      const raw = await deps.scm.readFile(repo, 'agents.json');
+      if (raw === null) return [];
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        parsed = raw;
+      }
+      const manifest = parseAgentsManifest(parsed, { workflowInputs: BUILTIN_WORKFLOW_INPUTS });
+      return manifest.agents;
+    },
+
+    async listAgentSchedules(project: string): Promise<Array<{ id: string; scheduleSpec: string; workflow: string; paused: boolean }>> {
+      const client = deps.scheduleClient;
+      if (!client || !client.list) return [];
+      const out: Array<{ id: string; scheduleSpec: string; workflow: string; paused: boolean }> = [];
+      try {
+        /* eslint-disable @typescript-eslint/no-explicit-any */
+        for await (const s of client.list!()) {
+          const rec = s as Record<string, unknown>;
+          const sid = rec.scheduleId as string | undefined;
+          if (!sid || !sid.startsWith(`agent:${project}:`)) continue;
+          const spec = (rec.schedule as any)?.spec;
+          const scheduleSpec = typeof spec === 'string' ? spec : ((spec as any)?.cron?.cronString ?? String(spec ?? ''));
+          const workflow = (rec.action as any)?.workflowType ?? 'whiteboxBugHunt';
+          out.push({ id: sid, scheduleSpec, workflow, paused: false });
+        }
+        /* eslint-enable @typescript-eslint/no-explicit-any */
+      } catch {
+        // best effort
+      }
+      return out;
+    },
+
+    async applyScheduleChanges(project: string, plan: ReconcilePlan): Promise<void> {
+      const client = deps.scheduleClient;
+      if (!client) return;
+      const tq = deps.taskQueue ?? 'agentops-devcycle';
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      for (const spec of [...plan.toCreate, ...plan.toUpdate]) {
+        if (spec.schedule === 'continuous') continue;
+        const id = scheduleId(project, spec.name);
+        const args = [{ repo: '', ...spec.input }];
+        if (plan.toCreate.some((c) => c.name === spec.name) && client.create) {
+          await client.create({
+            scheduleId: id,
+            spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } },
+            action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: tq },
+            memo: { project, agentName: spec.name },
+          } as any);
+        } else {
+          const h = client.getHandle(id);
+          await h.update?.({
+            schedule: { spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } }, action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: tq } },
+          } as any).catch(() => {});
+        }
+      }
+      for (const id of plan.toPause) {
+        await client.getHandle(id).pause?.().catch(() => {});
+      }
+      for (const id of plan.toResume) {
+        await client.getHandle(id).unpause?.().catch(() => {});
+      }
+      for (const id of plan.toDelete) {
+        await client.getHandle(id).delete?.().catch(() => {});
+      }
+      /* eslint-enable @typescript-eslint/no-explicit-any */
     },
     async prepareScratchWorkspace(taskId: string): Promise<{ workspaceRef: string }> {
       try {

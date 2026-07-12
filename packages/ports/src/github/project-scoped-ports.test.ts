@@ -19,6 +19,7 @@ function fakeTracker(): TrackerPort {
     getIssue: vi.fn().mockResolvedValue({ ref: 'r#1', title: 'T', body: 'B', labels: [] }),
     comment: vi.fn().mockResolvedValue(undefined),
     label: vi.fn().mockResolvedValue(undefined),
+    createIssue: vi.fn().mockResolvedValue({ ref: 'o/r#1', url: 'https://x' }),
   };
 }
 

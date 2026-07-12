@@ -1,17 +1,21 @@
 import { NativeConnection } from '@temporalio/worker';
+import { Client, Connection } from '@temporalio/client';
 import { BatchV1Api, KubeConfig } from '@kubernetes/client-node';
 import { Pool } from 'pg';
 import {
   createActivities,
+  InMemoryFiledFindingStore,
   InMemoryStageResultStore,
   InMemoryStatsStore,
   loadEnv,
   loadManagedProjectRegistry,
   MemoryWorkspaceManager,
+  PostgresFiledFindingStore,
   PostgresManagedProjectStore,
   PostgresStatsStore,
   SpawnGitCommandRunner,
   WorkspaceManager,
+  type FiledFindingStore,
   type ManagedProjectRegistryDeps,
   type StatsStore,
   type Workspaces,
@@ -326,6 +330,23 @@ export async function buildStatsStore(): Promise<StatsStore> {
   return store;
 }
 
+export async function buildFiledFindingStore(): Promise<FiledFindingStore> {
+  const host = process.env.ENGINE_DB_HOST;
+  if (!host) {
+    return new InMemoryFiledFindingStore();
+  }
+  const pool = new Pool({
+    host,
+    port: process.env.ENGINE_DB_PORT ? Number(process.env.ENGINE_DB_PORT) : 5432,
+    database: process.env.ENGINE_DB_NAME ?? 'agentops_engine',
+    user: process.env.ENGINE_DB_USER ?? 'temporal',
+    password: process.env.ENGINE_DB_PASSWORD,
+  });
+  const store = new PostgresFiledFindingStore(pool);
+  await store.ensureSchema();
+  return store;
+}
+
 async function main(): Promise<void> {
   const connection = await NativeConnection.connect({
     address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233',
@@ -374,6 +395,26 @@ async function main(): Promise<void> {
       : 'agentops worker: agent_run_stats in-memory only (ENGINE_DB_HOST not set)',
   );
 
+  const filedFindings = await buildFiledFindingStore();
+  console.log(
+    filedFindings instanceof PostgresFiledFindingStore
+      ? 'agentops worker: filed_findings persisted to Postgres (ENGINE_DB_HOST set)'
+      : 'agentops worker: filed_findings in-memory only (ENGINE_DB_HOST not set)',
+  );
+
+  // Build a Temporal client for Schedule management (ConfigSync activities).
+  // Uses the same address/namespace as the worker connection when available.
+  let scheduleClient: import('@agentops/activities').ScheduleClientLike | undefined;
+  try {
+    const c: import('@temporalio/client').Connection = await Connection.connect({
+      address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233',
+    });
+    const tc = new Client({ connection: c, namespace: process.env.TEMPORAL_NAMESPACE });
+    scheduleClient = tc.schedule as unknown as import('@agentops/activities').ScheduleClientLike;
+  } catch {
+    // In test or no Temporal, schedule ops will no-op or be injected by tests.
+  }
+
   const activities: DevCycleActivities & PlatformActivities = createActivities({
     backends: buildBackends(inCluster),
     tracker,
@@ -383,6 +424,9 @@ async function main(): Promise<void> {
     workspaces,
     prompts: new PromptPack(),
     registry,
+    filedFindings,
+    scheduleClient,
+    taskQueue: 'agentops-devcycle',
   });
 
   const tracing = setupTracing();

@@ -11,5 +11,10 @@ export const RunStatsSchema = z.object({
   tokensOut: z.number().int().nonnegative(),
   wallMs: z.number().int().nonnegative(),
   outcome: StageOutcomeSchema,
+  // provenance + attribution (design §7) — optional so existing call sites compile
+  promptHash: z.string().optional(),
+  promptSource: z.string().optional(),
+  project: z.string().optional(),
+  workflowType: z.string().optional(),
 });
 export type RunStats = z.infer<typeof RunStatsSchema>;
