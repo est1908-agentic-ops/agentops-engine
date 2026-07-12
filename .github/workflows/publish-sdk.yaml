@@ -46,6 +46,21 @@ jobs:
       # `packages/*/src/**` globs match nothing ("No test files found").
       - run: pnpm test -- packages/engine-sdk
 
+      # TEMPORARY DIAGNOSTIC — remove after root-causing the publish 404.
+      # Reveals which npm identity the token maps to and whether pnpm (not just
+      # npm) actually picks up the setup-node .npmrc auth. Token stays masked.
+      - name: Diagnose npm auth (temporary)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "NPM_CONFIG_USERCONFIG=$NPM_CONFIG_USERCONFIG"
+          echo "--- userconfig .npmrc (authToken masked) ---"
+          sed -E 's/(_authToken=).*/\1<MASKED>/' "$NPM_CONFIG_USERCONFIG" || echo "(no userconfig file)"
+          echo "--- npm whoami ---";  npm whoami  || echo "npm whoami FAILED"
+          echo "--- pnpm whoami ---"; pnpm whoami || echo "pnpm whoami FAILED"
+          echo "--- npm access list packages (agentic-ops org) ---"
+          npm access list packages agentic-ops || echo "npm access list FAILED"
+
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
