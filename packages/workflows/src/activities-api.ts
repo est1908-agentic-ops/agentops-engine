@@ -58,5 +58,5 @@ export interface DevCycleActivities {
 export interface ConfigSyncActivities {
   loadAgentsManifest(project: string, repo: string): Promise<AgentSpec[]>;
   listAgentSchedules(project: string): Promise<ExistingSchedule[]>;
-  applyScheduleChanges(project: string, plan: ReconcilePlan): Promise<void>;
+  applyScheduleChanges(project: string, repo: string, plan: ReconcilePlan): Promise<void>;
 }

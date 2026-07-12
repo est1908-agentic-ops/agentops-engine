@@ -8,6 +8,6 @@ export async function configSync(input: { project: string; repo: string }): Prom
   const declared = await acts.loadAgentsManifest(input.project, input.repo);
   const existing = await acts.listAgentSchedules(input.project);
   const plan = reconcileAgents(declared, existing, input.project);
-  await acts.applyScheduleChanges(input.project, plan);
+  await acts.applyScheduleChanges(input.project, input.repo, plan);
   return plan;
 }

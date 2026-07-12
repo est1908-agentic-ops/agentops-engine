@@ -267,7 +267,7 @@ export function createActivities(deps: ActivityDependencies) {
       return out;
     },
 
-    async applyScheduleChanges(project: string, plan: ReconcilePlan): Promise<void> {
+    async applyScheduleChanges(project: string, repo: string, plan: ReconcilePlan): Promise<void> {
       const client = deps.scheduleClient;
       if (!client) return;
       const tq = deps.taskQueue ?? ENGINE_QUEUE;
@@ -275,18 +275,23 @@ export function createActivities(deps: ActivityDependencies) {
       for (const spec of [...plan.toCreate, ...plan.toUpdate]) {
         if (spec.schedule === 'continuous') continue;
         const id = scheduleId(project, spec.name);
-        const args = [{ repo: '', ...spec.input }];
+        const args = [{ repo, project, ...spec.input }];
+        const memo = { project, agentName: spec.name, workflowType: spec.workflow };
+        const searchAttributes = { project: [project], agentName: [spec.name], workflowType: [spec.workflow] };
         if (plan.toCreate.some((c) => c.name === spec.name) && client.create) {
           await client.create({
             scheduleId: id,
             spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } },
-            action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: tq },
-            memo: { project, agentName: spec.name },
+            action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: tq, memo, searchAttributes },
+            memo,
+            searchAttributes,
           } as any);
         } else {
           const h = client.getHandle(id);
           await h.update?.({
-            schedule: { spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } }, action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: tq } },
+            schedule: { spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } }, action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: tq, memo, searchAttributes } },
+            memo,
+            searchAttributes,
           } as any).catch(() => {});
         }
       }

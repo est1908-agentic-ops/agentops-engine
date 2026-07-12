@@ -571,13 +571,33 @@ describe('createActivities — resolveRepoConfig', () => {
   it('createIssue throws ProjectAuthorizationError when caller project does not own the repo', async () => {
     const { projectContext } = await import('./project-context');
     const tracker = new MemoryTrackerPort();
-    const deps = { ...buildDeps(), tracker, registry: [{ project: 'acme', repo: 'acme/web' }] };
+    const deps = { ...buildDeps(), tracker, registry: [{ project: 'acme', repo: 'acme/web', trackerType: 'github' as const, token: 't' }] };
     const activities = createActivities(deps);
     await expect(
       projectContext.run({ project: 'other' }, () =>
         activities.createIssue({ repo: 'acme/web', project: 'acme', title: 't', body: 'b', labels: [] }),
       ),
     ).rejects.toThrow(/ProjectAuthorizationError|not authorized/);
+  });
+
+  it('applyScheduleChanges stamps repo + project/agentName/workflowType and search attributes', async () => {
+    const create = vi.fn().mockResolvedValue({});
+    const getHandle = vi.fn(() => ({}));
+    const deps = {
+      ...buildDeps(),
+      scheduleClient: { create, getHandle } as any,
+      registry: [{ project: 'acme', repo: 'acme/web', trackerType: 'github' as const, token: 't' }],
+    } as any;
+    const activities = createActivities(deps);
+    const plan = {
+      toCreate: [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: { focus: 'auth' }, enabled: true, timezone: 'UTC', overlap: 'skip' }],
+      toUpdate: [], toDelete: [], toPause: [], toResume: [],
+    } as any;
+    await activities.applyScheduleChanges('acme', 'acme/web', plan);
+    const arg = create.mock.calls[0][0];
+    expect(arg.action.args[0]).toMatchObject({ repo: 'acme/web', project: 'acme', focus: 'auth' });
+    expect(arg.memo).toMatchObject({ project: 'acme', agentName: 'nb', workflowType: 'whiteboxBugHunt' });
+    expect(arg.searchAttributes).toMatchObject({ project: ['acme'], agentName: ['nb'], workflowType: ['whiteboxBugHunt'] });
   });
 });
 

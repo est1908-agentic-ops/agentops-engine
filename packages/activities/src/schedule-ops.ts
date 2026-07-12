@@ -68,6 +68,7 @@ export async function listAgentSchedules(project: string, client?: ScheduleClien
 
 export async function applyScheduleChanges(
   project: string,
+  repo: string,
   plan: ReconcilePlan,
   deps: ScheduleOpsDeps & { startWorkflow?: (workflowType: string, args: unknown[]) => unknown },
 ): Promise<void> {
@@ -78,6 +79,9 @@ export async function applyScheduleChanges(
   for (const spec of plan.toCreate) {
     if (spec.schedule === 'continuous') continue; // SP1: Schedules only
     const id = scheduleId(project, spec.name);
+    const args = [{ repo, project, ...spec.input }];
+    const memo = { project, agentName: spec.name, workflowType: spec.workflow };
+    const searchAttributes = { project: [project], agentName: [spec.name], workflowType: [spec.workflow] };
     if (client.create) {
       await client.create({
         scheduleId: id,
@@ -85,10 +89,13 @@ export async function applyScheduleChanges(
         action: {
           type: 'startWorkflow',
           workflowType: spec.workflow,
-          args: [{ repo: /* provided by caller context */ '', ...spec.input }],
+          args,
           taskQueue,
+          memo,
+          searchAttributes,
         },
-        memo: { project, agentName: spec.name },
+        memo,
+        searchAttributes,
       } as any);
     }
   }
@@ -97,16 +104,23 @@ export async function applyScheduleChanges(
     if (spec.schedule === 'continuous') continue;
     const id = scheduleId(project, spec.name);
     const h = client.getHandle(id);
+    const args = [{ repo, project, ...spec.input }];
+    const memo = { project, agentName: spec.name, workflowType: spec.workflow };
+    const searchAttributes = { project: [project], agentName: [spec.name], workflowType: [spec.workflow] };
     await h.update?.({
       schedule: {
         spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } },
         action: {
           type: 'startWorkflow',
           workflowType: spec.workflow,
-          args: [{ repo: '', ...spec.input }],
+          args,
           taskQueue,
+          memo,
+          searchAttributes,
         },
       },
+      memo,
+      searchAttributes,
     } as any);
   }
 
