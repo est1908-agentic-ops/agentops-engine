@@ -1,6 +1,7 @@
 import {
   DevCycleRunDetailSchema,
   DevCycleTargetsResponseSchema,
+  ListAgentSchedulesResponseSchema,
   ManagedProjectListResponseSchema,
   ManagedProjectSchema,
   RepoListResponseSchema,
@@ -9,6 +10,7 @@ import {
   StartDevCycleResponseSchema,
   StartRunResponseSchema,
   z,
+  type AgentScheduleSummary,
   type DevCycleRunDetail,
   type DevCycleTarget,
   type ManagedProject,
@@ -250,6 +252,21 @@ export async function updateProject(
 export async function deleteProject(repo: string): Promise<void> {
   const res = await fetch(`/api/projects/${encodeURIComponent(repo)}`, {
     method: 'DELETE',
+    headers: crudHeaders(false),
+  });
+  await parseEmptyResponse(res);
+}
+
+// --- agent schedules (SP3 run-from-UI) ---
+
+export async function listAgents(): Promise<{ agents: AgentScheduleSummary[] }> {
+  const res = await fetch('/api/agents');
+  return parseJsonResponse(res, ListAgentSchedulesResponseSchema);
+}
+
+export async function runAgent(scheduleId: string): Promise<void> {
+  const res = await fetch(`/api/agents/${encodeURIComponent(scheduleId)}/run`, {
+    method: 'POST',
     headers: crudHeaders(false),
   });
   await parseEmptyResponse(res);
