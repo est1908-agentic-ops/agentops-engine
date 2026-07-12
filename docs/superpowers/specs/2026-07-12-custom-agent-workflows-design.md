@@ -2,7 +2,7 @@
 
 Status: draft v1 · 2026-07-12 · Owner: Artem
 Tracks: [#30](https://github.com/est1908-agentic-ops/agentops-engine/issues/30) ("Custom agent config in the JSON and database") · follow-ons in [#31](https://github.com/est1908-agentic-ops/agentops-engine/issues/31)
-Relates to: ARCHITECTURE.md §5.2/§5.9 (worker fleet — amended by §7), §5.9.1 (role-as-manifest), §6.1 (project-defined triggers & jobs), §8.1 M8 (supersedes the git `RoleManifest`).
+Amends: the worker-fleet model (§7). Supersedes: the planned git-based role manifest ("roles as config", M8). The monolithic architecture doc was removed, so this spec is the standalone authority for the model it describes.
 
 ## 1. Why
 
@@ -46,11 +46,11 @@ All five #30 use-cases are covered by **Tier 1** except a project-specific exter
 
 Validated by a zod `AgentsManifestSchema` in `contracts`. `workflow` must name a registered workflow; `schedule` is cron (or `"continuous"` for a long-running poll workflow). `input` is passed as workflow args, merged with `{ repo, project, config }` the reconciler resolves.
 
-**The reconciler** (`ConfigSync`, ARCHITECTURE §6.1) — reads each managed project's `agents.json` (via `ScmPort.readFile`, reusing `load-project-config.ts`) on repo push (Gateway) and on a periodic Schedule, then **reconciles** the declared agents into **Temporal Schedules** (`ScheduleClient` create/update/delete). Config *is* the state: removing an entry deletes its Schedule. Each Schedule starts its workflow on the shared fleet queue with `{ repo, project, config, ...input }`.
+**The reconciler** (`ConfigSync`) — reads each managed project's `agents.json` (via `ScmPort.readFile`, reusing `load-project-config.ts`) on repo push (Gateway) and on a periodic Schedule, then **reconciles** the declared agents into **Temporal Schedules** (`ScheduleClient` create/update/delete). Config *is* the state: removing an entry deletes its Schedule. Each Schedule starts its workflow on the shared fleet queue with `{ repo, project, config, ...input }`.
 
 ## 4. Tier 2 — `@agentops/engine-sdk` + per-project worker
 
-For workflows whose *structure* isn't a built-in (e.g. a Rollbar monitor), a project authors TS workflows and runs its own worker. The Temporal constraint (workflow code is bundled into a worker at startup; you cannot inject project code into the engine's worker without a rebuild, and it would break §5.7 isolation) is resolved by a **per-project workflow worker** that delegates heavy activities back to the engine.
+For workflows whose *structure* isn't a built-in (e.g. a Rollbar monitor), a project authors TS workflows and runs its own worker. The Temporal constraint (workflow code is bundled into a worker at startup; you cannot inject project code into the engine's worker without a rebuild, and it would break per-project isolation) is resolved by a **per-project workflow worker** that delegates heavy activities back to the engine.
 
 **The SDK** — `@agentops/engine-sdk` (fallback name `@est1908/agentops-engine-sdk` if the `@agentops` npm org is unavailable), a **thin facade** published **public on npmjs** (secret-free: types + workflow-safe helpers only; nothing proprietary; `files: ["dist"]`). Built with tsup (ESM+CJS+`.d.ts`), bundling the used bits of `contracts`/`policies` so it's self-contained; `@temporalio/*` are peer deps. Two entry points enforce the sandbox split:
 - `@agentops/engine-sdk/workflow` — safe inside a workflow: the `EngineActivities` types, `engineActivities()`/`engineAgent()` proxy factories (targeting `ENGINE_QUEUE`), typed child wrappers (`childDevCycle(input): Promise<DevCycleState>` via `executeChild('devCycle', …)` — starts by name, no engine code bundled), and pure parsers (`parseFindings`, `parseVerdict`).
@@ -80,9 +80,9 @@ Condensed; full versions were validated during design.
 
 ## 7. Architecture impact
 
-- **Worker fleet model (amends §5.2/§5.9):** "one worker fleet serves all repos" becomes "**one shared fleet runs the engine activities + built-in workflows; projects may additionally run their own workflow workers**." Config-only (Tier 1) projects need no worker of their own.
-- **Supersedes M8's git `RoleManifest`:** a "role/custom agent" is an `agents.json` entry (Tier 1) or a project workflow (Tier 2), not an engine-repo manifest.
-- **AGENTS.md §5.2/§5.9 and ARCHITECTURE §5.2/§5.9 get updated** in the sub-project that introduces the SDK/per-project worker.
+- **Worker fleet model (changed by this spec):** "one worker fleet serves all repos" becomes "**one shared fleet runs the engine activities + built-in workflows; projects may additionally run their own workflow workers**." Config-only (Tier 1) projects need no worker of their own.
+- **Supersedes the planned git `RoleManifest`:** a "role/custom agent" is an `agents.json` entry (Tier 1) or a project workflow (Tier 2), not an engine-repo manifest.
+- This spec is the authority for that model; there is no separate architecture doc to keep in sync (it was removed).
 
 ## 8. Decomposition into sub-projects
 
@@ -102,11 +102,11 @@ Recommended order **1 → 2 → 3 → 4**; SP1 delivers most of #30 with least r
 - `ConfigSync` reconciler: reads `agents.json` via `ScmPort`, diffs against existing Temporal Schedules, applies create/update/delete.
 - e2e (stub backend): a manifest with a scheduled `whiteboxBugHunt` reconciles to a Temporal Schedule; triggering that Schedule runs the workflow, which files a `bug`-labeled issue via `createIssue`. (The filed issue → `devCycle` fix loop is the existing M3 Gateway trigger, exercised separately.)
 - `pnpm lint && pnpm typecheck && pnpm test` green; `pnpm e2e` green.
-- ARCHITECTURE.md §6.1 updated to point at this design.
+- CLAUDE.md/AGENTS.md already name `docs/superpowers/specs/` as the design authority — no separate architecture doc to update.
 
 ## 10. Open questions
 
-- **Reconciler as workflow vs. service.** A Temporal `ConfigSync` workflow (durable, replayable) vs. a control-side loop. Lean workflow (ARCHITECTURE §6.1 says "a `ConfigSync` workflow"); settle in the plan.
+- **Reconciler as workflow vs. service.** A Temporal `ConfigSync` workflow (durable, replayable) vs. a control-side loop. Lean workflow; settle in the plan.
 - **`agents.json` location + trigger to reconcile.** On Gateway push webhook and/or a periodic Schedule; pin in SP1's plan.
 - **Finding dedup.** `whiteboxBugHunt` must not re-file the same bug nightly; `createIssue`'s `dedupeFingerprint` (search existing open issues by fingerprint before creating) is the mechanism — pin the fingerprint scheme in the plan.
-- **Cross-repo `executeChild`** (`targetRepo`, ARCH §6.2) — SP3.
+- **Cross-repo `executeChild`** (a workflow whose PR lands in a different repo than the trigger, via a `targetRepo`) — SP3.
