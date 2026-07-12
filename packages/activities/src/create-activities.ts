@@ -165,6 +165,9 @@ export function createActivities(deps: ActivityDependencies) {
     async labelIssue(ref: string, label: string): Promise<void> {
       await deps.tracker.label(ref, label);
     },
+    async unlabelIssue(ref: string, label: string): Promise<void> {
+      await deps.tracker.removeLabel(ref, label);
+    },
     async createIssue(req: { repo: string; project: string; title: string; body: string; labels: string[]; dedupeFingerprint?: string }): Promise<{ ref: string; url: string; deduped: boolean }> {
       assertProjectOwnsRepo(req.repo, deps.registry);
       const filedFindings = deps.filedFindings;
@@ -240,6 +243,10 @@ export function createActivities(deps: ActivityDependencies) {
       return { registered: true, project: entry.project, config };
     },
 
+    async listManagedProjects(): Promise<Array<{ project: string; repo: string }>> {
+      return deps.registry.map((e) => ({ project: e.project, repo: e.repo }));
+    },
+
     async loadAgentsManifest(project: string, repo: string): Promise<AgentSpec[]> {
       const raw = await deps.scm.readFile(repo, 'agents.json');
       if (raw === null) return [];
@@ -279,10 +286,10 @@ export function createActivities(deps: ActivityDependencies) {
     async applyScheduleChanges(project: string, repo: string, plan: ReconcilePlan): Promise<void> {
       const client = deps.scheduleClient;
       if (!client) return;
-      const tq = deps.taskQueue ?? ENGINE_QUEUE;
       /* eslint-disable @typescript-eslint/no-explicit-any */
       for (const spec of [...plan.toCreate, ...plan.toUpdate]) {
         if (spec.schedule === 'continuous') continue;
+        const actionQueue = spec.taskQueue ?? deps.taskQueue ?? ENGINE_QUEUE;
         const id = scheduleId(project, spec.name);
         const args = [{ repo, project, ...spec.input }];
         const memo = { project, agentName: spec.name, workflowType: spec.workflow };
@@ -291,14 +298,14 @@ export function createActivities(deps: ActivityDependencies) {
           await client.create({
             scheduleId: id,
             spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } },
-            action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: tq, memo, searchAttributes },
+            action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: actionQueue, memo, searchAttributes },
             memo,
             searchAttributes,
           } as any);
         } else {
           const h = client.getHandle(id);
           await h.update?.({
-            schedule: { spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } }, action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: tq, memo, searchAttributes } },
+            schedule: { spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } }, action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: actionQueue, memo, searchAttributes } },
             memo,
             searchAttributes,
           } as any).catch(() => {});
