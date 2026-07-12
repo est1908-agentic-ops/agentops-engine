@@ -17,6 +17,8 @@
   "peerDependencies": { "@temporalio/workflow": "*", "@temporalio/worker": "*", "@temporalio/common": "*", "@temporalio/client": "*" },
   "dependencies": { "zod": "^3.23.0" },
   "devDependencies": {
+    "@agentops/contracts": "workspace:*",
+    "@agentops/policies": "workspace:*",
     "tsup": "^8.0.0",
     "typescript": "^6.0.3",
     "vitest": "^4.1.9"
