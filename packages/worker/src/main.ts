@@ -53,6 +53,7 @@ import {
 import { PromptPack } from '@agentops/prompts';
 import type { DevCycleActivities, PlatformActivities } from '@agentops/workflows';
 import { createWorker } from './create-worker';
+import { ensureSearchAttributes, type OperatorConnectionLike } from './ensure-search-attributes';
 import { setupTracing } from './tracing';
 
 export interface ActivityWiring {
@@ -414,6 +415,17 @@ async function main(): Promise<void> {
     const tc = new Client({ connection: c, namespace: process.env.TEMPORAL_NAMESPACE });
     scheduleClient = tc.schedule as unknown as import('@agentops/activities').ScheduleClientLike;
     workflowClient = tc.workflow as unknown as import('@agentops/activities').WorkflowClientLike;
+    // Ensure the custom search attributes exist before the reconciler ever
+    // creates a Schedule (which stamps them) -- Temporal rejects a create that
+    // references an unregistered attribute. Idempotent, so it's safe on every
+    // boot. A failure here isn't fatal (the worker can still serve devCycle);
+    // warn so a genuinely broken namespace surfaces without blocking startup.
+    try {
+      await ensureSearchAttributes(c as unknown as OperatorConnectionLike, process.env.TEMPORAL_NAMESPACE);
+      console.log('agentops worker: custom search attributes ensured (project, agentName, workflowType)');
+    } catch (err) {
+      console.warn('agentops worker: failed to ensure search attributes — reconcile may reject Schedule creates', err);
+    }
   } catch {
     // In test or no Temporal, schedule ops will no-op or be injected by tests.
   }

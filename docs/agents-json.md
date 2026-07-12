@@ -65,7 +65,7 @@ The engine registers and stamps three custom Keyword search attributes for Sched
 - `agentName`
 - `workflowType`
 
-These must be registered per Temporal namespace before first reconcile (see `scripts/register-search-attributes.sh`). They enable filtering/listing per project or per-agent-instance in the UI, cost dashboards, and control surfaces.
+The engine worker **auto-registers** these in its namespace at startup (idempotent), so there's no manual pre-deploy step — Temporal would otherwise reject a Schedule create that references an unregistered attribute. `scripts/register-search-attributes.sh` remains as a manual fallback for bootstrapping a namespace by hand. They enable filtering/listing per project or per-agent-instance in the UI, cost dashboards, and control surfaces.
 
 ## Notes
 

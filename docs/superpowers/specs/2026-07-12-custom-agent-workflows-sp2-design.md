@@ -160,7 +160,7 @@ It points at the in-repo `examples/project-worker/` reference.
 | `RoutingSchema += agent?`, `TimeoutsSchema += agent?` | `contracts` | Make the `agent` stage routable/tunable (§10) | new |
 | `AgentRunRequest +=` prompt-source descriptor | `contracts` | Project-prompt provenance (§9) | new (optional) |
 | `ProjectAuthorizationError` | `contracts`/`activities` | Non-retryable authz failure (§7.2) | new |
-| Register `project`/`agentName`/`workflowType` search attributes | Temporal (`operator search-attribute create`) + `upsertSearchAttributes` in reconciled/built-in workflows | Identity binding + per-agent-instance telemetry (§7, master §7) | ops + code |
+| Register `project`/`agentName`/`workflowType` search attributes | Worker auto-registers at startup via the operator API (`ensure-search-attributes.ts`); `scripts/register-search-attributes.sh` is a manual fallback | Identity binding + per-agent-instance telemetry (§7, master §7) | code |
 
 ## 13. Testing strategy
 
