@@ -2,7 +2,10 @@ import { trace } from '@opentelemetry/api';
 import {
   LiteLlmBudgetExceededError,
   ProcessCliAuthError,
+  RateLimitError,
   RateWindowExceededError,
+  SessionLimitExhaustedError,
+  TierFallbackBackend,
   type AgentBackend,
 } from '@agentops/backends';
 import {
@@ -16,6 +19,7 @@ import {
 import type {
   AgentRunRequest,
   AgentRunResult,
+  ModelRef,
   PrFeedback,
   ProjectConfig,
   ResolvedProjectEntry,
@@ -27,7 +31,7 @@ import type { FiledFindingStore } from './filed-finding-store';
 import type { ScheduleClientLike } from './schedule-ops';
 import { ENGINE_QUEUE } from '@agentops/contracts';
 import type { ReconcilePlan } from '@agentops/policies';
-import { scheduleId } from '@agentops/policies';
+import { scheduleId, resolveTier } from '@agentops/policies';
 import type { PromptPack } from '@agentops/prompts';
 import type { StageResultRecord, StageResultStore } from './stage-result-store';
 import type { StatsStore } from './stats-store';
@@ -78,10 +82,37 @@ export function createActivities(deps: ActivityDependencies) {
   const heartbeat = deps.heartbeat ?? ((details: unknown) => Context.current().heartbeat(details));
   return {
     async runAgent(req: AgentRunRequest): Promise<AgentRunResult & { promptHash: string; promptSource: string }> {
-      const backend = deps.backends[req.backend];
-      if (!backend) {
-        throw new Error(`createActivities.runAgent: unknown backend "${req.backend}"`);
+      // Resolve the model: either via a tier ref (the normal path -- the
+      // workflow sends a tier name, the activity resolves it to an ordered
+      // ModelRef[] whose [0] is the primary and the rest is the
+      // session-limit fallback chain) or via a concrete backend+model
+      // (the platform.ts fixed-model path, which sets no tier).
+      let primaryBackend: AgentBackend;
+      let primaryModelRef: { backend: string; model: string; effort?: string };
+      let chain: ModelRef[];
+
+      if (req.tier) {
+        const effortOverride = req.effort as
+          | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+          | undefined;
+        const entries = resolveTier(req.projectTiers, req.tier, effortOverride);
+        primaryModelRef = entries[0];
+        chain = entries.slice(1);
+        primaryBackend = deps.backends[primaryModelRef.backend];
+        if (!primaryBackend) {
+          throw new Error(
+            `createActivities.runAgent: unknown backend "${primaryModelRef.backend}" for tier "${req.tier}"`,
+          );
+        }
+      } else {
+        primaryBackend = deps.backends[req.backend!];
+        if (!primaryBackend) {
+          throw new Error(`createActivities.runAgent: unknown backend "${req.backend}"`);
+        }
+        primaryModelRef = { backend: req.backend!, model: req.model!, effort: req.effort };
+        chain = [];
       }
+
       const prompt = deps.prompts.render(req.promptRef, req.promptContext);
       const promptHash = sha256(prompt);
       const promptSource = req.promptSource
@@ -93,18 +124,27 @@ export function createActivities(deps: ActivityDependencies) {
         stage: req.stage,
         attempt: req.attempt,
         callIndex: req.callIndex,
-        backend: req.backend,
-        model: req.model,
+        backend: primaryModelRef.backend,
+        model: primaryModelRef.model,
       });
+      // Wrap with TierFallbackBackend only when there's a chain to walk (a
+      // resolved tier with >1 entry). A concrete-model call or a single-entry
+      // tier dispatches directly -- no fallback to attempt.
+      const dispatchBackend =
+        chain.length > 0
+          ? new TierFallbackBackend(primaryBackend, deps.backends, chain, req.stage, heartbeat)
+          : primaryBackend;
       try {
-        const result = await backend.run({
+        const result = await dispatchBackend.run({
           taskId: req.taskId,
           stage: req.stage,
           attempt: req.attempt,
           callIndex: req.callIndex,
-          backend: req.backend,
-          model: req.model,
-          effort: req.effort,
+          backend: primaryModelRef.backend,
+          model: primaryModelRef.model,
+          effort: primaryModelRef.effort as
+            | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+            | undefined,
           image: req.image,
           services: req.services,
           workspaceRef: req.workspaceRef,
@@ -117,8 +157,8 @@ export function createActivities(deps: ActivityDependencies) {
         // doc), so these land on this activity's own span rather than
         // separate child spans.
         trace.getActiveSpan()?.setAttributes({
-          'gen_ai.system': req.backend,
-          'gen_ai.request.model': req.model,
+          'gen_ai.system': primaryModelRef.backend,
+          'gen_ai.request.model': primaryModelRef.model,
           'gen_ai.usage.input_tokens': result.tokensIn,
           'gen_ai.usage.output_tokens': result.tokensOut,
           'agentops.stage': req.stage,
@@ -126,7 +166,13 @@ export function createActivities(deps: ActivityDependencies) {
           'agentops.prompt.hash': promptHash,
           'agentops.prompt.source': promptSource,
         });
-        return { ...result, promptHash, promptSource };
+        return {
+          ...result,
+          resolvedBackend: primaryModelRef.backend,
+          resolvedModel: primaryModelRef.model,
+          promptHash,
+          promptSource,
+        };
       } catch (err) {
         // A LiteLLM virtual-key budget cap is definitive, not transient --
         // same "typed error at the boundary, non-retryable ApplicationFailure
@@ -151,6 +197,24 @@ export function createActivities(deps: ActivityDependencies) {
             type: 'RateWindowExceededError',
             nonRetryable: false,
             nextRetryDelay: err.retryAfterMs,
+          });
+        }
+        // The entire session-limit fallback chain is exhausted (every tier
+        // entry hit an account-wide cap lasting hours). Fail fast, non-retryable:
+        // burning Temporal's maximumAttempts budget re-hitting the same cap is
+        // exactly the issue-broccoli-94 failure mode this design exists to fix.
+        if (err instanceof SessionLimitExhaustedError) {
+          throw ApplicationFailure.nonRetryable(err.message, 'SessionLimitExhaustedError');
+        }
+        // A self-clearing 429 (minutes). The TierFallbackBackend propagated
+        // it untouched -- here we convert it to a retryable wait so Temporal's
+        // own retry absorbs the cooldown without changing the model.
+        if (err instanceof RateLimitError) {
+          throw ApplicationFailure.create({
+            message: err.message,
+            type: 'RateLimitError',
+            nonRetryable: false,
+            nextRetryDelay: 60_000,
           });
         }
         throw err;
