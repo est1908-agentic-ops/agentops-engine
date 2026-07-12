@@ -1,6 +1,7 @@
 import type { AgentSpec } from '@agentops/contracts';
 import type { ExistingSchedule, ReconcilePlan } from '@agentops/policies';
 import { scheduleId } from '@agentops/policies';
+import { ENGINE_QUEUE } from '@agentops/contracts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Minimal surface we use from Temporal's ScheduleClient / ScheduleHandle.
@@ -71,7 +72,7 @@ export async function applyScheduleChanges(
 ): Promise<void> {
   const client = deps.scheduleClient;
   if (!client) return; // no-op in environments without schedule client (tests often mock at higher level)
-  const taskQueue = deps.taskQueue ?? 'agentops-devcycle';
+  const taskQueue = deps.taskQueue ?? ENGINE_QUEUE;
 
   for (const spec of plan.toCreate) {
     if (spec.schedule === 'continuous') continue; // SP1: Schedules only

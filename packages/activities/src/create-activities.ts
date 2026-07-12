@@ -25,6 +25,7 @@ import { parseProjectConfig, sha256, type AgentSpec } from '@agentops/contracts'
 import { parseAgentsManifest, BUILTIN_WORKFLOW_INPUTS } from '@agentops/contracts';
 import type { FiledFindingStore } from './filed-finding-store';
 import type { ScheduleClientLike } from './schedule-ops';
+import { ENGINE_QUEUE } from '@agentops/contracts';
 import type { ReconcilePlan } from '@agentops/policies';
 import { scheduleId } from '@agentops/policies';
 import type { PromptPack } from '@agentops/prompts';
@@ -263,7 +264,7 @@ export function createActivities(deps: ActivityDependencies) {
     async applyScheduleChanges(project: string, plan: ReconcilePlan): Promise<void> {
       const client = deps.scheduleClient;
       if (!client) return;
-      const tq = deps.taskQueue ?? 'agentops-devcycle';
+      const tq = deps.taskQueue ?? ENGINE_QUEUE;
       /* eslint-disable @typescript-eslint/no-explicit-any */
       for (const spec of [...plan.toCreate, ...plan.toUpdate]) {
         if (spec.schedule === 'continuous') continue;

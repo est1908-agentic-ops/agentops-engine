@@ -38,6 +38,7 @@ import {
   type K8sJobRunnerOptions,
 } from '@agentops/backends';
 import type { ResolvedProjectEntry } from '@agentops/contracts';
+import { ENGINE_QUEUE, LEGACY_ENGINE_QUEUE } from '@agentops/contracts';
 import {
   createGithubPorts,
   createProjectScopedPorts,
@@ -426,7 +427,7 @@ async function main(): Promise<void> {
     registry,
     filedFindings,
     scheduleClient,
-    taskQueue: 'agentops-devcycle',
+    taskQueue: ENGINE_QUEUE,
   });
 
   const tracing = setupTracing();
@@ -436,17 +437,11 @@ async function main(): Promise<void> {
       : 'agentops worker: tracing disabled (OTEL_EXPORTER_OTLP_ENDPOINT not set)',
   );
 
-  const worker = await createWorker({
-    taskQueue: 'agentops-devcycle',
-    activities,
-    connection,
-    namespace: process.env.TEMPORAL_NAMESPACE,
-    tracing,
-  });
-
-  console.log('agentops worker started on task queue "agentops-devcycle"');
+  const worker = await createWorker({ taskQueue: ENGINE_QUEUE, activities, connection, namespace: process.env.TEMPORAL_NAMESPACE, tracing });
+  const legacyWorker = await createWorker({ taskQueue: LEGACY_ENGINE_QUEUE, activities, connection, namespace: process.env.TEMPORAL_NAMESPACE, tracing });
+  console.log(`agentops worker started on "${ENGINE_QUEUE}" (+ legacy "${LEGACY_ENGINE_QUEUE}" during cutover)`);
   try {
-    await worker.run();
+    await Promise.all([worker.run(), legacyWorker.run()]);
   } finally {
     await tracing?.shutdown();
   }
