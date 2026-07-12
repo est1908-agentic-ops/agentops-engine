@@ -1,4 +1,6 @@
-{{- $queue := .Values.taskQueue | default (printf "proj-%s" .Values.project) -}}
+{{- $tq := .Values.taskQueue | default "" -}}
+{{- $useDefault := or (not $tq) (eq $tq "<no value>") -}}
+{{- $queue := ternary (printf "proj-%s" .Values.project) $tq $useDefault -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
