@@ -213,6 +213,30 @@ describe('createActivities', () => {
     expect(r.promptHash).toMatch(/^[0-9a-f]{64}$/);
     expect(r.promptSource).toContain('implement.md');
   });
+
+  it('runAgent records a project-repo promptSource when provided', async () => {
+    const deps = buildDeps();
+    (deps.backends.stub as StubBackend).scriptResponse('bughunt', 1, { output: 'FINDINGS: []' });
+    const activities = createActivities(deps);
+    const res = await activities.runAgent({
+      taskId: 't1', stage: 'bughunt', repo: 'acme/web', project: 'acme', attempt: 1, callIndex: 1, backend: 'stub', model: 'm',
+      promptRef: 'implement.md', promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' }, workspaceRef: 'ws',
+      limits: { maxTokens: 1000, maxIterations: 1, maxImplementAttempts: 1, maxBabysitRounds: 1 },
+      promptSource: { repo: 'acme/web', commit: 'abc123', path: 'agentops/prompts/x.md' },
+    } as any);
+    expect(res.promptSource).toBe('acme/web@abc123:agentops/prompts/x.md');
+  });
+  it('runAgent defaults to builtin:<ref> when no project source is given', async () => {
+    const deps = buildDeps();
+    (deps.backends.stub as StubBackend).scriptResponse('bughunt', 1, { output: 'FINDINGS: []' });
+    const activities = createActivities(deps);
+    const res = await activities.runAgent({
+      taskId: 't1', stage: 'bughunt', repo: 'o/r', project: 'p', attempt: 1, callIndex: 1, backend: 'stub', model: 'm',
+      promptRef: 'implement.md', promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' }, workspaceRef: 'ws',
+      limits: { maxTokens: 1000, maxIterations: 1, maxImplementAttempts: 1, maxBabysitRounds: 1 },
+    } as any);
+    expect(res.promptSource).toBe('builtin:implement.md');
+  });
 });
 
 describe('createActivities — tracing', () => {

@@ -84,7 +84,9 @@ export function createActivities(deps: ActivityDependencies) {
       }
       const prompt = deps.prompts.render(req.promptRef, req.promptContext);
       const promptHash = sha256(prompt);
-      const promptSource = `builtin:${req.promptRef}`;
+      const promptSource = req.promptSource
+        ? `${req.promptSource.repo}@${req.promptSource.commit}:${req.promptSource.path}`
+        : `builtin:${req.promptRef}`;
       heartbeat({
         phase: 'started',
         taskId: req.taskId,
