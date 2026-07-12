@@ -40,7 +40,11 @@ jobs:
 
       - run: pnpm --filter @agentic-ops/engine-sdk build
 
-      - run: pnpm --filter @agentic-ops/engine-sdk test
+      # Run the SDK's tests through the root vitest config (which holds the
+      # @agentops/* -> src aliases and the correct root). `pnpm --filter … test`
+      # would set vitest's root to the package dir, where the root config's
+      # `packages/*/src/**` globs match nothing ("No test files found").
+      - run: pnpm test -- packages/engine-sdk
 
       - name: Publish to npm
         env:
