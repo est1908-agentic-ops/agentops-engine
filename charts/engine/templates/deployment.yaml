@@ -35,6 +35,10 @@ spec:
               value: {{ .Values.workspace.pvcName | quote }}
             - name: WORKSPACE_MOUNT_PATH
               value: {{ .Values.workspace.mountPath | quote }}
+            - name: CACHE_PVC_NAME
+              value: {{ .Values.workspace.cachePvcName | quote }}
+            - name: CACHE_MOUNT_PATH
+              value: {{ .Values.workspace.cacheMountPath | quote }}
             - name: AGENT_RUNNER_IMAGE
               value: "{{ .Values.image.repository }}/agent-runner:{{ .Values.image.agentRunnerTag }}"
             - name: AGENT_RUNNER_UID

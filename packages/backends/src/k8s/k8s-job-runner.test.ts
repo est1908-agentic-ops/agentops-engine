@@ -154,6 +154,48 @@ describe('buildAgentJob', () => {
     expect(container?.envFrom).toBeUndefined();
   });
 
+  it('also mounts the base-clone cache PVC when cachePvcName/cacheMountPath are set, so the worktree gitdir resolves in the Job pod', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      baseRequest,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+        cachePvcName: 'workspace-cache',
+        cacheMountPath: '/workspace/cache',
+      },
+      paths,
+    );
+
+    expect(job.spec?.template?.spec?.volumes).toEqual([
+      { name: 'workspace-tasks', persistentVolumeClaim: { claimName: 'workspace-tasks' } },
+      { name: 'workspace-cache', persistentVolumeClaim: { claimName: 'workspace-cache' } },
+    ]);
+    expect(job.spec?.template?.spec?.containers?.[0]?.volumeMounts).toEqual([
+      { name: 'workspace-tasks', mountPath: '/workspace/tasks' },
+      { name: 'workspace-cache', mountPath: '/workspace/cache' },
+    ]);
+  });
+
+  it('omits the cache volume when only one of cachePvcName/cacheMountPath is set', () => {
+    const paths = agentOpsArtifactPaths(baseRequest);
+    const job = buildAgentJob(
+      baseRequest,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks', cachePvcName: 'workspace-cache' },
+      paths,
+    );
+
+    expect(job.spec?.template?.spec?.volumes).toEqual([
+      { name: 'workspace-tasks', persistentVolumeClaim: { claimName: 'workspace-tasks' } },
+    ]);
+    expect(job.spec?.template?.spec?.containers?.[0]?.volumeMounts).toEqual([
+      { name: 'workspace-tasks', mountPath: '/workspace/tasks' },
+    ]);
+  });
+
   it('wires envFrom from authSecretName when provided', () => {
     const paths = agentOpsArtifactPaths(baseRequest);
     const job = buildAgentJob(

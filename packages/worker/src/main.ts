@@ -56,7 +56,11 @@ export interface ActivityWiring {
   workspaces: Workspaces;
 }
 
-export function buildActivityDependencies(registry: ResolvedProjectEntry[], workspacesDir?: string): ActivityWiring {
+export function buildActivityDependencies(
+  registry: ResolvedProjectEntry[],
+  workspacesDir?: string,
+  cacheDir?: string,
+): ActivityWiring {
   if (registry.length === 0) {
     return { scm: new MemoryScmPort(), tracker: new MemoryTrackerPort(), workspaces: new MemoryWorkspaceManager() };
   }
@@ -76,7 +80,7 @@ export function buildActivityDependencies(registry: ResolvedProjectEntry[], work
     return { repo: entry.repo, linearTeamKey: entry.linearTeamKey, scm, tracker, git };
   });
   const { scm, tracker, resolveGit } = createProjectScopedPorts(entries);
-  return { scm, tracker, workspaces: new WorkspaceManager({ resolveGit, cloneUrl: githubCloneUrl, workspacesDir }) };
+  return { scm, tracker, workspaces: new WorkspaceManager({ resolveGit, cloneUrl: githubCloneUrl, workspacesDir, cacheDir }) };
 }
 
 function buildManagedProjectDeps(pool: Pool | undefined): ManagedProjectRegistryDeps | undefined {
@@ -98,12 +102,36 @@ export function workspaceMountPath(): string {
   return process.env.WORKSPACE_MOUNT_PATH ?? '/workspace/tasks';
 }
 
+// WorkspaceManager creates each task workspace as a `git worktree` of a shared
+// per-repo base clone kept under this cache dir. Two things depend on it being
+// a persistent, shared PVC mounted at the SAME path in both the engine-worker
+// pod and every K8s Job pod (charts/engine/templates/deployment.yaml mounts the
+// workspace-cache PVC here, and buildJobRunnerOptions mounts it into Job pods):
+//   1. Persistence -- the base clone must survive a worker redeploy. It used to
+//      default to the worker's ephemeral home (~/.agentops/cache), so shipping
+//      any new worker image wiped every base clone and orphaned every worktree
+//      on the (persistent) tasks PVC -- their `.git` pointed at a gitdir that no
+//      longer existed. See issue-broccoli-94 (2026-07-12).
+//   2. Cross-pod resolution -- a worktree's `.git` file points at
+//      <cacheDir>/<repo>/.git/worktrees/<taskId>. The agent commits inside the
+//      Job pod (implement.md tells it to `git add`/`git commit`), so the Job pod
+//      must see that gitdir too; otherwise git can't resolve the worktree and
+//      the agent falls back to `git init` on `master`, leaving nothing on
+//      agentops/<taskId> for pushBranch to push.
+export function cacheMountPath(): string {
+  return process.env.CACHE_MOUNT_PATH ?? '/workspace/cache';
+}
+
 // Only in-cluster runAgent calls go through K8sJobRunner (see buildBackends
 // below) -- local/dev mode spawns the CLI in-process via ProcessCliRunner, so
 // there's no separate Job pod to line up with and the WorkspaceManager
-// default (home dir) is fine.
+// defaults (home dir) are fine.
 export function resolveWorkspacesDir(inCluster: boolean): string | undefined {
   return inCluster ? workspaceMountPath() : undefined;
+}
+
+export function resolveCacheDir(inCluster: boolean): string | undefined {
+  return inCluster ? cacheMountPath() : undefined;
 }
 
 export function buildJobRunnerOptions(
@@ -114,6 +142,11 @@ export function buildJobRunnerOptions(
     namespace: process.env.AGENT_NAMESPACE ?? 'dev-agents',
     workspacePvcName: process.env.WORKSPACE_PVC_NAME ?? 'workspace-tasks',
     workspaceMountPath: workspaceMountPath(),
+    // The base clone a worktree links back to lives here; the agent commits in
+    // the Job pod, so it needs the same cache PVC mounted at the same path the
+    // worker created the worktree under (see cacheMountPath above).
+    cachePvcName: process.env.CACHE_PVC_NAME ?? 'workspace-cache',
+    cacheMountPath: cacheMountPath(),
     authSecretName: opts.authSecretName,
     additionalSecretNames: opts.additionalSecretNames,
     serviceAccountName: opts.serviceAccountName,
@@ -316,7 +349,11 @@ async function main(): Promise<void> {
   }
   const registry = managedProjectDeps ? await loadManagedProjectRegistry(managedProjectDeps) : [];
   const inCluster = Boolean(process.env.KUBERNETES_SERVICE_HOST);
-  const { scm, tracker, workspaces } = buildActivityDependencies(registry, resolveWorkspacesDir(inCluster));
+  const { scm, tracker, workspaces } = buildActivityDependencies(
+    registry,
+    resolveWorkspacesDir(inCluster),
+    resolveCacheDir(inCluster),
+  );
   console.log(
     registry.length > 0
       ? `agentops worker: LIVE mode — ${registry.length} project(s) registered: ${registry
