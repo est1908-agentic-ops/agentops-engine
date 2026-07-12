@@ -23,7 +23,7 @@ SP2 is delivered as **one spec, two implementation phases**:
   5. **Project-prompt provenance** in `runAgent` (§9).
   6. The generic **`agent` stage** + routing/timeout wiring (§10).
 - **Phase B — packaging & external**:
-  7. The **`@agentops/engine-sdk`** package (§4), published to public npm.
+  7. The **`@agentic-ops/engine-sdk`** package (§4), published to public npm.
   8. An in-repo **reference project worker** + cross-worker e2e + tarball-install check (§5, §13).
   9. The **"author a project workflow" skill** baked into the agent-runner (§11).
 
@@ -44,17 +44,17 @@ Today the engine worker polls one hardcoded task queue, `'agentops-devcycle'` (`
 - The engine's `createActivities(...)` return type is asserted assignable to `EngineActivities` at compile time (`satisfies EngineActivities`), so the two can't drift.
 - **The semver compatibility contract is:** `EngineActivities` signatures + the child-workflow names/shapes (`devCycle` → `DevCycleState`) + `ENGINE_QUEUE`. Projects pin an SDK version and upgrade at their own pace.
 
-## 4. The SDK — `@agentops/engine-sdk`
+## 4. The SDK — `@agentic-ops/engine-sdk`
 
-A thin, secret-free facade published **public on npm** as `@agentops/engine-sdk` (types + workflow-safe helpers only; nothing proprietary; `files: ["dist"]`).
+A thin, secret-free facade published **public on npm** as `@agentic-ops/engine-sdk` (types + workflow-safe helpers only; nothing proprietary; `files: ["dist"]`).
 
 - **Build:** tsup → ESM + CJS + `.d.ts`. Bundles the used bits of `contracts`/`policies` so it is self-contained (no `@agentops/*` runtime deps). `@temporalio/*` are **peer dependencies** — the consumer provides them, so there's exactly one SDK copy in the worker sandbox.
-- **`@agentops/engine-sdk/workflow`** (safe inside the Temporal workflow sandbox):
+- **`@agentic-ops/engine-sdk/workflow`** (safe inside the Temporal workflow sandbox):
   - the `EngineActivities` types;
   - `engineActivities()` / `engineAgent()` — `proxyActivities` factories bound to `ENGINE_QUEUE` (so the call runs on the engine's activity workers, which hold the credentials);
   - `childDevCycle(input): Promise<DevCycleState>` — wraps `executeChild('devCycle', { taskQueue: ENGINE_QUEUE, ... })`; starts the built-in **by name**, so no engine workflow code is bundled into the project worker;
   - pure parsers (`parseFindings`, `parseVerdict`) re-exported from `policies`.
-- **`@agentops/engine-sdk/worker`** (Node side):
+- **`@agentic-ops/engine-sdk/worker`** (Node side):
   - `createEngineWorker({ taskQueue, namespace, workflowsPath, activities })` — creates a Temporal Worker for the project's own workflows/activities and **installs the identity interceptor** (§7).
 
 The two entry points enforce the sandbox split (workflow-safe vs. Node-only) at the import boundary.
@@ -65,7 +65,7 @@ A Tier-2 project repo holds:
 
 ```
 agentops/
-  workflows/*.ts     # the project's own Temporal workflows (import @agentops/engine-sdk/workflow)
+  workflows/*.ts     # the project's own Temporal workflows (import @agentic-ops/engine-sdk/workflow)
   activities/*.ts    # optional: project-owned activities holding the project's OWN secrets (e.g. rollbarFetch)
   worker.ts          # createEngineWorker({ taskQueue, namespace, workflowsPath, activities })
   agents.json        # manifest entries (schedule/continuous) referencing the project's workflows
@@ -140,7 +140,7 @@ This is the sanctioned "a new stage is a deliberate contract change" (AGENTS.md)
 
 A baked-in agent-runner skill (the re-homed DSL-authoring request, now aimed at the code-first model) teaching the SDK + per-project-worker pattern end-to-end:
 
-- install `@agentops/engine-sdk`;
+- install `@agentic-ops/engine-sdk`;
 - write `agentops/workflows/*.ts` with `engineActivities()` / `engineAgent()` / `childDevCycle()`;
 - write `worker.ts` with `createEngineWorker`;
 - add the `agents.json` entry (`continuous` or scheduled, with `taskQueue`);
@@ -167,7 +167,7 @@ It points at the in-repo `examples/project-worker/` reference.
 - **Unit.** `satisfies EngineActivities` compile assertion; interceptor propagation (header set from `workflowInfo().memo`; child inherits memo/search-attr/header); authz guard (repo∈project pass / mismatch → `ProjectAuthorizationError`); `reconcileAgents` continuous diff (start missing / terminate orphaned) and the new `taskQueue` re-point; project-prompt `promptSource` string.
 - **e2e (stub backend, `@temporalio/testing`).** The `examples/project-worker` reference worker on its own queue + the engine worker on `ENGINE_QUEUE` in a shared test namespace. Assert: (a) a Tier-2 workflow's `engineActivities().createIssue` and `childDevCycle()` cross worker boundaries correctly; (b) a workflow stamped with a mismatched `project` is rejected with `ProjectAuthorizationError` before any SCM token is used; (c) starting a `continuous` singleton twice is idempotent (`WorkflowExecutionAlreadyStarted`).
 - **Package.** `pnpm pack` the SDK → install the tarball into a throwaway consumer → typecheck against **both** entry points (proves bundling, peer-dep resolution, and `.d.ts` correctness — not just the in-workspace path).
-- **Publish.** `npm publish --access public` for `@agentops/engine-sdk` (the one outward, irreversible action; performed once the tarball check is green).
+- **Publish.** `npm publish --access public` for `@agentic-ops/engine-sdk` (the one outward, irreversible action; performed once the tarball check is green).
 - **Green bar.** `pnpm lint && pnpm typecheck && pnpm test`; `pnpm e2e` (touches workflows/policies/activities/backends).
 
 ## 14. Definition of done (SP2)
@@ -182,9 +182,9 @@ It points at the in-repo `examples/project-worker/` reference.
 - [ ] `agent` stage added to `StageSchema` + `RoutingSchema` + `TimeoutsSchema`.
 
 **Phase B**
-- [ ] `@agentops/engine-sdk` builds with tsup (ESM+CJS+`.d.ts`), dual entry, peer-dep `@temporalio/*`, self-contained; tarball-install typecheck green.
+- [ ] `@agentic-ops/engine-sdk` builds with tsup (ESM+CJS+`.d.ts`), dual entry, peer-dep `@temporalio/*`, self-contained; tarball-install typecheck green.
 - [ ] `examples/project-worker` reference worker (Rollbar monitor) + cross-worker e2e (delegation, authz-reject, continuous-idempotency) green.
-- [ ] `@agentops/engine-sdk` published to public npm.
+- [ ] `@agentic-ops/engine-sdk` published to public npm.
 - [ ] "Author a project workflow" agent-runner skill.
 - [ ] `pnpm lint && typecheck && test` green; `pnpm e2e` green; specs updated if implementation deviates.
 

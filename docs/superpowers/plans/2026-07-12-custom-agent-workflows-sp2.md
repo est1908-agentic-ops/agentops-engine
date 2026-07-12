@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Ship Tier 2 of the custom-agent-workflows design — a public `@agentops/engine-sdk` and a per-project worker convention that lets a project author its own Temporal workflow, delegate all privileged work back to the engine, and be provably unable to act on another project's repo.
+**Goal:** Ship Tier 2 of the custom-agent-workflows design — a public `@agentic-ops/engine-sdk` and a per-project worker convention that lets a project author its own Temporal workflow, delegate all privileged work back to the engine, and be provably unable to act on another project's repo.
 
-**Architecture:** Two phases. **Phase A** (engine-side, all mergeable in-repo): a shared `ENGINE_QUEUE` constant, a semver'd `EngineActivities` contract, project-identity binding (reconciler stamps `project` in memo + search-attributes → a workflow interceptor propagates it as a Temporal header → the engine validates `repo ∈ project` before touching a scoped token), continuous-agent reconciliation, and project-prompt provenance. **Phase B** (packaging): the `@agentops/engine-sdk` package (tsup dual-entry), an in-repo reference project worker + cross-worker e2e, the npm publish, and the authoring guide/skill.
+**Architecture:** Two phases. **Phase A** (engine-side, all mergeable in-repo): a shared `ENGINE_QUEUE` constant, a semver'd `EngineActivities` contract, project-identity binding (reconciler stamps `project` in memo + search-attributes → a workflow interceptor propagates it as a Temporal header → the engine validates `repo ∈ project` before touching a scoped token), continuous-agent reconciliation, and project-prompt provenance. **Phase B** (packaging): the `@agentic-ops/engine-sdk` package (tsup dual-entry), an in-repo reference project worker + cross-worker e2e, the npm publish, and the authoring guide/skill.
 
 **Tech Stack:** Node 22, pnpm workspaces, TypeScript strict, Temporal TS SDK (`@temporalio/*`), zod (`packages/contracts`), tsup, vitest + `@temporalio/testing`.
 
@@ -905,7 +905,7 @@ import type { AgentRunRequest, AgentRunResult } from './agent-run';
 import type { Issue, CreateIssueInput, CreateIssueResult } from './tracker-types';
 
 // The delegatable engine activity surface exposed to Tier-2 project workflows
-// via @agentops/engine-sdk/workflow. This interface + the child-workflow names
+// via @agentic-ops/engine-sdk/workflow. This interface + the child-workflow names
 // (devCycle) + ENGINE_QUEUE are the published semver compatibility contract
 // (SP2 design §3.2). Deliberately minimal — heavy SCM/workspace ops stay
 // internal to devCycle, reached via childDevCycle.
@@ -990,7 +990,7 @@ git commit -m "chore: search-attribute registration script + docs (project/agent
 
 # Phase B — packaging & external
 
-### Task 12: Scaffold `@agentops/engine-sdk`
+### Task 12: Scaffold `@agentic-ops/engine-sdk`
 
 **Files:**
 - Create: `packages/engine-sdk/package.json`, `tsup.config.ts`, `tsconfig.json`, `src/workflow.ts` (stub), `src/worker.ts` (stub), `README.md`
@@ -1001,7 +1001,7 @@ git commit -m "chore: search-attribute registration script + docs (project/agent
 ```jsonc
 // packages/engine-sdk/package.json
 {
-  "name": "@agentops/engine-sdk",
+  "name": "@agentic-ops/engine-sdk",
   "version": "0.1.0",
   "description": "Thin, secret-free facade for authoring Tier-2 agentops project workflows.",
   "license": "MIT",
@@ -1043,7 +1043,7 @@ export default defineConfig({
 
 - [ ] **Step 3: Verify it builds**
 
-Run: `pnpm --filter @agentops/engine-sdk install && pnpm --filter @agentops/engine-sdk build`
+Run: `pnpm --filter @agentic-ops/engine-sdk install && pnpm --filter @agentic-ops/engine-sdk build`
 Expected: PASS — `dist/workflow.*` and `dist/worker.*` emitted.
 
 - [ ] **Step 4: Commit**
@@ -1085,7 +1085,7 @@ describe('engine-sdk/workflow', () => {
 
 - [ ] **Step 2: Run, verify fail**
 
-Run: `pnpm --filter @agentops/engine-sdk test`
+Run: `pnpm --filter @agentic-ops/engine-sdk test`
 Expected: FAIL — exports missing.
 
 - [ ] **Step 3: Implement**
@@ -1123,7 +1123,7 @@ export { interceptors } from './project-interceptor';
 
 - [ ] **Step 4: Run test + build**
 
-Run: `pnpm --filter @agentops/engine-sdk test && pnpm --filter @agentops/engine-sdk build`
+Run: `pnpm --filter @agentic-ops/engine-sdk test && pnpm --filter @agentic-ops/engine-sdk build`
 Expected: PASS; `dist/workflow.*` self-contained (grep the bundle: no `require('@agentops`).
 
 - [ ] **Step 5: Commit**
@@ -1163,7 +1163,7 @@ describe('createEngineWorker', () => {
 
 - [ ] **Step 2: Run, verify fail**
 
-Run: `pnpm --filter @agentops/engine-sdk test -- worker`
+Run: `pnpm --filter @agentic-ops/engine-sdk test -- worker`
 Expected: FAIL — missing.
 
 - [ ] **Step 3: Implement**
@@ -1218,7 +1218,7 @@ export function createEngineWorker(options: CreateEngineWorkerOptions) {
 
 - [ ] **Step 4: Run test + build**
 
-Run: `pnpm --filter @agentops/engine-sdk test && pnpm --filter @agentops/engine-sdk build`
+Run: `pnpm --filter @agentic-ops/engine-sdk test && pnpm --filter @agentic-ops/engine-sdk build`
 Expected: PASS.
 
 - [ ] **Step 5: Commit**
@@ -1255,8 +1255,8 @@ JSON
 npm init -y >/dev/null 2>&1 || true
 npm i "./$(basename "$TARBALL")" @temporalio/workflow @temporalio/worker @temporalio/common @temporalio/client typescript >/dev/null
 cat > check.ts <<'TS'
-import { engineActivities, childDevCycle, ENGINE_QUEUE } from '@agentops/engine-sdk/workflow';
-import { createEngineWorker } from '@agentops/engine-sdk/worker';
+import { engineActivities, childDevCycle, ENGINE_QUEUE } from '@agentic-ops/engine-sdk/workflow';
+import { createEngineWorker } from '@agentic-ops/engine-sdk/worker';
 const _ = { engineActivities, childDevCycle, ENGINE_QUEUE, createEngineWorker };
 TS
 npx tsc --noEmit --moduleResolution bundler --module esnext check.ts
@@ -1287,7 +1287,7 @@ A minimal Rollbar-style Tier-2 project worker exercising delegation, authz rejec
 
 - [ ] **Step 1: Write the reference workflow + worker**
 
-`rollbar-monitor.ts`: a workflow using `engineAgent()`/`engineActivities()` from `@agentops/engine-sdk/workflow` (via `workspace:*`) that, given a synthetic finding, calls `engineActivities().createIssue({ repo, project, title, body, labels: ['bug'], dedupeFingerprint })`. Keep it deterministic (finding passed as input) so the e2e is stable. `worker.ts` uses `createEngineWorker`.
+`rollbar-monitor.ts`: a workflow using `engineAgent()`/`engineActivities()` from `@agentic-ops/engine-sdk/workflow` (via `workspace:*`) that, given a synthetic finding, calls `engineActivities().createIssue({ repo, project, title, body, labels: ['bug'], dedupeFingerprint })`. Keep it deterministic (finding passed as input) so the e2e is stable. `worker.ts` uses `createEngineWorker`.
 
 - [ ] **Step 2: Write the failing e2e**
 
@@ -1332,8 +1332,8 @@ The project-facing "how to write a custom project workflow" instructions the use
 
 `docs/authoring-project-workflows.md` — a complete walkthrough:
 1. **When you need Tier 2** (a workflow shape no built-in provides; else use `agents.json` Tier 1).
-2. **Install:** `pnpm add @agentops/engine-sdk @temporalio/workflow @temporalio/worker @temporalio/common @temporalio/client`.
-3. **Author `agentops/workflows/<name>.ts`** — a worked `rollbarMonitor` example: `import { engineAgent, engineActivities, childDevCycle } from '@agentops/engine-sdk/workflow'`; poll your own activity; per finding `engineActivities().createIssue({ repo, project, labels:['bug'], dedupeFingerprint })`; use `childDevCycle(input)` to drive a fix to a merged PR.
+2. **Install:** `pnpm add @agentic-ops/engine-sdk @temporalio/workflow @temporalio/worker @temporalio/common @temporalio/client`.
+3. **Author `agentops/workflows/<name>.ts`** — a worked `rollbarMonitor` example: `import { engineAgent, engineActivities, childDevCycle } from '@agentic-ops/engine-sdk/workflow'`; poll your own activity; per finding `engineActivities().createIssue({ repo, project, labels:['bug'], dedupeFingerprint })`; use `childDevCycle(input)` to drive a fix to a merged PR.
 4. **Author `agentops/activities/*.ts`** for your own externals (e.g. `rollbarFetch`) holding *your* secret — never an engine secret.
 5. **`agentops/worker.ts`** — `createEngineWorker({ taskQueue: 'proj-<name>', namespace, workflowsPath: require.resolve('./workflows'), activities })`.
 6. **`agents.json`** — add the entry (`"schedule": "continuous"` or a cron, and `"taskQueue": "proj-<name>"` for continuous Tier-2).
@@ -1354,7 +1354,7 @@ git commit -m "docs: authoring guide + agent-runner skill for Tier-2 project wor
 
 ---
 
-### Task 18: Publish `@agentops/engine-sdk` to public npm
+### Task 18: Publish `@agentic-ops/engine-sdk` to public npm
 
 > Outward-facing, irreversible. Do only after Tasks 12–16 are green and the PR (Task 19) is approved/merged, or as an explicit release step the human confirms.
 
@@ -1362,7 +1362,7 @@ git commit -m "docs: authoring guide + agent-runner skill for Tier-2 project wor
 
 - [ ] **Step 1: Dry run**
 
-Run: `pnpm --filter @agentops/engine-sdk build && cd packages/engine-sdk && npm publish --access public --dry-run`
+Run: `pnpm --filter @agentic-ops/engine-sdk build && cd packages/engine-sdk && npm publish --access public --dry-run`
 Expected: the packed file list contains only `dist/**` + `package.json` + `README.md` (no `src`, no secrets).
 
 - [ ] **Step 2: Confirm the `@agentops` org + auth**
@@ -1372,7 +1372,7 @@ Verify `npm whoami` and that the `@agentops` scope is owned/available. If not ye
 - [ ] **Step 3: Publish**
 
 Run (human-confirmed): `cd packages/engine-sdk && npm publish --access public`
-Expected: `@agentops/engine-sdk@0.1.0` live. Verify `npm view @agentops/engine-sdk`.
+Expected: `@agentic-ops/engine-sdk@0.1.0` live. Verify `npm view @agentic-ops/engine-sdk`.
 
 - [ ] **Step 4: Record the release**
 
@@ -1407,7 +1407,7 @@ Expected: all green.
 
 ```bash
 git push -u origin HEAD
-gh pr create --repo est1908-agentic-ops/agentops-engine --title "feat: SP2 — Tier-2 SDK + per-project worker + authorization" --body "Implements docs/superpowers/specs/2026-07-12-custom-agent-workflows-sp2-design.md (SP2, #31). Phase A engine-side (ENGINE_QUEUE rename, EngineActivities, project-identity authz, continuous agents, project-prompt provenance, agent stage) + Phase B (@agentops/engine-sdk, reference worker, authoring guide). Publish (Task 18) is a separate release step."
+gh pr create --repo est1908-agentic-ops/agentops-engine --title "feat: SP2 — Tier-2 SDK + per-project worker + authorization" --body "Implements docs/superpowers/specs/2026-07-12-custom-agent-workflows-sp2-design.md (SP2, #31). Phase A engine-side (ENGINE_QUEUE rename, EngineActivities, project-identity authz, continuous agents, project-prompt provenance, agent stage) + Phase B (@agentic-ops/engine-sdk, reference worker, authoring guide). Publish (Task 18) is a separate release step."
 ```
 
 - [ ] **Step 4: Get CI green**
