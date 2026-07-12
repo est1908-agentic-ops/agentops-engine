@@ -8,6 +8,7 @@ import {
 } from '@agentops/activities';
 import type { ResolvedProjectEntry } from '@agentops/contracts';
 import type { ScmPort } from '@agentops/ports';
+import type { ProjectWorkerParamsProvider } from './argocd-project-workers';
 import { matchesLinearTriggerLabel, parseLinearIssueEvent } from './parse-linear-issue-event';
 import { parseIssueTriggerEvent } from './parse-issue-labeled';
 import { parsePushEvent } from './parse-push-event';
@@ -35,6 +36,13 @@ export interface GatewayDeps {
   // deployment with no Linear-tracked projects skip configuring a new
   // required secret, same as every existing GitHub-only gateway deployment.
   linearWebhookSecret?: string;
+  // Serves the ArgoCD ApplicationSet plugin-generator route
+  // (POST /api/v1/getparams.execute) with per-project worker specs read from
+  // each project's agents.json. Both must be set or the route 404s (feature
+  // off), same posture as the Linear route. The token gates the route
+  // (ArgoCD sends `Authorization: Bearer <token>`).
+  argocdParams?: ProjectWorkerParamsProvider;
+  argocdPluginToken?: string;
 }
 
 function readRawBody(req: IncomingMessage): Promise<Buffer> {
@@ -79,7 +87,37 @@ async function handleRequest(deps: GatewayDeps, req: IncomingMessage, res: Serve
     return;
   }
 
+  // ArgoCD ApplicationSet plugin generator (project-worker-onboarding spec §5.2).
+  if (req.method === 'POST' && req.url === '/api/v1/getparams.execute') {
+    await handleArgoCdGetParams(deps, req, res);
+    return;
+  }
+
   res.writeHead(404).end();
+}
+
+async function handleArgoCdGetParams(deps: GatewayDeps, req: IncomingMessage, res: ServerResponse): Promise<void> {
+  // Off unless configured — 404 (same "not built here" posture as the Linear route).
+  if (!deps.argocdPluginToken || !deps.argocdParams) {
+    res.writeHead(404).end();
+    return;
+  }
+  // Drain the request body regardless (ArgoCD posts {applicationSetName, input};
+  // we take no input parameters). Do this before auth so the socket is consumed.
+  await readRawBody(req);
+  const auth = req.headers['authorization'];
+  if (auth !== `Bearer ${deps.argocdPluginToken}`) {
+    res.writeHead(401).end('unauthorized');
+    return;
+  }
+  try {
+    const parameters = await deps.argocdParams.getParams();
+    // ArgoCD plugin-generator response contract: { output: { parameters: [...] } }.
+    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ output: { parameters } }));
+  } catch (err) {
+    console.error('gateway: failed to compute ArgoCD project-worker params', err);
+    res.writeHead(500).end('failed to compute params');
+  }
 }
 
 async function handleGithubWebhook(deps: GatewayDeps, req: IncomingMessage, res: ServerResponse): Promise<void> {
