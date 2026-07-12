@@ -39,6 +39,7 @@ import {
 import { loadProjectConfig } from './load-project-config';
 import { ApplicationFailure } from '@temporalio/common';
 import { Context } from '@temporalio/activity';
+import { assertProjectOwnsRepo } from './project-context';
 
 export interface ActivityDependencies {
   backends: Record<string, AgentBackend>;
@@ -156,6 +157,7 @@ export function createActivities(deps: ActivityDependencies) {
       await deps.tracker.label(ref, label);
     },
     async createIssue(req: { repo: string; project: string; title: string; body: string; labels: string[]; dedupeFingerprint?: string }): Promise<{ ref: string; url: string; deduped: boolean }> {
+      assertProjectOwnsRepo(req.repo, deps.registry);
       const filedFindings = deps.filedFindings;
       if (req.dedupeFingerprint && filedFindings) {
         const existing = await filedFindings.find(req.project, req.dedupeFingerprint);
@@ -171,6 +173,7 @@ export function createActivities(deps: ActivityDependencies) {
       return { ref: created.ref, url: created.url, deduped: false };
     },
     async openPr(req: OpenPrRequest): Promise<OpenPrResult> {
+      assertProjectOwnsRepo(req.repo, deps.registry);
       return deps.scm.openPr(req);
     },
     async getPrFeedback(prRef: string): Promise<PrFeedback> {
@@ -182,6 +185,7 @@ export function createActivities(deps: ActivityDependencies) {
       branch: string,
       contentHash: string,
     ): Promise<void> {
+      assertProjectOwnsRepo(repo, deps.registry);
       await deps.scm.push(repo, workspaceRef, branch, contentHash);
     },
     async recordStageResult(result: StageResultRecord): Promise<void> {
@@ -195,6 +199,7 @@ export function createActivities(deps: ActivityDependencies) {
       repo: string;
       initCommands?: string[];
     }): Promise<PreparedWorkspace> {
+      assertProjectOwnsRepo(req.repo, deps.registry);
       try {
         return await deps.workspaces.prepare(req.taskId, req.repo, req.initCommands);
       } catch (err) {
@@ -239,10 +244,10 @@ export function createActivities(deps: ActivityDependencies) {
       return manifest.agents;
     },
 
-    async listAgentSchedules(project: string): Promise<Array<{ id: string; scheduleSpec: string; workflow: string; paused: boolean }>> {
+    async listAgentSchedules(project: string): Promise<Array<{ id: string; scheduleSpec: string; workflow: string; paused: boolean; taskQueue?: string }>> {
       const client = deps.scheduleClient;
       if (!client || !client.list) return [];
-      const out: Array<{ id: string; scheduleSpec: string; workflow: string; paused: boolean }> = [];
+      const out: Array<{ id: string; scheduleSpec: string; workflow: string; paused: boolean; taskQueue?: string }> = [];
       try {
         /* eslint-disable @typescript-eslint/no-explicit-any */
         for await (const s of client.list!()) {

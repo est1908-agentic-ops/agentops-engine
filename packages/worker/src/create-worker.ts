@@ -1,11 +1,16 @@
 import { NativeConnection, Worker } from '@temporalio/worker';
 import { OpenTelemetryActivityInboundInterceptor } from '@temporalio/interceptors-opentelemetry/lib/worker';
+import { defaultPayloadConverter } from '@temporalio/common';
 import type { DevCycleActivities, PlatformActivities } from '@agentops/workflows';
+import { projectContext } from '@agentops/activities';
+import { PROJECT_HEADER_KEY } from '@agentops/contracts';
 import type { TracingSetup } from './tracing';
 
 const OTEL_WORKFLOW_INTERCEPTOR_MODULE = require.resolve(
   '@temporalio/interceptors-opentelemetry/lib/workflow-interceptors',
 );
+const wfMain = require.resolve('@agentops/workflows');
+const PROJECT_INTERCEPTOR_MODULE = require('path').join(require('path').dirname(wfMain), 'project-interceptor.ts');
 
 export interface CreateWorkerOptions {
   taskQueue: string;
@@ -18,6 +23,22 @@ export interface CreateWorkerOptions {
 
 export async function createWorker(options: CreateWorkerOptions): Promise<Worker> {
   const { tracing } = options;
+
+  function projectInbound() {
+    return {
+      async execute(input: any, next: any) {
+        const payload = input.headers?.[PROJECT_HEADER_KEY];
+        const project = payload ? (defaultPayloadConverter.fromPayload(payload) as string) : undefined;
+        return projectContext.run({ project }, () => next(input));
+      },
+    };
+  }
+
+  const baseActivityInterceptors = tracing
+    ? [(ctx: any) => ({ inbound: new OpenTelemetryActivityInboundInterceptor(ctx, { tracer: tracing.tracer }) })]
+    : [];
+  const baseWorkflowModules = tracing ? [OTEL_WORKFLOW_INTERCEPTOR_MODULE] : [];
+
   return Worker.create({
     connection: options.connection,
     namespace: options.namespace,
@@ -25,11 +46,12 @@ export async function createWorker(options: CreateWorkerOptions): Promise<Worker
     workflowsPath: options.workflowsPath ?? require.resolve('@agentops/workflows'),
     activities: options.activities as unknown as Record<string, (...args: never[]) => Promise<unknown>>,
     sinks: tracing ? { exporter: tracing.workflowExporterSink } : undefined,
-    interceptors: tracing
-      ? {
-          activity: [(ctx) => ({ inbound: new OpenTelemetryActivityInboundInterceptor(ctx, { tracer: tracing.tracer }) })],
-          workflowModules: [OTEL_WORKFLOW_INTERCEPTOR_MODULE],
-        }
-      : undefined,
+    interceptors: {
+      activity: [
+        (ctx) => ({ inbound: projectInbound() }),
+        ...baseActivityInterceptors,
+      ],
+      workflowModules: [PROJECT_INTERCEPTOR_MODULE, ...baseWorkflowModules],
+    },
   });
 }

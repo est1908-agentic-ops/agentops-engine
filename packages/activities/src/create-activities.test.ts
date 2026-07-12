@@ -567,6 +567,18 @@ describe('createActivities — resolveRepoConfig', () => {
     // for, so resolveRepoConfig must never reach it for an unregistered repo.
     expect(readFileSpy).not.toHaveBeenCalled();
   });
+
+  it('createIssue throws ProjectAuthorizationError when caller project does not own the repo', async () => {
+    const { projectContext } = await import('./project-context');
+    const tracker = new MemoryTrackerPort();
+    const deps = { ...buildDeps(), tracker, registry: [{ project: 'acme', repo: 'acme/web' }] };
+    const activities = createActivities(deps);
+    await expect(
+      projectContext.run({ project: 'other' }, () =>
+        activities.createIssue({ repo: 'acme/web', project: 'acme', title: 't', body: 'b', labels: [] }),
+      ),
+    ).rejects.toThrow(/ProjectAuthorizationError|not authorized/);
+  });
 });
 
 describe('createActivities — scratch workspace lifecycle', () => {
