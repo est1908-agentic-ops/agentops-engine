@@ -78,6 +78,11 @@ function rethrowWorkspaceError(err: unknown): never {
   throw err;
 }
 
+// Fixed backoff for a self-clearing provider 429 (RateLimitError). The CLI
+// doesn't reliably surface a Retry-After, so a fixed wait lets Temporal's
+// activity retry absorb the cooldown. Chart/operator-tunable later (SP3).
+const RATE_LIMIT_RETRY_DELAY_MS = 60_000;
+
 export function createActivities(deps: ActivityDependencies) {
   const heartbeat = deps.heartbeat ?? ((details: unknown) => Context.current().heartbeat(details));
   return {
@@ -88,14 +93,11 @@ export function createActivities(deps: ActivityDependencies) {
       // session-limit fallback chain) or via a concrete backend+model
       // (the platform.ts fixed-model path, which sets no tier).
       let primaryBackend: AgentBackend;
-      let primaryModelRef: { backend: string; model: string; effort?: string };
+      let primaryModelRef: ModelRef;
       let chain: ModelRef[];
 
       if (req.tier) {
-        const effortOverride = req.effort as
-          | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-          | undefined;
-        const entries = resolveTier(req.projectTiers, req.tier, effortOverride);
+        const entries = resolveTier(req.projectTiers, req.tier, req.effort);
         primaryModelRef = entries[0];
         chain = entries.slice(1);
         primaryBackend = deps.backends[primaryModelRef.backend];
@@ -109,7 +111,10 @@ export function createActivities(deps: ActivityDependencies) {
         if (!primaryBackend) {
           throw new Error(`createActivities.runAgent: unknown backend "${req.backend}"`);
         }
-        primaryModelRef = { backend: req.backend!, model: req.model!, effort: req.effort };
+        // ModelRef.backend is a fixed enum, but the workflow's concrete-model
+        // path may pass a backend name outside it (e.g. 'platform'). The cast
+        // is safe: req.backend was set by a workflow that knows its registry.
+        primaryModelRef = { backend: req.backend! as ModelRef['backend'], model: req.model!, effort: req.effort };
         chain = [];
       }
 
@@ -142,9 +147,7 @@ export function createActivities(deps: ActivityDependencies) {
           callIndex: req.callIndex,
           backend: primaryModelRef.backend,
           model: primaryModelRef.model,
-          effort: primaryModelRef.effort as
-            | 'low' | 'medium' | 'high' | 'xhigh' | 'max'
-            | undefined,
+          effort: primaryModelRef.effort,
           image: req.image,
           services: req.services,
           workspaceRef: req.workspaceRef,
@@ -156,9 +159,14 @@ export function createActivities(deps: ActivityDependencies) {
         // returns one aggregate usage total per invocation, see the design
         // doc), so these land on this activity's own span rather than
         // separate child spans.
+        // resolvedBackend/Model reflect whatever actually served the call:
+        // TierFallbackBackend stamps the fallback's identity on a successful
+        // cross-backend retry; the primary's identity otherwise.
+        const resolvedBackend = result.resolvedBackend ?? primaryModelRef.backend;
+        const resolvedModel = result.resolvedModel ?? primaryModelRef.model;
         trace.getActiveSpan()?.setAttributes({
-          'gen_ai.system': primaryModelRef.backend,
-          'gen_ai.request.model': primaryModelRef.model,
+          'gen_ai.system': resolvedBackend,
+          'gen_ai.request.model': resolvedModel,
           'gen_ai.usage.input_tokens': result.tokensIn,
           'gen_ai.usage.output_tokens': result.tokensOut,
           'agentops.stage': req.stage,
@@ -168,8 +176,8 @@ export function createActivities(deps: ActivityDependencies) {
         });
         return {
           ...result,
-          resolvedBackend: primaryModelRef.backend,
-          resolvedModel: primaryModelRef.model,
+          resolvedBackend,
+          resolvedModel,
           promptHash,
           promptSource,
         };
@@ -214,7 +222,7 @@ export function createActivities(deps: ActivityDependencies) {
             message: err.message,
             type: 'RateLimitError',
             nonRetryable: false,
-            nextRetryDelay: 60_000,
+            nextRetryDelay: RATE_LIMIT_RETRY_DELAY_MS,
           });
         }
         throw err;

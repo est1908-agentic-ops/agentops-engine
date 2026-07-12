@@ -45,7 +45,13 @@ export class TierFallbackBackend implements AgentBackend {
             backend: fallback.backend,
             model: fallback.model,
             effort: fallback.effort ?? req.effort,
-          });
+          }).then((res) => ({
+            ...res,
+            // Stamp which backend/model actually served this call so stats /
+            // traces attribute to the fallback, not the throttled primary.
+            resolvedBackend: fallback.backend,
+            resolvedModel: fallback.model,
+          }));
         } catch (e) {
           if (e instanceof SessionLimitError) continue;
           throw e;

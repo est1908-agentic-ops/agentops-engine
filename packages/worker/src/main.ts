@@ -201,7 +201,15 @@ function wrapWithRateWindow(
 // activity layer constructs per-call. This env-var wrapper is intentionally
 // kept as a no-op passthrough for now -- its config (PI_RATE_LIMIT_FALLBACK_MODEL)
 // is no longer read, and SP3 removes the env var from the chart entirely.
-function wrapWithRateLimitFallback(backend: AgentBackend, _envPrefix: string, _name: string): AgentBackend {
+function wrapWithRateLimitFallback(backend: AgentBackend, envPrefix: string, _name: string): AgentBackend {
+  if (process.env[`${envPrefix}_RATE_LIMIT_FALLBACK_MODEL`]) {
+    console.warn(
+      `agentops worker: ${envPrefix}_RATE_LIMIT_FALLBACK_MODEL is set but no longer ` +
+        `used -- same-backend fallback was superseded by tier-based cross-backend ` +
+        `fallback (see docs/superpowers/specs/2026-07-10-model-tiering-fallback-design.md). ` +
+        `Remove this env var from the chart (SP3).`,
+    );
+  }
   return backend;
 }
 

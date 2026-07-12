@@ -53,7 +53,10 @@ describe('TierFallbackBackend', () => {
 
     const result = await backend.run(baseRequest);
 
-    expect(result).toBe(fallbackResult);
+    expect(result.output).toBe('fallback ok');
+    // Attribution: the fallback stamped its own identity on the result.
+    expect(result.resolvedBackend).toBe('pi');
+    expect(result.resolvedModel).toBe('zai/glm-5.2');
     expect(primary.run).toHaveBeenCalledTimes(1);
     expect(fallback.run).toHaveBeenCalledTimes(1);
     expect(fallback.run).toHaveBeenCalledWith(
