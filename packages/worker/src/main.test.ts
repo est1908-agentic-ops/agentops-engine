@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MemoryWorkspaceManager, WorkspaceManager } from '@agentops/activities';
 import { MemoryScmPort, MemoryTrackerPort } from '@agentops/ports';
-import { assertLiveBackendConfig, buildActivityDependencies, resolveWorkspacesDir } from './main';
+import { assertLiveBackendConfig, buildActivityDependencies, resolveCacheDir, resolveWorkspacesDir } from './main';
 
 const validLiveEnv: NodeJS.ProcessEnv = {
   AGENT_RUNNER_IMAGE: 'gitactions.est1908.top/agentic-ops/agent-runner:abc123',
@@ -151,5 +151,15 @@ describe('resolveWorkspacesDir', () => {
 
   it('resolves to undefined outside the cluster, so WorkspaceManager keeps its home-dir default', () => {
     expect(resolveWorkspacesDir(false)).toBeUndefined();
+  });
+});
+
+describe('resolveCacheDir', () => {
+  it('resolves to the shared cache PVC mount path in-cluster, so base clones persist and Job pods can resolve worktrees', () => {
+    expect(resolveCacheDir(true)).toBe(process.env.CACHE_MOUNT_PATH ?? '/workspace/cache');
+  });
+
+  it('resolves to undefined outside the cluster, so WorkspaceManager keeps its home-dir cache default', () => {
+    expect(resolveCacheDir(false)).toBeUndefined();
   });
 });

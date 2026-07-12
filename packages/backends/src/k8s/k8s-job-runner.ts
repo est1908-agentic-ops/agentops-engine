@@ -19,6 +19,14 @@ export interface K8sJobRunnerOptions {
   namespace: string;
   workspacePvcName: string;
   workspaceMountPath: string;
+  // The per-repo base clone a task worktree links back to. When set, the PVC is
+  // mounted into the agent Job pod at cacheMountPath so the worktree's `.git`
+  // gitdir pointer (<cacheMountPath>/<repo>/.git/worktrees/<taskId>) resolves and
+  // the agent can `git commit` to the task branch instead of falling back to a
+  // fresh `git init` on `master`. Both fields must be set together; omitting them
+  // (dev/in-process paths) mounts only the workspace volume, as before.
+  cachePvcName?: string;
+  cacheMountPath?: string;
   batchApi: BatchV1ApiLike;
   pollIntervalMs?: number;
   statusPollTimeoutMs?: number;
@@ -152,6 +160,8 @@ export function buildAgentJob(
     | 'namespace'
     | 'workspacePvcName'
     | 'workspaceMountPath'
+    | 'cachePvcName'
+    | 'cacheMountPath'
     | 'authSecretName'
     | 'additionalSecretNames'
     | 'serviceAccountName'
@@ -182,6 +192,15 @@ export function buildAgentJob(
   const imagePullSecrets = opts.imagePullSecretName ? [{ name: opts.imagePullSecretName }] : undefined;
   const initContainers = buildInitContainers(req.services);
 
+  // Mount the base-clone cache too, so the worktree's `.git` gitdir resolves and
+  // the agent can commit to the task branch (see K8sJobRunnerOptions.cachePvcName).
+  // Both fields go together; if either is unset, fall back to the task volume only.
+  const mountCache = Boolean(opts.cachePvcName && opts.cacheMountPath);
+  const cacheVolume = mountCache
+    ? [{ name: 'workspace-cache', persistentVolumeClaim: { claimName: opts.cachePvcName! } }]
+    : [];
+  const cacheMount = mountCache ? [{ name: 'workspace-cache', mountPath: opts.cacheMountPath! }] : [];
+
   return {
     metadata: {
       name: k8sJobName(req),
@@ -203,6 +222,7 @@ export function buildAgentJob(
               name: 'workspace-tasks',
               persistentVolumeClaim: { claimName: opts.workspacePvcName },
             },
+            ...cacheVolume,
           ],
           initContainers,
           containers: [
@@ -223,6 +243,7 @@ export function buildAgentJob(
                   name: 'workspace-tasks',
                   mountPath: opts.workspaceMountPath,
                 },
+                ...cacheMount,
               ],
             },
           ],
