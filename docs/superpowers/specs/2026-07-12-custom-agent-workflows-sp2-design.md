@@ -71,7 +71,7 @@ agentops/
   agents.json        # manifest entries (schedule/continuous) referencing the project's workflows
 ```
 
-Project CI builds a worker image; ArgoCD runs it in the `proj-<name>` namespace on the project's own task queue. **Adding/changing a project workflow = the project rebuilds its own worker; the engine image is untouched.** Config-only (Tier 1) projects still need no worker of their own.
+Project CI builds a worker image; ArgoCD runs it as a normal Deployment (in a shared `proj` namespace) on the project's own task queue. **Adding/changing a project workflow = the project rebuilds its own worker; the engine image is untouched.** Config-only (Tier 1) projects still need no worker of their own.
 
 The **reference implementation** — the §8-of-master Rollbar monitor — lives in-repo at `examples/project-worker/` and doubles as the cross-worker e2e fixture (§13). It exercises: an own `rollbarFetch` activity (its own secret) + a durable cursor + `continueAsNew` (a `"continuous"` agent); per finding, `engineAgent().runAgent(investigate)` then `engineActivities().createIssue({ labels:['bug'], dedupeFingerprint })`; and `childDevCycle()`.
 
@@ -79,18 +79,16 @@ The **reference implementation** — the §8-of-master Rollbar monitor — lives
 
 - Project workflows call `engineActivities()` / `engineAgent()` → `ENGINE_QUEUE`, so every privileged, credential-holding activity (`runAgent` = K8s Jobs, SCM writes with the per-project token, workspace ops) runs on the engine fleet.
 - `childDevCycle()` runs the built-in pipeline on `ENGINE_QUEUE` too.
-- The project worker runs only its own orchestration + its own non-engine activities (e.g. `rollbarFetch`) on its own queue in its own namespace.
+- The project worker runs only its own orchestration + its own non-engine activities (e.g. `rollbarFetch`) on its own queue.
 
 ## 7. Topology & authorization — the crux
 
-In OSS Temporal the **namespace is the only hard trust boundary**: any worker in a namespace can poll any task queue and start/terminate any workflow in it. So topology *is* the authorization model, and the credential-delegation binding is the security property layered on top.
+In OSS Temporal the **namespace is the only hard trust boundary**: any worker in a namespace can poll any task queue and start/terminate any workflow in it. For SP2's trusted-projects model the real authorization boundary is **not** K8s topology but the **credential-delegation binding** (§7.2) — that guarantee is pure engine-side logic and holds regardless of how the project workers are laid out in the cluster.
 
-### 7.1 Topology
+### 7.1 Topology (deliberately minimal for SP2)
 
-- **Kubernetes:** the engine fleet (activity workers + built-in workflow workers) runs in the `ops` namespace. Each project worker runs in its own **`proj-<name>`** namespace with:
-  - a **NetworkPolicy** — egress restricted to the Temporal frontend + the project's *own declared externals* only (no cluster API, no other project); and
-  - a **ResourceQuota**.
-- **Temporal:** one namespace per environment (`dev-agents` / `prod-agents`), **shared** by the engine and the org's own (trusted, PR-reviewed) projects. Task-queue routing and cross-worker `executeChild` only work intra-namespace, so a shared namespace is what makes Tier 2 simple.
+- **Kubernetes:** the engine fleet runs in its `ops` namespace; project workers run as **normal Deployments in a shared `proj` namespace** on their own task queues. No dedicated per-project namespace and no per-project `NetworkPolicy` are required. The load-bearing constraint is enforced by **what is mounted, not by network policy**: a project worker's Deployment gets *no engine secrets* — only Temporal connection config + the project's own externals. An optional namespace-level `ResourceQuota` / `LimitRange` keeps a runaway worker from starving the cluster. Per-project network micro-segmentation is redundant with §7.2 in the trusted case and premature relative to the threat it addresses, so it moves to the deferred escalation path (§15) alongside vcluster.
+- **Temporal:** one namespace per environment (`dev-agents` / `prod-agents`), **shared** by the engine and the org's own (trusted, PR-reviewed) projects. Task-queue routing and cross-worker `executeChild` only work intra-namespace, so a shared namespace is what makes Tier 2 simple. (This shared *Temporal* namespace is load-bearing and stays; the K8s simplification above does not touch it.)
 
 ### 7.2 Authorization = capability delegation bound to project identity
 
@@ -106,7 +104,7 @@ Project workers hold **no engine credentials** (agent OAuth and per-project SCM 
 
 ### 7.3 Threat model (stated honestly)
 
-This binding **defends against accidental cross-project action** (a bug in project A's workflow referencing project B's repo is rejected) and gives every privileged op an **auditable project identity** within the *trusted* shared namespace. It does **not** sandbox hostile in-namespace code: a rogue worker in the shared namespace could start a workflow with a forged memo. That is out of scope by design — untrusted / client code gets the **escalation** path (its own Temporal namespace + a vcluster, engine reachable only via a narrow claim-checked cross-namespace entrypoint), which master §4.3 **defers** until an untrusted project actually appears. SP2 locks the binding convention and the shared-namespace-for-trusted default; it does not build the escalation.
+This binding **defends against accidental cross-project action** (a bug in project A's workflow referencing project B's repo is rejected) and gives every privileged op an **auditable project identity** within the *trusted* shared namespace. It does **not** sandbox hostile in-namespace code: a rogue worker in the shared namespace could start a workflow with a forged memo. That is out of scope by design — untrusted / client code gets the **escalation** path (its own Temporal namespace + a vcluster + per-project network isolation, engine reachable only via a narrow claim-checked cross-namespace entrypoint), which master §4.3 **defers** until an untrusted project actually appears. SP2 locks the binding convention and the shared-namespace-for-trusted default; it does not build the escalation or any per-project network isolation.
 
 ## 8. Continuous agents in the reconciler
 
@@ -146,7 +144,7 @@ A baked-in agent-runner skill (the re-homed DSL-authoring request, now aimed at 
 - write `agentops/workflows/*.ts` with `engineActivities()` / `engineAgent()` / `childDevCycle()`;
 - write `worker.ts` with `createEngineWorker`;
 - add the `agents.json` entry (`continuous` or scheduled, with `taskQueue`);
-- add the deploy manifests (`proj-<name>` namespace + NetworkPolicy + ResourceQuota).
+- add the deploy manifest (a normal Deployment in the shared `proj` namespace, mounting only Temporal connection config + the project's own externals — **no engine secrets**).
 
 It points at the in-repo `examples/project-worker/` reference.
 
@@ -192,7 +190,7 @@ It points at the in-repo `examples/project-worker/` reference.
 
 ## 15. Deferred / out of scope
 
-- **vcluster + own-namespace escalation** for untrusted / client code (master §4.3) — built when an untrusted project appears.
+- **vcluster + own-namespace escalation** for untrusted / client code (master §4.3) — built when an untrusted project appears. **This is where per-project K8s network isolation lives** (dedicated `proj-<name>` namespace + `NetworkPolicy` restricting egress to Temporal + declared externals): it defends against hostile/compromised in-cluster code, a threat SP2's trusted model does not carry, and it is redundant with §7.2 for trusted projects.
 - **Cross-repo `executeChild`** (`targetRepo`, a PR landing in a different repo than the trigger) → SP3.
 - **`qaProbe` + triggers** (Gateway `opened`-with-label fix, `agent:fix`, fix-dedup, `workflowClosed`) → SP3.
 - **Mission Control** → SP4.
