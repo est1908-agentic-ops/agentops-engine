@@ -10,27 +10,35 @@ FROM node:22-slim AS deps
 RUN npm install --global pnpm@9.15.9
 
 WORKDIR /app
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY packages/activities/package.json ./packages/activities/
-COPY packages/backends/package.json  ./packages/backends/
-COPY packages/cli/package.json       ./packages/cli/
-COPY packages/contracts/package.json ./packages/contracts/
-COPY packages/control/package.json   ./packages/control/
-COPY packages/gateway/package.json   ./packages/gateway/
-COPY packages/policies/package.json  ./packages/policies/
-COPY packages/ports/package.json     ./packages/ports/
-COPY packages/prompts/package.json   ./packages/prompts/
-COPY packages/ui/package.json        ./packages/ui/
-COPY packages/worker/package.json    ./packages/worker/
-COPY packages/workflows/package.json ./packages/workflows/
-RUN --mount=type=cache,target=/pnpm-store,sharing=locked \
-    pnpm install --frozen-lockfile --store-dir /pnpm-store --package-import-method copy
 
-# Chown once here, not once per final stage. node_modules is the expensive
-# part of this walk; every stage forking from `deps` (worker, base, and
-# base's children gateway/control) inherits this single cached layer instead
-# of each re-running its own `chown -R` over the whole tree.
-RUN chown -R node:node /app
+# Own /app as node, then build as uid 1000 so every file pnpm writes is born
+# node-owned. This replaces a post-install `chown -R node:node /app` that had
+# to walk the entire copied node_modules tree (676 packages materialized as
+# real files by --package-import-method copy) and cost ~130s on every build
+# where a manifest changed — the single dominant vertex in the image build.
+# Two consequences of installing as non-root: COPY ignores the active USER and
+# writes root-owned unless told, so each manifest copy is --chown=node:node;
+# and the pnpm store cache mount is owned by 1000 so the install can write it.
+# `deps` is restored to root at the end so stages forking from it (worker's
+# apt-get) still run privileged; file ownership set here is unaffected.
+RUN chown node:node /app
+USER node
+COPY --chown=node:node package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+COPY --chown=node:node packages/activities/package.json ./packages/activities/
+COPY --chown=node:node packages/backends/package.json  ./packages/backends/
+COPY --chown=node:node packages/cli/package.json       ./packages/cli/
+COPY --chown=node:node packages/contracts/package.json ./packages/contracts/
+COPY --chown=node:node packages/control/package.json   ./packages/control/
+COPY --chown=node:node packages/gateway/package.json   ./packages/gateway/
+COPY --chown=node:node packages/policies/package.json  ./packages/policies/
+COPY --chown=node:node packages/ports/package.json     ./packages/ports/
+COPY --chown=node:node packages/prompts/package.json   ./packages/prompts/
+COPY --chown=node:node packages/ui/package.json        ./packages/ui/
+COPY --chown=node:node packages/worker/package.json    ./packages/worker/
+COPY --chown=node:node packages/workflows/package.json ./packages/workflows/
+RUN --mount=type=cache,target=/pnpm-store,uid=1000,gid=1000,sharing=locked \
+    pnpm install --frozen-lockfile --store-dir /pnpm-store --package-import-method copy
+USER root
 
 FROM deps AS base
 COPY --chown=1000:1000 . .
@@ -46,9 +54,18 @@ FROM deps AS worker
 # this container (packages/activities/src/workspace, packages/ports/src/github)
 # — without it, git clone fails with `spawn git ENOENT` and (pre-fix) retries
 # forever. See images/agent-runner/Dockerfile for the same pattern.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
+# Cache the apt index and downloaded archives across builds (persists in the
+# self-hosted runners' long-lived buildkitd). node:slim ships a `docker-clean`
+# apt hook that deletes /var/cache/apt/*.deb after each install — remove it in
+# the same RUN (before apt reads its config) or the archive cache mount is a
+# no-op. No `rm -rf /var/lib/apt/lists/*`: cache-mount contents are never
+# committed to the image layer, so they don't bloat it, and removing them
+# would wipe the very cache this is meant to keep.
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    rm -f /etc/apt/apt.conf.d/docker-clean \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends git ca-certificates
 COPY --chown=1000:1000 . .
 # Numeric, not the name "node": kubelet can't verify a pod's runAsNonRoot
 # against a named image user without a matching explicit runAsUser in the
@@ -62,7 +79,7 @@ CMD ["pnpm", "--filter", "@agentops/gateway", "run", "start"]
 
 FROM base AS control
 # Build as uid 1000, not root: /app is already fully owned by node:node
-# (chowned once in `deps`, copied with --chown in `base`), so there's no
+# (born node-owned in `deps`, copied with --chown in `base`), so there's no
 # need for another whole-tree `chown -R` after this writes new files.
 USER 1000
 RUN pnpm --filter @agentops/ui run build
