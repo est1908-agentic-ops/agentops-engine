@@ -29,7 +29,6 @@ import {
   K8sJobRunner,
   LiteLlmBackend,
   ProcessCliRunner,
-  RateLimitFallbackBackend,
   RateWindowedBackend,
   RateWindowLimiter,
   StubBackend,
@@ -196,12 +195,14 @@ function wrapWithRateWindow(
 // docs/superpowers/specs/2026-07-08-provider-rate-limit-fallback-design.md.
 // Unset env var (the default) means no fallback, same "off by default"
 // convention as the rate window.
-function wrapWithRateLimitFallback(backend: AgentBackend, envPrefix: string, name: string): AgentBackend {
-  const fallbackModel = process.env[`${envPrefix}_RATE_LIMIT_FALLBACK_MODEL`];
-  if (!fallbackModel) {
-    return backend;
-  }
-  return new RateLimitFallbackBackend(backend, fallbackModel, name);
+//
+// NOTE: the same-backend RateLimitFallbackBackend this once wired has been
+// superseded by TierFallbackBackend (cross-backend, tier-resolved), which the
+// activity layer constructs per-call. This env-var wrapper is intentionally
+// kept as a no-op passthrough for now -- its config (PI_RATE_LIMIT_FALLBACK_MODEL)
+// is no longer read, and SP3 removes the env var from the chart entirely.
+function wrapWithRateLimitFallback(backend: AgentBackend, _envPrefix: string, _name: string): AgentBackend {
+  return backend;
 }
 
 // In-cluster tasks fail two ways when these are missing or still placeholders:
