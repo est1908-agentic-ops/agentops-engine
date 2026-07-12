@@ -25,6 +25,7 @@ import { parseProjectConfig, sha256, type AgentSpec } from '@agentops/contracts'
 import { parseAgentsManifest, BUILTIN_WORKFLOW_INPUTS } from '@agentops/contracts';
 import type { FiledFindingStore } from './filed-finding-store';
 import type { ScheduleClientLike } from './schedule-ops';
+import { ENGINE_QUEUE } from '@agentops/contracts';
 import type { ReconcilePlan } from '@agentops/policies';
 import { scheduleId } from '@agentops/policies';
 import type { PromptPack } from '@agentops/prompts';
@@ -38,6 +39,7 @@ import {
 import { loadProjectConfig } from './load-project-config';
 import { ApplicationFailure } from '@temporalio/common';
 import { Context } from '@temporalio/activity';
+import { assertProjectOwnsRepo } from './project-context';
 
 export interface ActivityDependencies {
   backends: Record<string, AgentBackend>;
@@ -51,7 +53,14 @@ export interface ActivityDependencies {
   filedFindings?: FiledFindingStore;
   scheduleClient?: ScheduleClientLike;
   taskQueue?: string;
+  workflowClient?: WorkflowClientLike;
   heartbeat?: (details: unknown) => void;
+}
+
+export interface WorkflowClientLike {
+  start?: (workflowType: string, opts: any) => Promise<any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  list?: (query?: string) => AsyncIterable<any>; // eslint-disable-line @typescript-eslint/no-explicit-any
+  getHandle?: (id: string) => { terminate?: (reason?: string) => Promise<void> };
 }
 
 function rethrowWorkspaceError(err: unknown): never {
@@ -75,7 +84,9 @@ export function createActivities(deps: ActivityDependencies) {
       }
       const prompt = deps.prompts.render(req.promptRef, req.promptContext);
       const promptHash = sha256(prompt);
-      const promptSource = `builtin:${req.promptRef}`;
+      const promptSource = req.promptSource
+        ? `${req.promptSource.repo}@${req.promptSource.commit}:${req.promptSource.path}`
+        : `builtin:${req.promptRef}`;
       heartbeat({
         phase: 'started',
         taskId: req.taskId,
@@ -155,6 +166,7 @@ export function createActivities(deps: ActivityDependencies) {
       await deps.tracker.label(ref, label);
     },
     async createIssue(req: { repo: string; project: string; title: string; body: string; labels: string[]; dedupeFingerprint?: string }): Promise<{ ref: string; url: string; deduped: boolean }> {
+      assertProjectOwnsRepo(req.repo, deps.registry);
       const filedFindings = deps.filedFindings;
       if (req.dedupeFingerprint && filedFindings) {
         const existing = await filedFindings.find(req.project, req.dedupeFingerprint);
@@ -170,6 +182,7 @@ export function createActivities(deps: ActivityDependencies) {
       return { ref: created.ref, url: created.url, deduped: false };
     },
     async openPr(req: OpenPrRequest): Promise<OpenPrResult> {
+      assertProjectOwnsRepo(req.repo, deps.registry);
       return deps.scm.openPr(req);
     },
     async getPrFeedback(prRef: string): Promise<PrFeedback> {
@@ -181,6 +194,7 @@ export function createActivities(deps: ActivityDependencies) {
       branch: string,
       contentHash: string,
     ): Promise<void> {
+      assertProjectOwnsRepo(repo, deps.registry);
       await deps.scm.push(repo, workspaceRef, branch, contentHash);
     },
     async recordStageResult(result: StageResultRecord): Promise<void> {
@@ -194,6 +208,7 @@ export function createActivities(deps: ActivityDependencies) {
       repo: string;
       initCommands?: string[];
     }): Promise<PreparedWorkspace> {
+      assertProjectOwnsRepo(req.repo, deps.registry);
       try {
         return await deps.workspaces.prepare(req.taskId, req.repo, req.initCommands);
       } catch (err) {
@@ -238,10 +253,10 @@ export function createActivities(deps: ActivityDependencies) {
       return manifest.agents;
     },
 
-    async listAgentSchedules(project: string): Promise<Array<{ id: string; scheduleSpec: string; workflow: string; paused: boolean }>> {
+    async listAgentSchedules(project: string): Promise<Array<{ id: string; scheduleSpec: string; workflow: string; paused: boolean; taskQueue?: string }>> {
       const client = deps.scheduleClient;
       if (!client || !client.list) return [];
-      const out: Array<{ id: string; scheduleSpec: string; workflow: string; paused: boolean }> = [];
+      const out: Array<{ id: string; scheduleSpec: string; workflow: string; paused: boolean; taskQueue?: string }> = [];
       try {
         /* eslint-disable @typescript-eslint/no-explicit-any */
         for await (const s of client.list!()) {
@@ -251,7 +266,8 @@ export function createActivities(deps: ActivityDependencies) {
           const spec = (rec.schedule as any)?.spec;
           const scheduleSpec = typeof spec === 'string' ? spec : ((spec as any)?.cron?.cronString ?? String(spec ?? ''));
           const workflow = (rec.action as any)?.workflowType ?? 'whiteboxBugHunt';
-          out.push({ id: sid, scheduleSpec, workflow, paused: false });
+          const taskQueue = (rec.action as any)?.taskQueue as string | undefined;
+          out.push({ id: sid, scheduleSpec, workflow, paused: false, taskQueue });
         }
         /* eslint-enable @typescript-eslint/no-explicit-any */
       } catch {
@@ -260,26 +276,31 @@ export function createActivities(deps: ActivityDependencies) {
       return out;
     },
 
-    async applyScheduleChanges(project: string, plan: ReconcilePlan): Promise<void> {
+    async applyScheduleChanges(project: string, repo: string, plan: ReconcilePlan): Promise<void> {
       const client = deps.scheduleClient;
       if (!client) return;
-      const tq = deps.taskQueue ?? 'agentops-devcycle';
+      const tq = deps.taskQueue ?? ENGINE_QUEUE;
       /* eslint-disable @typescript-eslint/no-explicit-any */
       for (const spec of [...plan.toCreate, ...plan.toUpdate]) {
         if (spec.schedule === 'continuous') continue;
         const id = scheduleId(project, spec.name);
-        const args = [{ repo: '', ...spec.input }];
+        const args = [{ repo, project, ...spec.input }];
+        const memo = { project, agentName: spec.name, workflowType: spec.workflow };
+        const searchAttributes = { project: [project], agentName: [spec.name], workflowType: [spec.workflow] };
         if (plan.toCreate.some((c) => c.name === spec.name) && client.create) {
           await client.create({
             scheduleId: id,
             spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } },
-            action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: tq },
-            memo: { project, agentName: spec.name },
+            action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: tq, memo, searchAttributes },
+            memo,
+            searchAttributes,
           } as any);
         } else {
           const h = client.getHandle(id);
           await h.update?.({
-            schedule: { spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } }, action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: tq } },
+            schedule: { spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } }, action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: tq, memo, searchAttributes } },
+            memo,
+            searchAttributes,
           } as any).catch(() => {});
         }
       }
@@ -294,6 +315,42 @@ export function createActivities(deps: ActivityDependencies) {
       }
       /* eslint-enable @typescript-eslint/no-explicit-any */
     },
+    /* eslint-disable @typescript-eslint/no-explicit-any */
+    async listContinuousAgents(project: string): Promise<string[]> {
+      const client = deps.workflowClient;
+      if (!client?.list) return [];
+      const ids: string[] = [];
+      const prefix = `agent:${project}:`;
+      try {
+        for await (const wf of client.list(`ExecutionStatus="Running"`)) {
+          const id = (wf as any).workflowId as string | undefined;
+          if (id && id.startsWith(prefix)) ids.push(id);
+        }
+      } catch { /* best effort */ }
+      return ids;
+    },
+    async startContinuousAgent(project: string, repo: string, spec: AgentSpec): Promise<void> {
+      const client = deps.workflowClient;
+      if (!client?.start) return;
+      const id = scheduleId(project, spec.name);
+      const memo = { project, agentName: spec.name, workflowType: spec.workflow };
+      try {
+        await client.start(spec.workflow, {
+          workflowId: id,
+          taskQueue: (spec as any).taskQueue ?? ENGINE_QUEUE,
+          args: [{ repo, project, ...spec.input }],
+          memo,
+          searchAttributes: { project: [project], agentName: [spec.name], workflowType: [spec.workflow] },
+        });
+      } catch (err) {
+        if (!(err instanceof Error && err.name === 'WorkflowExecutionAlreadyStartedError')) throw err;
+      }
+    },
+    async terminateContinuousAgent(id: string): Promise<void> {
+      await deps.workflowClient?.getHandle?.(id)?.terminate?.('agent removed from manifest').catch(() => {});
+    },
+    /* eslint-enable @typescript-eslint/no-explicit-any */
+
     async prepareScratchWorkspace(taskId: string): Promise<{ workspaceRef: string }> {
       try {
         return await deps.workspaces.prepareScratch(taskId);
@@ -312,3 +369,12 @@ export function createActivities(deps: ActivityDependencies) {
 }
 
 export type Activities = ReturnType<typeof createActivities>;
+
+import type { EngineActivities } from '@agentops/contracts';
+// Compile-time guarantee: the engine's activity implementation stays a
+// superset of the published EngineActivities surface. If a signature drifts,
+// typecheck fails here. SP2 design §3.2.
+type _Acts = ReturnType<typeof createActivities>;
+type _AssertEngineSurface = _Acts extends EngineActivities ? true : false;
+const _engineSurfaceOk: _AssertEngineSurface = true;
+void _engineSurfaceOk;

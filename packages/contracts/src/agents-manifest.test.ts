@@ -42,4 +42,11 @@ describe('parseAgentsManifest', () => {
       { name: 'dup', workflow: 'whiteboxBugHunt', schedule: '0 3 * * *' },
     ] }, opts)).toThrow(/duplicate/i);
   });
+
+  it('accepts an optional taskQueue and defaults it absent', () => {
+    const m = parseAgentsManifest({ agents: [{ name: 'r', workflow: 'rollbarMonitor', schedule: 'continuous', taskQueue: 'proj-acme' }] }, opts);
+    expect(m.agents[0].taskQueue).toBe('proj-acme');
+    const m2 = parseAgentsManifest({ agents: [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *' }] }, opts);
+    expect(m2.agents[0].taskQueue).toBeUndefined();
+  });
 });

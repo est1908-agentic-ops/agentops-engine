@@ -30,6 +30,7 @@ export const RoutingSchema = z.object({
   pr: ModelRefSchema.optional(),
   pr_babysit: ModelRefSchema.optional(),
   bughunt: ModelRefSchema.optional(),
+  agent: ModelRefSchema.optional(),
 });
 export type Routing = z.infer<typeof RoutingSchema>;
 
@@ -50,6 +51,7 @@ export const TimeoutsSchema = z.object({
   pr: StageTimeoutSchema.optional(),
   pr_babysit: StageTimeoutSchema.optional(),
   bughunt: StageTimeoutSchema.optional(),
+  agent: StageTimeoutSchema.optional(),
 });
 export type Timeouts = z.infer<typeof TimeoutsSchema>;
 

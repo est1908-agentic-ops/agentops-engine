@@ -1,9 +1,5 @@
-export interface Issue {
-  ref: string;
-  title: string;
-  body: string;
-  labels: string[];
-}
+import type { Issue } from '@agentops/contracts';
+export type { Issue };
 
 export interface CreateIssueRequest {
   repo: string;

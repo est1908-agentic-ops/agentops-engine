@@ -26,6 +26,7 @@ export const AgentRunRequestSchema = z.object({
   services: z.array(VerifyServiceSchema).optional(),
   promptRef: z.string().min(1),
   promptContext: z.record(z.string(), z.unknown()).default({}),
+  promptSource: z.object({ repo: z.string().min(1), commit: z.string().min(1), path: z.string().min(1) }).optional(),
   workspaceRef: z.string().min(1),
   limits: AgentRunLimitsSchema,
 });

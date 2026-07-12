@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { describe, expect, it, vi } from 'vitest';
 import { context, trace } from '@opentelemetry/api';
 import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
@@ -212,6 +213,30 @@ describe('createActivities', () => {
     } as never);
     expect(r.promptHash).toMatch(/^[0-9a-f]{64}$/);
     expect(r.promptSource).toContain('implement.md');
+  });
+
+  it('runAgent records a project-repo promptSource when provided', async () => {
+    const deps = buildDeps();
+    (deps.backends.stub as StubBackend).scriptResponse('bughunt', 1, { output: 'FINDINGS: []' });
+    const activities = createActivities(deps);
+    const res = await activities.runAgent({
+      taskId: 't1', stage: 'bughunt', repo: 'acme/web', project: 'acme', attempt: 1, callIndex: 1, backend: 'stub', model: 'm',
+      promptRef: 'implement.md', promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' }, workspaceRef: 'ws',
+      limits: { maxTokens: 1000, maxIterations: 1, maxImplementAttempts: 1, maxBabysitRounds: 1 },
+      promptSource: { repo: 'acme/web', commit: 'abc123', path: 'agentops/prompts/x.md' },
+    } as any);
+    expect(res.promptSource).toBe('acme/web@abc123:agentops/prompts/x.md');
+  });
+  it('runAgent defaults to builtin:<ref> when no project source is given', async () => {
+    const deps = buildDeps();
+    (deps.backends.stub as StubBackend).scriptResponse('bughunt', 1, { output: 'FINDINGS: []' });
+    const activities = createActivities(deps);
+    const res = await activities.runAgent({
+      taskId: 't1', stage: 'bughunt', repo: 'o/r', project: 'p', attempt: 1, callIndex: 1, backend: 'stub', model: 'm',
+      promptRef: 'implement.md', promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' }, workspaceRef: 'ws',
+      limits: { maxTokens: 1000, maxIterations: 1, maxImplementAttempts: 1, maxBabysitRounds: 1 },
+    } as any);
+    expect(res.promptSource).toBe('builtin:implement.md');
   });
 });
 
@@ -566,6 +591,57 @@ describe('createActivities — resolveRepoConfig', () => {
     // the real (non-fake) ScmPort throws for any repo it isn't configured
     // for, so resolveRepoConfig must never reach it for an unregistered repo.
     expect(readFileSpy).not.toHaveBeenCalled();
+  });
+
+  it('createIssue throws ProjectAuthorizationError when caller project does not own the repo', async () => {
+    const { projectContext } = await import('./project-context');
+    const tracker = new MemoryTrackerPort();
+    const deps = { ...buildDeps(), tracker, registry: [{ project: 'acme', repo: 'acme/web', trackerType: 'github' as const, token: 't' }] };
+    const activities = createActivities(deps);
+    await expect(
+      projectContext.run({ project: 'other' }, () =>
+        activities.createIssue({ repo: 'acme/web', project: 'acme', title: 't', body: 'b', labels: [] }),
+      ),
+    ).rejects.toThrow(/ProjectAuthorizationError|not authorized/);
+  });
+
+  it('applyScheduleChanges stamps repo + project/agentName/workflowType and search attributes', async () => {
+    const create = vi.fn().mockResolvedValue({});
+    const getHandle = vi.fn(() => ({}));
+    const deps = {
+      ...buildDeps(),
+      scheduleClient: { create, getHandle } as any,
+      registry: [{ project: 'acme', repo: 'acme/web', trackerType: 'github' as const, token: 't' }],
+    } as any;
+    const activities = createActivities(deps);
+    const plan = {
+      toCreate: [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: { focus: 'auth' }, enabled: true, timezone: 'UTC', overlap: 'skip' }],
+      toUpdate: [], toDelete: [], toPause: [], toResume: [],
+    } as any;
+    await activities.applyScheduleChanges('acme', 'acme/web', plan);
+    const arg = create.mock.calls[0][0];
+    expect(arg.action.args[0]).toMatchObject({ repo: 'acme/web', project: 'acme', focus: 'auth' });
+    expect(arg.memo).toMatchObject({ project: 'acme', agentName: 'nb', workflowType: 'whiteboxBugHunt' });
+    expect(arg.searchAttributes).toMatchObject({ project: ['acme'], agentName: ['nb'], workflowType: ['whiteboxBugHunt'] });
+  });
+
+  it('startContinuousAgent starts a singleton by deterministic id with identity + taskQueue, tolerating AlreadyStarted', async () => {
+    const start = vi.fn().mockResolvedValue({});
+    const deps = {
+      ...buildDeps(),
+      workflowClient: { start, list: async function* () {} } as any,
+      registry: [],
+    } as any;
+    const activities = createActivities(deps);
+    const spec = { name: 'mon', workflow: 'rollbarMonitor', schedule: 'continuous', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip', taskQueue: 'proj-acme' } as any;
+    await activities.startContinuousAgent('acme', 'acme/web', spec);
+    const [wf, opts] = start.mock.calls[0];
+    expect(wf).toBe('rollbarMonitor');
+    expect(opts.workflowId).toBe('agent:acme:mon');
+    expect(opts.taskQueue).toBe('proj-acme');
+    expect(opts.memo).toMatchObject({ project: 'acme', agentName: 'mon', workflowType: 'rollbarMonitor' });
+    expect(opts.searchAttributes).toMatchObject({ project: ['acme'] });
+    expect(opts.args[0]).toMatchObject({ repo: 'acme/web', project: 'acme' });
   });
 });
 

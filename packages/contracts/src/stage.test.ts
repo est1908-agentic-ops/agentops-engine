@@ -25,6 +25,10 @@ describe('StageSchema', () => {
     expect(StageSchema.parse('platform')).toBe('platform');
   });
 
+  it('accepts the generic agent stage', () => {
+    expect(StageSchema.parse('agent')).toBe('agent');
+  });
+
   it('rejects an invented stage name', () => {
     expect(() => StageSchema.parse('deploy')).toThrow();
   });

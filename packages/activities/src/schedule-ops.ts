@@ -1,6 +1,7 @@
 import type { AgentSpec } from '@agentops/contracts';
 import type { ExistingSchedule, ReconcilePlan } from '@agentops/policies';
 import { scheduleId } from '@agentops/policies';
+import { ENGINE_QUEUE } from '@agentops/contracts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 // Minimal surface we use from Temporal's ScheduleClient / ScheduleHandle.
@@ -57,8 +58,9 @@ export async function listAgentSchedules(project: string, client?: ScheduleClien
       const spec = (s as any)?.schedule?.spec;
       const scheduleSpec = typeof spec === 'string' ? spec : (spec?.cron?.cronString ?? 'continuous');
       const workflow = (s as any)?.action?.type ?? 'whiteboxBugHunt';
+      const taskQueue = (s as any)?.action?.taskQueue as string | undefined;
       // paused not directly on list item in all SDK versions; default false and rely on apply
-      out.push({ id, scheduleSpec, workflow, paused: false });
+      out.push({ id, scheduleSpec, workflow, paused: false, taskQueue });
     }
   }
   return out;
@@ -66,16 +68,20 @@ export async function listAgentSchedules(project: string, client?: ScheduleClien
 
 export async function applyScheduleChanges(
   project: string,
+  repo: string,
   plan: ReconcilePlan,
   deps: ScheduleOpsDeps & { startWorkflow?: (workflowType: string, args: unknown[]) => unknown },
 ): Promise<void> {
   const client = deps.scheduleClient;
   if (!client) return; // no-op in environments without schedule client (tests often mock at higher level)
-  const taskQueue = deps.taskQueue ?? 'agentops-devcycle';
+  const taskQueue = deps.taskQueue ?? ENGINE_QUEUE;
 
   for (const spec of plan.toCreate) {
     if (spec.schedule === 'continuous') continue; // SP1: Schedules only
     const id = scheduleId(project, spec.name);
+    const args = [{ repo, project, ...spec.input }];
+    const memo = { project, agentName: spec.name, workflowType: spec.workflow };
+    const searchAttributes = { project: [project], agentName: [spec.name], workflowType: [spec.workflow] };
     if (client.create) {
       await client.create({
         scheduleId: id,
@@ -83,10 +89,13 @@ export async function applyScheduleChanges(
         action: {
           type: 'startWorkflow',
           workflowType: spec.workflow,
-          args: [{ repo: /* provided by caller context */ '', ...spec.input }],
+          args,
           taskQueue,
+          memo,
+          searchAttributes,
         },
-        memo: { project, agentName: spec.name },
+        memo,
+        searchAttributes,
       } as any);
     }
   }
@@ -95,16 +104,23 @@ export async function applyScheduleChanges(
     if (spec.schedule === 'continuous') continue;
     const id = scheduleId(project, spec.name);
     const h = client.getHandle(id);
+    const args = [{ repo, project, ...spec.input }];
+    const memo = { project, agentName: spec.name, workflowType: spec.workflow };
+    const searchAttributes = { project: [project], agentName: [spec.name], workflowType: [spec.workflow] };
     await h.update?.({
       schedule: {
         spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } },
         action: {
           type: 'startWorkflow',
           workflowType: spec.workflow,
-          args: [{ repo: '', ...spec.input }],
+          args,
           taskQueue,
+          memo,
+          searchAttributes,
         },
       },
+      memo,
+      searchAttributes,
     } as any);
   }
 

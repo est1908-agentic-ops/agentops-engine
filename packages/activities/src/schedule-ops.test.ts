@@ -22,7 +22,7 @@ describe('applyScheduleChanges (mocked ScheduleClient)', () => {
       toCreate: [{ name: 'nightly', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' } as any],
       toUpdate: [], toDelete: [], toPause: [], toResume: [],
     };
-    await applyScheduleChanges('acme', plan, { scheduleClient: client, taskQueue: 'q' });
+    await applyScheduleChanges('acme', 'acme/web', plan, { scheduleClient: client, taskQueue: 'q' });
     expect(client.create).toHaveBeenCalled();
     const arg = client.create.mock.calls[0][0];
     expect(arg.scheduleId).toMatch(/agent:acme:nightly/);
@@ -31,7 +31,7 @@ describe('applyScheduleChanges (mocked ScheduleClient)', () => {
   it('deletes for toDelete', async () => {
     const client = makeMockClient();
     const plan: ReconcilePlan = { toCreate: [], toUpdate: [], toDelete: ['agent:p:x'], toPause: [], toResume: [] };
-    await applyScheduleChanges('p', plan, { scheduleClient: client });
+    await applyScheduleChanges('p', 'p/r', plan, { scheduleClient: client });
     expect(client.getHandle).toHaveBeenCalledWith('agent:p:x');
   });
 });

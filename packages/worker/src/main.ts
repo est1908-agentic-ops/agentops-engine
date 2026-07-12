@@ -38,6 +38,7 @@ import {
   type K8sJobRunnerOptions,
 } from '@agentops/backends';
 import type { ResolvedProjectEntry } from '@agentops/contracts';
+import { ENGINE_QUEUE, LEGACY_ENGINE_QUEUE } from '@agentops/contracts';
 import {
   createGithubPorts,
   createProjectScopedPorts,
@@ -405,12 +406,14 @@ async function main(): Promise<void> {
   // Build a Temporal client for Schedule management (ConfigSync activities).
   // Uses the same address/namespace as the worker connection when available.
   let scheduleClient: import('@agentops/activities').ScheduleClientLike | undefined;
+  let workflowClient: import('@agentops/activities').WorkflowClientLike | undefined;
   try {
     const c: import('@temporalio/client').Connection = await Connection.connect({
       address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233',
     });
     const tc = new Client({ connection: c, namespace: process.env.TEMPORAL_NAMESPACE });
     scheduleClient = tc.schedule as unknown as import('@agentops/activities').ScheduleClientLike;
+    workflowClient = tc.workflow as unknown as import('@agentops/activities').WorkflowClientLike;
   } catch {
     // In test or no Temporal, schedule ops will no-op or be injected by tests.
   }
@@ -426,7 +429,8 @@ async function main(): Promise<void> {
     registry,
     filedFindings,
     scheduleClient,
-    taskQueue: 'agentops-devcycle',
+    taskQueue: ENGINE_QUEUE,
+    workflowClient,
   });
 
   const tracing = setupTracing();
@@ -436,17 +440,11 @@ async function main(): Promise<void> {
       : 'agentops worker: tracing disabled (OTEL_EXPORTER_OTLP_ENDPOINT not set)',
   );
 
-  const worker = await createWorker({
-    taskQueue: 'agentops-devcycle',
-    activities,
-    connection,
-    namespace: process.env.TEMPORAL_NAMESPACE,
-    tracing,
-  });
-
-  console.log('agentops worker started on task queue "agentops-devcycle"');
+  const worker = await createWorker({ taskQueue: ENGINE_QUEUE, activities, connection, namespace: process.env.TEMPORAL_NAMESPACE, tracing });
+  const legacyWorker = await createWorker({ taskQueue: LEGACY_ENGINE_QUEUE, activities, connection, namespace: process.env.TEMPORAL_NAMESPACE, tracing });
+  console.log(`agentops worker started on "${ENGINE_QUEUE}" (+ legacy "${LEGACY_ENGINE_QUEUE}" during cutover)`);
   try {
-    await worker.run();
+    await Promise.all([worker.run(), legacyWorker.run()]);
   } finally {
     await tracing?.shutdown();
   }

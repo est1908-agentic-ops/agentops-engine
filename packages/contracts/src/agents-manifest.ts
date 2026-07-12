@@ -16,6 +16,10 @@ export const AgentSpecSchema = z
     enabled: z.boolean().default(true),
     timezone: z.string().default('UTC'),
     overlap: z.enum(['skip', 'bufferOne', 'allow']).default('skip'),
+    // Task queue the reconciler starts this agent on. Built-in workflows omit
+    // it (they run on ENGINE_QUEUE); a continuous Tier-2 agent sets it to its
+    // project worker's queue so the reconciler can start it by name there.
+    taskQueue: z.string().min(1).optional(),
   })
   .strict();
 export type AgentSpec = z.infer<typeof AgentSpecSchema>;

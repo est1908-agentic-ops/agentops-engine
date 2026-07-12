@@ -1,6 +1,7 @@
 import type { AgentSpec } from '@agentops/contracts';
+import { ENGINE_QUEUE } from '@agentops/contracts';
 
-export interface ExistingSchedule { id: string; scheduleSpec: string; workflow: string; paused: boolean }
+export interface ExistingSchedule { id: string; scheduleSpec: string; workflow: string; paused: boolean; taskQueue?: string }
 export interface ReconcilePlan { toCreate: AgentSpec[]; toUpdate: AgentSpec[]; toDelete: string[]; toPause: string[]; toResume: string[] }
 
 export function scheduleId(project: string, name: string): string {
@@ -20,10 +21,29 @@ export function reconcileAgents(declared: AgentSpec[], existing: ExistingSchedul
     declaredIds.add(id);
     const cur = byId.get(id);
     if (!cur) { plan.toCreate.push(spec); continue; }
-    if (cur.scheduleSpec !== spec.schedule || cur.workflow !== spec.workflow) plan.toUpdate.push(spec);
+    const desiredQueue = ENGINE_QUEUE; // built-in scheduled workflows always run on the engine queue
+    if (cur.scheduleSpec !== spec.schedule || cur.workflow !== spec.workflow || (cur.taskQueue !== undefined && cur.taskQueue !== desiredQueue)) {
+      plan.toUpdate.push(spec);
+    }
     if (spec.enabled && cur.paused) plan.toResume.push(id);
     if (!spec.enabled && !cur.paused) plan.toPause.push(id);
   }
   for (const e of existing) if (!declaredIds.has(e.id)) plan.toDelete.push(e.id);
   return plan;
+}
+
+export interface ContinuousPlan { toStart: AgentSpec[]; toTerminate: string[] }
+
+// Continuous agents are singleton long-lived workflows keyed by the same
+// deterministic id as schedules (agent:<project>:<name>). Enabled + declared
+// but not running => start; running but not declared (or disabled) =>
+// terminate. SP2 design §8.
+export function reconcileContinuous(declared: AgentSpec[], running: string[], project: string): ContinuousPlan {
+  const wanted = declared.filter((a) => a.schedule === 'continuous' && a.enabled);
+  const runningSet = new Set(running);
+  const wantedIds = new Set(wanted.map((a) => scheduleId(project, a.name)));
+  return {
+    toStart: wanted.filter((a) => !runningSet.has(scheduleId(project, a.name))),
+    toTerminate: running.filter((id) => !wantedIds.has(id)),
+  };
 }
