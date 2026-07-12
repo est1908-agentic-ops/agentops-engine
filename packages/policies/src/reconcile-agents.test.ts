@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { reconcileAgents, scheduleId, reconcileContinuous } from './reconcile-agents';
+import { reconcileAgents, scheduleId, reconcileContinuous, resolveAgentQueue, projectQueue, workerWarnings } from './reconcile-agents';
 import { ENGINE_QUEUE, LEGACY_ENGINE_QUEUE } from '@agentops/contracts';
-import type { AgentSpec } from '@agentops/contracts';
+import type { AgentSpec, AgentsManifest } from '@agentops/contracts';
 
 const spec = (over: Partial<AgentSpec>): AgentSpec => ({
   name: 'a', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip', ...over,
@@ -57,6 +57,51 @@ describe('reconcileAgents', () => {
     const declared = [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' as const }];
     const existing = [{ id: scheduleId('acme', 'nb'), scheduleSpec: '0 2 * * *', workflow: 'whiteboxBugHunt', paused: false, taskQueue: ENGINE_QUEUE }];
     expect(reconcileAgents(declared as any, existing, 'acme').toUpdate).toHaveLength(0); // eslint-disable-line @typescript-eslint/no-explicit-any
+  });
+
+  it('re-points a project workflow with no explicit taskQueue from ENGINE_QUEUE to proj-<project>', () => {
+    // The SP-b default: a custom (non-built-in) workflow now defaults to its
+    // project queue even without an explicit taskQueue.
+    const declared = [{ name: 'scan', workflow: 'projectScan', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' as const }];
+    const existing = [{ id: scheduleId('acme', 'scan'), scheduleSpec: '0 2 * * *', workflow: 'projectScan', paused: false, taskQueue: ENGINE_QUEUE }];
+    expect(reconcileAgents(declared as any, existing, 'acme').toUpdate.map((s) => s.name)).toContain('scan'); // eslint-disable-line @typescript-eslint/no-explicit-any
+  });
+});
+
+describe('resolveAgentQueue', () => {
+  it('honors an explicit taskQueue above all', () => {
+    expect(resolveAgentQueue({ workflow: 'whiteboxBugHunt', taskQueue: 'custom' }, 'acme')).toBe('custom');
+    expect(resolveAgentQueue({ workflow: 'rollbarMonitor', taskQueue: 'custom' }, 'acme')).toBe('custom');
+  });
+  it('routes a built-in workflow to the engine queue', () => {
+    expect(resolveAgentQueue({ workflow: 'whiteboxBugHunt', taskQueue: undefined }, 'acme')).toBe(ENGINE_QUEUE);
+    expect(resolveAgentQueue({ workflow: 'devCycle', taskQueue: undefined }, 'acme', LEGACY_ENGINE_QUEUE)).toBe(LEGACY_ENGINE_QUEUE);
+  });
+  it('routes a project (Tier-2) workflow to proj-<project>', () => {
+    expect(resolveAgentQueue({ workflow: 'rollbarMonitor', taskQueue: undefined }, 'acme')).toBe('proj-acme');
+    expect(projectQueue('broccoli')).toBe('proj-broccoli');
+  });
+});
+
+describe('workerWarnings', () => {
+  const manifest = (over: Partial<AgentsManifest>): AgentsManifest =>
+    ({ agents: [], ...over }) as AgentsManifest;
+  it('warns when a custom workflow is scheduled but no worker block is declared', () => {
+    const m = manifest({ agents: [{ name: 'scan', workflow: 'projectScan', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' }] });
+    const w = workerWarnings(m, 'acme');
+    expect(w).toHaveLength(1);
+    expect(w[0]).toMatch(/projectScan.*proj-acme.*no "worker"/);
+  });
+  it('is silent when a worker block is present', () => {
+    const m = manifest({
+      agents: [{ name: 'scan', workflow: 'projectScan', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' }],
+      worker: { image: 'reg/w:tag', replicas: 1, externalSecrets: [] },
+    });
+    expect(workerWarnings(m, 'acme')).toEqual([]);
+  });
+  it('is silent for built-in workflows even without a worker block', () => {
+    const m = manifest({ agents: [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' }] });
+    expect(workerWarnings(m, 'acme')).toEqual([]);
   });
 });
 
