@@ -46,6 +46,13 @@ spec:
                   name: {{ .Values.gateway.linearWebhookSecretName }}
                   key: LINEAR_WEBHOOK_SECRET
             {{- end }}
+            {{- if .Values.gateway.argocdPluginTokenSecretName }}
+            - name: ARGOCD_PLUGIN_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.gateway.argocdPluginTokenSecretName }}
+                  key: ARGOCD_PLUGIN_TOKEN
+            {{- end }}
             {{- if .Values.engineDb.host }}
             - name: ENGINE_DB_HOST
               value: {{ .Values.engineDb.host | quote }}

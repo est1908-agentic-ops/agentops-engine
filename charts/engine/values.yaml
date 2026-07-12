@@ -159,6 +159,12 @@ gateway:
   # LINEAR_WEBHOOK_SECRET key -- the shared secret configured on the Linear
   # workspace's webhook, once a `projects` entry sets `trackerType: linear`.
   linearWebhookSecretName: ""
+  # Empty by default -- unset means the ArgoCD project-workers plugin-generator
+  # route (POST /api/v1/getparams.execute) 404s (feature off), same pattern as
+  # linearWebhookSecretName. agentops-platform sets this + creates the matching
+  # Secret (key ARGOCD_PLUGIN_TOKEN) when it swaps the project-workers
+  # ApplicationSet to the plugin generator (project-worker-onboarding spec §5.2).
+  argocdPluginTokenSecretName: ""
   # Disabled by default: this chart ships no real public hostname.
   # agentops-platform's values override sets host + enabled: true once a real
   # domain is pointed at the cluster. clusterIssuer must be a cert-manager
