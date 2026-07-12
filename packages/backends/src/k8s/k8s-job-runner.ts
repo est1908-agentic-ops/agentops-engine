@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Context } from '@temporalio/activity';
@@ -269,6 +269,30 @@ export class K8sJobRunner implements AgentBackend {
     this.now = opts.now ?? Date.now;
   }
 
+  // Remove a failed attempt's Job AND its output/error files from the shared
+  // workspace PVC. The Job name is deterministic from (taskId, stage, attempt,
+  // callIndex, model), so a Temporal retry of this same call reissues the exact
+  // same create -- and without this cleanup a *failed* attempt would leave the
+  // Job (409 -> reused) and its partial/unparseable output file behind, so the
+  // retry's first poll tick reads that terminal status + stale output and
+  // re-fails in milliseconds without ever re-running the CLI. Every retry after
+  // the first failure then becomes an instant no-op re-failure. Deleting both on
+  // the way out lets each retry start genuinely fresh. A runner that *crashes*
+  // (rather than throwing) skips this, so the legitimate "reattach to a still-
+  // running Job after the previous runner died" path (the 409 swallow below)
+  // still works. See prompt-broccoli-cachefix-verify-1's full_verify (2026-07-12),
+  // where attempts 3-5 each failed in ~40ms without re-running claude.
+  private async cleanupFailedAttempt(
+    jobName: string,
+    paths: ReturnType<typeof agentOpsArtifactPaths>,
+  ): Promise<void> {
+    await this.opts.batchApi
+      .deleteNamespacedJob(jobName, this.opts.namespace, { propagationPolicy: 'Background' })
+      .catch(() => {});
+    await rm(paths.outFile, { force: true }).catch(() => {});
+    await rm(paths.errFile, { force: true }).catch(() => {});
+  }
+
   async run(req: BackendRunRequest): Promise<AgentRunResult> {
     const paths = agentOpsArtifactPaths(req);
     await mkdir(paths.dir, { recursive: true });
@@ -280,12 +304,11 @@ export class K8sJobRunner implements AgentBackend {
       await this.opts.batchApi.createNamespacedJob(this.opts.namespace, job);
     } catch (err) {
       // The Job name is deterministic from (taskId, stage, attempt, callIndex), so a Temporal-level
-      // retry of this same activity call reissues the exact same create. If an earlier retry's create
-      // already succeeded but this runner never got to see it finish (e.g. the status poll below
-      // failed), the Job is still there under that name -- reuse it instead of erroring forever.
-      // Assumes buildAgentJob(req, ...) would still produce the same spec now (bounded retry backoff
-      // is on the order of seconds, far under a deploy cycle) -- Jobs are immutable once created, so
-      // there is nothing to reconcile if that assumption is ever wrong.
+      // retry of this same activity call reissues the exact same create. If an earlier runner CRASHED
+      // (so cleanupFailedAttempt never ran) but its Job is still there under this name, reattach to it
+      // instead of erroring forever. A gracefully-failed attempt deletes its own Job on the way out
+      // (see cleanupFailedAttempt), so a 409 here means the prior attempt's Job is genuinely still
+      // around to be reused -- not a stale failed leftover.
       if (!(err instanceof ApiException) || err.code !== 409) {
         throw err;
       }
@@ -327,18 +350,14 @@ export class K8sJobRunner implements AgentBackend {
       }
 
       if (this.now() - lastProgressAt > idleTimeoutMs) {
-        await this.opts.batchApi.deleteNamespacedJob(jobName, this.opts.namespace, {
-          propagationPolicy: 'Background',
-        });
+        await this.cleanupFailedAttempt(jobName, paths);
         throw new ProcessCliTimeoutError(
           `${this.spec.binary} produced no output for ${idleTimeoutMs}ms (idle since elapsed ${lastProgressAt - start}ms)`,
         );
       }
 
       if (this.now() - start > req.limits.timeoutMs) {
-        await this.opts.batchApi.deleteNamespacedJob(jobName, this.opts.namespace, {
-          propagationPolicy: 'Background',
-        });
+        await this.cleanupFailedAttempt(jobName, paths);
         throw new ProcessCliTimeoutError(
           `${this.spec.binary} exceeded overall ${req.limits.timeoutMs}ms budget despite ongoing output`,
         );
@@ -374,15 +393,25 @@ export class K8sJobRunner implements AgentBackend {
         const stdout = await readFile(paths.outFile, 'utf8').catch(() => '');
         const stderr = await readFile(paths.errFile, 'utf8').catch(() => '');
 
-        if (this.spec.isAuthError(stderr)) {
-          throw new ProcessCliAuthError(stderr.trim());
+        try {
+          if (this.spec.isAuthError(stderr)) {
+            throw new ProcessCliAuthError(stderr.trim());
+          }
+          if (stdout.trim().length === 0 && lastStatus.failed === 1) {
+            throw new ProcessCliProcessError(
+              `${this.spec.binary} job failed with no output: ${stderr.trim()}`,
+            );
+          }
+          return this.spec.parseOutput(stdout, stderr, elapsedMs);
+        } catch (err) {
+          // Terminal outcome the caller treats as a (retryable) failure -- e.g.
+          // parseOutput couldn't find a result event because the CLI was killed
+          // mid-stream. Delete this Job and its stale output so the next Temporal
+          // retry re-runs the CLI fresh instead of 409-reusing this Job and
+          // re-reading the same unparseable output (see cleanupFailedAttempt).
+          await this.cleanupFailedAttempt(jobName, paths);
+          throw err;
         }
-        if (stdout.trim().length === 0 && lastStatus.failed === 1) {
-          throw new ProcessCliProcessError(
-            `${this.spec.binary} job failed with no output: ${stderr.trim()}`,
-          );
-        }
-        return this.spec.parseOutput(stdout, stderr, elapsedMs);
       }
 
       await sleep(this.pollIntervalMs);

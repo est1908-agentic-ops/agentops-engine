@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import os from 'node:os';
@@ -6,7 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { BackendRunRequest } from '@agentops/contracts';
 import { createClaudeCliSpec } from '../claude/claude-backend';
 import type { CliSpec } from '../cli-spec';
-import { ProcessCliAuthError } from '../process-cli-runner';
+import { ProcessCliAuthError, ProcessCliProcessError } from '../process-cli-runner';
 import { FakeBatchApi } from './fake-batch-api';
 import type { V1Job } from './k8s-types';
 import {
@@ -681,6 +682,37 @@ describe('K8sJobRunner', () => {
       tokensOut: 4,
       wallMs: 50,
     });
+  });
+
+  it('deletes the Job and clears its output files when the terminal output is unparseable, so a retry starts fresh', async () => {
+    const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-unparseable-'));
+    const req = { ...baseRequest, workspaceRef };
+    const paths = agentOpsArtifactPaths(req);
+    await mkdir(paths.dir, { recursive: true });
+
+    const batchApi = new FakeBatchApi();
+    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
+      namespace: 'dev-agents',
+      workspacePvcName: 'workspace-tasks',
+      workspaceMountPath: '/workspace/tasks',
+      batchApi,
+      pollIntervalMs: 1,
+      heartbeat: () => {},
+    });
+
+    const runPromise = runner.run(req);
+    await vi.waitFor(() => expect(batchApi.creates).toHaveLength(1));
+
+    // A stream the CLI never finished (killed mid-run): events but no terminal
+    // `result` event, so parseOutput can't produce a result.
+    await writeFile(paths.outFile, '{"type":"system","subtype":"init"}\n{"type":"assistant","message":{}}', 'utf8');
+    batchApi.setJobStatus(k8sJobName(req), { failed: 1 });
+
+    await expect(runPromise).rejects.toThrow(ProcessCliProcessError);
+    // The failed Job is deleted (so the retry's create won't 409-reuse it) and
+    // the stale output file is gone (so the retry can't re-read it and re-fail).
+    expect(batchApi.deletes.map((d) => d.name)).toContain(k8sJobName(req));
+    expect(existsSync(paths.outFile)).toBe(false);
   });
 
   it('throws ProcessCliAuthError when stderr matches the auth pattern', async () => {
