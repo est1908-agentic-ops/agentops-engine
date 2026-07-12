@@ -3,6 +3,12 @@ import { VerifyServiceSchema } from './project-config';
 import { StageSchema } from './stage';
 
 export const DEFAULT_IDLE_TIMEOUT_MS = 300_000;
+// Verify stages (full_verify) drive the project's test suite / build as single
+// long tool calls that legitimately produce no streamed output for far longer
+// than the 5-minute global idle default while one command runs. A larger idle
+// default -- still well under the 30-minute backstop -- keeps the runner from
+// killing a working agent mid-suite. See resolveStageLimits.
+export const DEFAULT_VERIFY_IDLE_TIMEOUT_MS = 900_000;
 export const DEFAULT_BACKSTOP_TIMEOUT_MS = 1_800_000;
 
 export const AgentRunLimitsSchema = z.object({
