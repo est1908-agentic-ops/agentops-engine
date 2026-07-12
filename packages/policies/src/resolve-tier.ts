@@ -36,6 +36,12 @@ export const DEFAULT_TIERS: Record<string, ModelRef[]> = {
     { backend: 'claude', model: 'claude-sonnet-5', effort: 'high' },
     { backend: 'pi', model: 'openrouter/deepseek-v4-pro' },
   ],
+  // Zero-cost demo/test tier: routes every stage to the stub backend (always
+  // present in buildBackends) so devCycle runs end-to-end without spending
+  // tokens. The CLI's seedDemoAgentopsConfig points each stage here.
+  stub: [
+    { backend: 'stub', model: 'stub-v1' },
+  ],
 };
 
 // Resolve a tier name to its ordered ModelRef[], applying an optional effort

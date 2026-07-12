@@ -36,7 +36,7 @@ export function parseFlags(args: string[]): Record<string, string> {
 }
 
 export function seedDemoAgentopsConfig(scm: MemoryScmPort, repo: string): void {
-  const stubRoute = { backend: 'stub', model: 'stub-v1' };
+  const stubRoute = { tier: 'stub' };
   scm.seedFile(
     repo,
     'agentops.json',

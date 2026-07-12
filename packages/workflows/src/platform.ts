@@ -24,7 +24,7 @@ const agentActivities = proxyActivities<Pick<PlatformActivities, 'runAgent'>>({
 // ServiceAccount/secrets/pod-label -- keep routing through this key rather
 // than switching to 'claude' directly, or the role silently loses cluster
 // access again (see docs/superpowers/specs/2026-07-09-routing-defaults-rebalance-design.md).
-const PLATFORM_MODEL = { backend: 'platform', model: 'claude-sonnet-5', effort: 'high' as const };
+const PLATFORM_TIER = 'platform';
 const PLATFORM_MAX_TOKENS = 400_000;
 const PLATFORM_TIMEOUT_MS = 1_800_000;
 const PLATFORM_IDLE_TIMEOUT_MS = DEFAULT_IDLE_TIMEOUT_MS;
@@ -42,9 +42,7 @@ export async function platform(input: PlatformAgentInput): Promise<PlatformAgent
         stage: 'platform',
         attempt: 1,
         callIndex: call,
-        backend: PLATFORM_MODEL.backend,
-        model: PLATFORM_MODEL.model,
-        effort: PLATFORM_MODEL.effort,
+        tier: PLATFORM_TIER,
         promptRef: 'platform.md',
         promptContext: {
           taskId,
@@ -57,8 +55,8 @@ export async function platform(input: PlatformAgentInput): Promise<PlatformAgent
       await activities.recordRunStats({
         taskId,
         stage: 'platform',
-        backend: PLATFORM_MODEL.backend,
-        model: PLATFORM_MODEL.model,
+        backend: result.resolvedBackend ?? 'unknown',
+        model: result.resolvedModel ?? 'unknown',
         tokensIn: result.tokensIn,
         tokensOut: result.tokensOut,
         wallMs: result.wallMs,
