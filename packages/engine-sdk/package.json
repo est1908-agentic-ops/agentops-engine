@@ -1,0 +1,25 @@
+{
+  "name": "@agentops/engine-sdk",
+  "version": "0.1.0",
+  "description": "Thin, secret-free facade for authoring Tier-2 agentops project workflows.",
+  "license": "MIT",
+  "type": "module",
+  "files": ["dist"],
+  "exports": {
+    "./workflow": { "types": "./dist/workflow.d.ts", "import": "./dist/workflow.js", "require": "./dist/workflow.cjs" },
+    "./worker": { "types": "./dist/worker.d.ts", "import": "./dist/worker.js", "require": "./dist/worker.cjs" }
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "peerDependencies": { "@temporalio/workflow": "*", "@temporalio/worker": "*", "@temporalio/common": "*", "@temporalio/client": "*" },
+  "dependencies": { "zod": "^3.23.0" },
+  "devDependencies": {
+    "tsup": "^8.0.0",
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.9"
+  },
+  "publishConfig": { "access": "public" }
+}
