@@ -59,4 +59,7 @@ export interface ConfigSyncActivities {
   loadAgentsManifest(project: string, repo: string): Promise<AgentSpec[]>;
   listAgentSchedules(project: string): Promise<ExistingSchedule[]>;
   applyScheduleChanges(project: string, repo: string, plan: ReconcilePlan): Promise<void>;
+  listContinuousAgents(project: string): Promise<string[]>;
+  startContinuousAgent(project: string, repo: string, spec: AgentSpec): Promise<void>;
+  terminateContinuousAgent(id: string): Promise<void>;
 }

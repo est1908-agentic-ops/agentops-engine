@@ -599,6 +599,25 @@ describe('createActivities — resolveRepoConfig', () => {
     expect(arg.memo).toMatchObject({ project: 'acme', agentName: 'nb', workflowType: 'whiteboxBugHunt' });
     expect(arg.searchAttributes).toMatchObject({ project: ['acme'], agentName: ['nb'], workflowType: ['whiteboxBugHunt'] });
   });
+
+  it('startContinuousAgent starts a singleton by deterministic id with identity + taskQueue, tolerating AlreadyStarted', async () => {
+    const start = vi.fn().mockResolvedValue({});
+    const deps = {
+      ...buildDeps(),
+      workflowClient: { start, list: async function* () {} } as any,
+      registry: [],
+    } as any;
+    const activities = createActivities(deps);
+    const spec = { name: 'mon', workflow: 'rollbarMonitor', schedule: 'continuous', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip', taskQueue: 'proj-acme' } as any;
+    await activities.startContinuousAgent('acme', 'acme/web', spec);
+    const [wf, opts] = start.mock.calls[0];
+    expect(wf).toBe('rollbarMonitor');
+    expect(opts.workflowId).toBe('agent:acme:mon');
+    expect(opts.taskQueue).toBe('proj-acme');
+    expect(opts.memo).toMatchObject({ project: 'acme', agentName: 'mon', workflowType: 'rollbarMonitor' });
+    expect(opts.searchAttributes).toMatchObject({ project: ['acme'] });
+    expect(opts.args[0]).toMatchObject({ repo: 'acme/web', project: 'acme' });
+  });
 });
 
 describe('createActivities — scratch workspace lifecycle', () => {

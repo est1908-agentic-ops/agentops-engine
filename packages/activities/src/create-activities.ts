@@ -53,7 +53,14 @@ export interface ActivityDependencies {
   filedFindings?: FiledFindingStore;
   scheduleClient?: ScheduleClientLike;
   taskQueue?: string;
+  workflowClient?: WorkflowClientLike;
   heartbeat?: (details: unknown) => void;
+}
+
+export interface WorkflowClientLike {
+  start?: (workflowType: string, opts: any) => Promise<any>;
+  list?: (query?: string) => AsyncIterable<any>;
+  getHandle?: (id: string) => { terminate?: (reason?: string) => Promise<void> };
 }
 
 function rethrowWorkspaceError(err: unknown): never {
@@ -306,6 +313,41 @@ export function createActivities(deps: ActivityDependencies) {
       }
       /* eslint-enable @typescript-eslint/no-explicit-any */
     },
+
+    async listContinuousAgents(project: string): Promise<string[]> {
+      const client = deps.workflowClient;
+      if (!client?.list) return [];
+      const ids: string[] = [];
+      const prefix = `agent:${project}:`;
+      try {
+        for await (const wf of client.list(`ExecutionStatus="Running"`)) {
+          const id = (wf as any).workflowId as string | undefined;
+          if (id && id.startsWith(prefix)) ids.push(id);
+        }
+      } catch { /* best effort */ }
+      return ids;
+    },
+    async startContinuousAgent(project: string, repo: string, spec: AgentSpec): Promise<void> {
+      const client = deps.workflowClient;
+      if (!client?.start) return;
+      const id = scheduleId(project, spec.name);
+      const memo = { project, agentName: spec.name, workflowType: spec.workflow };
+      try {
+        await client.start(spec.workflow, {
+          workflowId: id,
+          taskQueue: (spec as any).taskQueue ?? ENGINE_QUEUE,
+          args: [{ repo, project, ...spec.input }],
+          memo,
+          searchAttributes: { project: [project], agentName: [spec.name], workflowType: [spec.workflow] },
+        });
+      } catch (err) {
+        if (!(err instanceof Error && err.name === 'WorkflowExecutionAlreadyStartedError')) throw err;
+      }
+    },
+    async terminateContinuousAgent(id: string): Promise<void> {
+      await deps.workflowClient?.getHandle?.(id)?.terminate?.('agent removed from manifest').catch(() => {});
+    },
+
     async prepareScratchWorkspace(taskId: string): Promise<{ workspaceRef: string }> {
       try {
         return await deps.workspaces.prepareScratch(taskId);

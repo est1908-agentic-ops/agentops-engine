@@ -406,12 +406,14 @@ async function main(): Promise<void> {
   // Build a Temporal client for Schedule management (ConfigSync activities).
   // Uses the same address/namespace as the worker connection when available.
   let scheduleClient: import('@agentops/activities').ScheduleClientLike | undefined;
+  let workflowClient: import('@agentops/activities').WorkflowClientLike | undefined;
   try {
     const c: import('@temporalio/client').Connection = await Connection.connect({
       address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233',
     });
     const tc = new Client({ connection: c, namespace: process.env.TEMPORAL_NAMESPACE });
     scheduleClient = tc.schedule as unknown as import('@agentops/activities').ScheduleClientLike;
+    workflowClient = tc.workflow as unknown as import('@agentops/activities').WorkflowClientLike;
   } catch {
     // In test or no Temporal, schedule ops will no-op or be injected by tests.
   }
@@ -428,6 +430,7 @@ async function main(): Promise<void> {
     filedFindings,
     scheduleClient,
     taskQueue: ENGINE_QUEUE,
+    workflowClient,
   });
 
   const tracing = setupTracing();
