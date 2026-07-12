@@ -58,6 +58,15 @@ Validation rules:
 - `promptSource` (e.g. `builtin:whitebox-bughunt.md`)
 - `project`, `workflowType`
 
+## Search attributes
+
+The engine registers and stamps three custom Keyword search attributes for Schedules and continuous agent workflows:
+- `project`
+- `agentName`
+- `workflowType`
+
+These must be registered per Temporal namespace before first reconcile (see `scripts/register-search-attributes.sh`). They enable filtering/listing per project or per-agent-instance in the UI, cost dashboards, and control surfaces.
+
 ## Notes
 
 - Removing or editing `agents.json` is the supported way to manage automation.
