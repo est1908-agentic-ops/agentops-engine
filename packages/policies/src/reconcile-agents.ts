@@ -1,6 +1,7 @@
 import type { AgentSpec } from '@agentops/contracts';
+import { ENGINE_QUEUE } from '@agentops/contracts';
 
-export interface ExistingSchedule { id: string; scheduleSpec: string; workflow: string; paused: boolean }
+export interface ExistingSchedule { id: string; scheduleSpec: string; workflow: string; paused: boolean; taskQueue?: string }
 export interface ReconcilePlan { toCreate: AgentSpec[]; toUpdate: AgentSpec[]; toDelete: string[]; toPause: string[]; toResume: string[] }
 
 export function scheduleId(project: string, name: string): string {
@@ -20,7 +21,10 @@ export function reconcileAgents(declared: AgentSpec[], existing: ExistingSchedul
     declaredIds.add(id);
     const cur = byId.get(id);
     if (!cur) { plan.toCreate.push(spec); continue; }
-    if (cur.scheduleSpec !== spec.schedule || cur.workflow !== spec.workflow) plan.toUpdate.push(spec);
+    const desiredQueue = ENGINE_QUEUE; // built-in scheduled workflows always run on the engine queue
+    if (cur.scheduleSpec !== spec.schedule || cur.workflow !== spec.workflow || (cur.taskQueue !== undefined && cur.taskQueue !== desiredQueue)) {
+      plan.toUpdate.push(spec);
+    }
     if (spec.enabled && cur.paused) plan.toResume.push(id);
     if (!spec.enabled && !cur.paused) plan.toPause.push(id);
   }

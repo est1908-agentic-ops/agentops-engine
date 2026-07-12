@@ -58,8 +58,9 @@ export async function listAgentSchedules(project: string, client?: ScheduleClien
       const spec = (s as any)?.schedule?.spec;
       const scheduleSpec = typeof spec === 'string' ? spec : (spec?.cron?.cronString ?? 'continuous');
       const workflow = (s as any)?.action?.type ?? 'whiteboxBugHunt';
+      const taskQueue = (s as any)?.action?.taskQueue as string | undefined;
       // paused not directly on list item in all SDK versions; default false and rely on apply
-      out.push({ id, scheduleSpec, workflow, paused: false });
+      out.push({ id, scheduleSpec, workflow, paused: false, taskQueue });
     }
   }
   return out;

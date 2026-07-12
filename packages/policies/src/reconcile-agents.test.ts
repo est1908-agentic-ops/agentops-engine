@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { reconcileAgents, scheduleId } from './reconcile-agents';
+import { ENGINE_QUEUE, LEGACY_ENGINE_QUEUE } from '@agentops/contracts';
 import type { AgentSpec } from '@agentops/contracts';
 
 const spec = (over: Partial<AgentSpec>): AgentSpec => ({
@@ -29,5 +30,19 @@ describe('reconcileAgents', () => {
     const idA = scheduleId('p', 'a');
     expect(reconcileAgents([spec({ name: 'a', enabled: false })], [{ id: idA, scheduleSpec: '0 2 * * *', workflow: 'whiteboxBugHunt', paused: false }], 'p').toPause).toEqual([idA]);
     expect(reconcileAgents([spec({ name: 'a', enabled: true })], [{ id: idA, scheduleSpec: '0 2 * * *', workflow: 'whiteboxBugHunt', paused: true }], 'p').toResume).toEqual([idA]);
+  });
+
+  it('re-points a schedule still on the legacy queue', () => {
+    const declared = [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' as const }];
+    const existing = [{ id: scheduleId('p', 'nb'), scheduleSpec: '0 2 * * *', workflow: 'whiteboxBugHunt', paused: false, taskQueue: LEGACY_ENGINE_QUEUE }];
+    const plan = reconcileAgents(declared as any, existing, 'p');
+    expect(plan.toUpdate.map((s) => s.name)).toContain('nb');
+  });
+
+  it('does not update a schedule already on the engine queue', () => {
+    const declared = [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' as const }];
+    const existing = [{ id: scheduleId('p', 'nb'), scheduleSpec: '0 2 * * *', workflow: 'whiteboxBugHunt', paused: false, taskQueue: ENGINE_QUEUE }];
+    const plan = reconcileAgents(declared as any, existing, 'p');
+    expect(plan.toUpdate).toHaveLength(0);
   });
 });

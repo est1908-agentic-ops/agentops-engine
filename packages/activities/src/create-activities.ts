@@ -252,7 +252,8 @@ export function createActivities(deps: ActivityDependencies) {
           const spec = (rec.schedule as any)?.spec;
           const scheduleSpec = typeof spec === 'string' ? spec : ((spec as any)?.cron?.cronString ?? String(spec ?? ''));
           const workflow = (rec.action as any)?.workflowType ?? 'whiteboxBugHunt';
-          out.push({ id: sid, scheduleSpec, workflow, paused: false });
+          const taskQueue = (rec.action as any)?.taskQueue as string | undefined;
+          out.push({ id: sid, scheduleSpec, workflow, paused: false, taskQueue });
         }
         /* eslint-enable @typescript-eslint/no-explicit-any */
       } catch {
