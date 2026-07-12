@@ -20,6 +20,7 @@ import {
   handleListDevCycleTargets,
   handleStartDevCycleRun,
 } from './devcycle-routes';
+import { handleListAgents, handleTriggerAgent } from './agents-routes';
 import { matchPath } from './route';
 import { resolveStaticFile } from './serve-static';
 
@@ -264,6 +265,16 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
   }
   if (req.method === 'GET' && pathname === '/api/registry/repos') {
     return handleListRepos(deps);
+  }
+  if (req.method === 'GET' && pathname === '/api/agents') {
+    return handleListAgents(deps);
+  }
+  const agentRun = matchPath('/api/agents/:scheduleId/run', pathname);
+  if (req.method === 'POST' && agentRun) {
+    if (!authorizeProjectCrud(deps, req)) {
+      return { status: 401, body: { error: 'unauthorized' } };
+    }
+    return handleTriggerAgent(deps, agentRun.params.scheduleId);
   }
   if (pathname === '/api/projects' || pathname.startsWith('/api/projects/')) {
     if (!isProjectCrudEnabled(deps)) {

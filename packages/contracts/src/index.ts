@@ -14,6 +14,7 @@ export * from './platform-agent';
 export * from './control-api';
 export * from './control-devcycle-api';
 export * from './control-projects-api';
+export * from './control-agents-api';
 export * from './agents-manifest';
 export * from './whitebox-finding';
 export * from './sha256';
