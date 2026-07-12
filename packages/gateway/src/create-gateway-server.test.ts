@@ -128,6 +128,19 @@ describe('createGatewayServer GitHub route', () => {
     expect(start).not.toHaveBeenCalled();
   });
 
+  it('starts configSync for a push event on a registered repo', async () => {
+    const body = JSON.stringify({ repository: { full_name: 'octocat/hello-world' } });
+    const res = await post(port, '/webhooks/github', body, {
+      'content-type': 'application/json',
+      'x-github-event': 'push',
+      'x-hub-signature-256': sign(body),
+    });
+    expect(res.status).toBe(202);
+    expect(start).toHaveBeenCalledTimes(1);
+    const [, options] = start.mock.calls[0];
+    expect(options.workflowId).toBe('configsync:my-project');
+  });
+
   it('starts devCycle for a correctly signed labeled event on a registered repo', async () => {
     const body = JSON.stringify(labeledPayload());
     const res = await post(port, '/webhooks/github', body, {
