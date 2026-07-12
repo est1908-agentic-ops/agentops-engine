@@ -1,0 +1,5 @@
+apiVersion: v2
+name: project-worker
+description: Generic Tier-2 per-project agentops worker Deployment
+version: 0.1.0
+appVersion: "0.1.0"

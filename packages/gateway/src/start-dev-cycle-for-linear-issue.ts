@@ -4,6 +4,7 @@ import type { ProjectConfig } from '@agentops/contracts';
 import { linearRef } from '@agentops/ports';
 import { devCycle } from '@agentops/workflows';
 import type { LinearIssueEvent } from './parse-linear-issue-event';
+import { slugifyProject } from './slug';
 import type { StartDevCycleResult } from './start-dev-cycle';
 
 // Parallel to startDevCycleForIssue rather than a shared/generalized
@@ -19,7 +20,10 @@ export async function startDevCycleForLinearIssue(
   repo: string,
   config: ProjectConfig,
 ): Promise<StartDevCycleResult> {
-  const taskId = `linear-${project}-${event.identifier}`;
+  // Slugify the project part: the taskId becomes a git branch and workspace dir
+  // (see slugifyProject / startDevCycleForIssue). The Linear identifier (e.g.
+  // "ENG-123") is already branch-safe.
+  const taskId = `linear-${slugifyProject(project)}-${event.identifier}`;
   try {
     await client.workflow.start(devCycle, {
       taskQueue,
