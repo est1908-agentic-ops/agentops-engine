@@ -53,6 +53,8 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
+          echo "=== RUNNER EGRESS IP (add this to the token's IP allowlist) ==="
+          curl -s https://api.ipify.org; echo
           echo "NPM_CONFIG_USERCONFIG=$NPM_CONFIG_USERCONFIG"
           echo "--- userconfig .npmrc (authToken masked) ---"
           sed -E 's/(_authToken=).*/\1<MASKED>/' "$NPM_CONFIG_USERCONFIG" || echo "(no userconfig file)"
