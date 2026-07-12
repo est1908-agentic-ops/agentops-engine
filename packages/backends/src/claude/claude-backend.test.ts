@@ -3,6 +3,7 @@ import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { BackendRunRequest } from '@agentops/contracts';
 import { ClaudeBackendAuthError, ClaudeBackendProcessError, ClaudeBackendTimeoutError, createClaudeCliSpec } from './claude-backend';
+import { RateLimitError, SessionLimitError } from '../provider-rate-limit';
 import { ProcessCliRunner } from '../process-cli-runner';
 
 const baseRequest: BackendRunRequest = {
@@ -191,6 +192,56 @@ describe('ClaudeBackend', () => {
 
     expect(error).toBeInstanceOf(ClaudeBackendProcessError);
     expect((error as Error).message).toMatch(/hit an internal snag/);
+  });
+
+  it('throws SessionLimitError when is_error:true carries the Claude subscription session-limit phrasing', async () => {
+    const { child } = fakeChildProcess();
+    const spawnFn = vi.fn(() => {
+      queueMicrotask(() => {
+        child.stdout.end(
+          streamJson({ is_error: true, result: "You've hit your session limit · resets 9:30am (UTC)", usage: { input_tokens: 1, output_tokens: 1 }, duration_ms: 5 }),
+        );
+        child.stderr.end('');
+        child.emit('close', 0);
+      });
+      return child;
+    });
+    const backend = new ProcessCliRunner(createClaudeCliSpec(), { spawn: spawnFn as never });
+
+    let error: unknown;
+    try {
+      await backend.run(baseRequest);
+    } catch (err) {
+      error = err;
+    }
+
+    expect(error).toBeInstanceOf(SessionLimitError);
+    expect(error).not.toBeInstanceOf(ClaudeBackendProcessError);
+  });
+
+  it('throws RateLimitError when is_error:true carries a 429 rate-limit phrasing', async () => {
+    const { child } = fakeChildProcess();
+    const spawnFn = vi.fn(() => {
+      queueMicrotask(() => {
+        child.stdout.end(
+          streamJson({ is_error: true, result: '429 Too Many Requests: rate limit exceeded, retry later', usage: { input_tokens: 1, output_tokens: 1 }, duration_ms: 5 }),
+        );
+        child.stderr.end('');
+        child.emit('close', 0);
+      });
+      return child;
+    });
+    const backend = new ProcessCliRunner(createClaudeCliSpec(), { spawn: spawnFn as never });
+
+    let error: unknown;
+    try {
+      await backend.run(baseRequest);
+    } catch (err) {
+      error = err;
+    }
+
+    expect(error).toBeInstanceOf(RateLimitError);
+    expect(error).not.toBeInstanceOf(ClaudeBackendProcessError);
   });
 
   it('throws ClaudeBackendAuthError (not a generic process error) when is_error:true carries a 401/auth message', async () => {

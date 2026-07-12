@@ -5,6 +5,7 @@ import {
   ProcessCliProcessError,
   ProcessCliTimeoutError,
 } from '../process-cli-runner';
+import { isRateLimitMessage, isSessionLimitMessage, RateLimitError, SessionLimitError } from '../provider-rate-limit';
 
 export { ProcessCliProcessError as ClaudeBackendProcessError };
 export { ProcessCliTimeoutError as ClaudeBackendTimeoutError };
@@ -130,6 +131,19 @@ export function createClaudeCliSpec(opts: ClaudeCliSpecOptions = {}): CliSpec {
         // fail fast and non-retryably.
         if (AUTH_ERROR_PATTERN.test(parsed.result)) {
           throw new ProcessCliAuthError(message);
+        }
+        // A subscription session cap ("You've hit your session limit · resets
+        // 9:30am") is account-wide on claude-credentials and lasts hours -- a
+        // same-backend retry is pointless. Classify it so SP2's TierFallbackBackend
+        // can advance to a different credential domain (claude -> pi). This is the
+        // gap issue-broccoli-94 hit: today it is a generic ProcessCliProcessError
+        // that just re-hits the cap 5x and dies.
+        if (isSessionLimitMessage(parsed.result)) {
+          throw new SessionLimitError(message);
+        }
+        // A self-clearing 429 (minutes). SP2 maps this to a retryable wait.
+        if (isRateLimitMessage(parsed.result)) {
+          throw new RateLimitError(message);
         }
         throw new ProcessCliProcessError(message);
       }
