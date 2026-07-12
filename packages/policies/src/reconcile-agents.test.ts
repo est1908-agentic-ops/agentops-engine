@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reconcileAgents, scheduleId } from './reconcile-agents';
+import { reconcileAgents, scheduleId, reconcileContinuous } from './reconcile-agents';
 import { ENGINE_QUEUE, LEGACY_ENGINE_QUEUE } from '@agentops/contracts';
 import type { AgentSpec } from '@agentops/contracts';
 
@@ -46,3 +46,26 @@ describe('reconcileAgents', () => {
     expect(plan.toUpdate).toHaveLength(0);
   });
 });
+
+const cont = (name: string) => ({ name, workflow: 'rollbarMonitor', schedule: 'continuous' as const, input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' as const, taskQueue: 'proj-acme' });
+
+it('starts declared continuous agents that are not running', () => {
+  const plan = reconcileContinuous([cont('mon')], [], 'acme');
+  expect(plan.toStart.map((s) => s.name)).toEqual(['mon']);
+  expect(plan.toTerminate).toEqual([]);
+});
+it('terminates running singletons no longer declared', () => {
+  const plan = reconcileContinuous([], [scheduleId('acme', 'mon')], 'acme');
+  expect(plan.toStart).toEqual([]);
+  expect(plan.toTerminate).toEqual([scheduleId('acme', 'mon')]);
+});
+it('is idempotent for an already-running declared agent', () => {
+  const plan = reconcileContinuous([cont('mon')], [scheduleId('acme', 'mon')], 'acme');
+  expect(plan.toStart).toEqual([]);
+  expect(plan.toTerminate).toEqual([]);
+});
+it('excludes a disabled continuous agent (treated as terminate)', () => {
+  const plan = reconcileContinuous([{ ...cont('mon'), enabled: false }], [scheduleId('acme', 'mon')], 'acme');
+  expect(plan.toTerminate).toEqual([scheduleId('acme', 'mon')]);
+});
+

@@ -31,3 +31,19 @@ export function reconcileAgents(declared: AgentSpec[], existing: ExistingSchedul
   for (const e of existing) if (!declaredIds.has(e.id)) plan.toDelete.push(e.id);
   return plan;
 }
+
+export interface ContinuousPlan { toStart: AgentSpec[]; toTerminate: string[] }
+
+// Continuous agents are singleton long-lived workflows keyed by the same
+// deterministic id as schedules (agent:<project>:<name>). Enabled + declared
+// but not running => start; running but not declared (or disabled) =>
+// terminate. SP2 design §8.
+export function reconcileContinuous(declared: AgentSpec[], running: string[], project: string): ContinuousPlan {
+  const wanted = declared.filter((a) => a.schedule === 'continuous' && a.enabled);
+  const runningSet = new Set(running);
+  const wantedIds = new Set(wanted.map((a) => scheduleId(project, a.name)));
+  return {
+    toStart: wanted.filter((a) => !runningSet.has(scheduleId(project, a.name))),
+    toTerminate: running.filter((id) => !wantedIds.has(id)),
+  };
+}
