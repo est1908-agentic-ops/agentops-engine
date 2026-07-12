@@ -8,7 +8,7 @@ export interface IssueLabeledEvent {
 interface GithubIssuesWebhookPayload {
   action?: string;
   label?: { name?: string };
-  issue?: { number?: number; title?: string };
+  issue?: { number?: number; title?: string; labels?: Array<{ name?: string }> };
   repository?: { full_name?: string };
 }
 
@@ -16,7 +16,7 @@ interface GithubIssuesWebhookPayload {
 // trigger label — a repo's webhook may be subscribed to far more event types
 // than this gateway acts on; everything else is silently not-our-concern,
 // not an error.
-export function parseIssueLabeledEvent(
+export function parseIssueTriggerEvent(
   githubEvent: string | undefined,
   payload: unknown,
   triggerLabel: string,
@@ -25,10 +25,10 @@ export function parseIssueLabeledEvent(
     return null;
   }
   const body = payload as GithubIssuesWebhookPayload;
-  if (body.action !== 'labeled') {
-    return null;
-  }
-  if (body.label?.name !== triggerLabel) {
+  const hasTrigger =
+    (body.action === 'labeled' && body.label?.name === triggerLabel) ||
+    (body.action === 'opened' && (body.issue?.labels ?? []).some((l) => l.name === triggerLabel));
+  if (!hasTrigger) {
     return null;
   }
   const repo = body.repository?.full_name;
@@ -42,4 +42,13 @@ export function parseIssueLabeledEvent(
     issueNumber,
     title: body.issue?.title ?? '',
   };
+}
+
+/** @deprecated Use {@link parseIssueTriggerEvent} — kept for tests referencing the old name. */
+export function parseIssueLabeledEvent(
+  githubEvent: string | undefined,
+  payload: unknown,
+  triggerLabel: string,
+): IssueLabeledEvent | null {
+  return parseIssueTriggerEvent(githubEvent, payload, triggerLabel);
 }

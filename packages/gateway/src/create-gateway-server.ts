@@ -9,7 +9,9 @@ import {
 import type { ResolvedProjectEntry } from '@agentops/contracts';
 import type { ScmPort } from '@agentops/ports';
 import { matchesLinearTriggerLabel, parseLinearIssueEvent } from './parse-linear-issue-event';
-import { parseIssueLabeledEvent } from './parse-issue-labeled';
+import { parseIssueTriggerEvent } from './parse-issue-labeled';
+import { parsePushEvent } from './parse-push-event';
+import { startConfigSync } from './start-config-sync';
 import { startDevCycleForLinearIssue } from './start-dev-cycle-for-linear-issue';
 import { startDevCycleForIssue } from './start-dev-cycle';
 import { isFreshLinearWebhook, verifyLinearSignature } from './verify-linear-signature';
@@ -98,7 +100,28 @@ async function handleGithubWebhook(deps: GatewayDeps, req: IncomingMessage, res:
   }
 
   const githubEvent = req.headers['x-github-event'];
-  const event = parseIssueLabeledEvent(typeof githubEvent === 'string' ? githubEvent : undefined, payload, deps.triggerLabel);
+  const eventType = typeof githubEvent === 'string' ? githubEvent : undefined;
+
+  const push = parsePushEvent(eventType, payload);
+  if (push) {
+    const entry = await resolveManagedProjectEntry(deps.managedProjectDeps, push.repo);
+    if (!entry) {
+      console.warn(`gateway: no project registered for repo "${push.repo}" — ignoring push event`);
+      res.writeHead(202).end('no project registered for this repo');
+      return;
+    }
+    try {
+      const result = await startConfigSync(deps.client, deps.taskQueue, entry.project, entry.repo);
+      console.log(`gateway: push → configSync for project "${entry.project}" (started=${result.started})`);
+      res.writeHead(result.started ? 202 : 204).end();
+    } catch (err) {
+      console.error('gateway: failed to start configSync from push webhook', err);
+      res.writeHead(500).end('failed to start configSync');
+    }
+    return;
+  }
+
+  const event = parseIssueTriggerEvent(eventType, payload, deps.triggerLabel);
   if (!event) {
     // Not an event this gateway acts on (wrong event type, wrong action, or a
     // different label) — acknowledge so GitHub doesn't retry, but do nothing.
