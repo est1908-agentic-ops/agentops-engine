@@ -55,3 +55,35 @@ export const RepoListResponseSchema = z.object({
   repos: z.array(z.string()),
 });
 export type RepoListResponse = z.infer<typeof RepoListResponseSchema>;
+
+// --- budgets (simple subscription / spend dashboard, 2026-07-13 simple slice) ---
+
+export const RateWindowViewSchema = z.object({
+  maxCalls: z.number().int().nonnegative(),
+  windowHours: z.number().nonnegative(),
+  configured: z.boolean(),
+});
+export type RateWindowView = z.infer<typeof RateWindowViewSchema>;
+
+export const OpenRouterSpendSchema = z.object({
+  estimatedUsd: z.number(),
+  totalTokens: z.number().int().nonnegative(),
+  period: z.string(),
+  modelBreakdown: z.array(
+    z.object({
+      model: z.string(),
+      tokens: z.number().int().nonnegative(),
+      estimatedUsd: z.number(),
+    }),
+  ),
+});
+export type OpenRouterSpend = z.infer<typeof OpenRouterSpendSchema>;
+
+export const BudgetsResponseSchema = z.object({
+  rateWindows: z.object({
+    claude: RateWindowViewSchema,
+    pi: RateWindowViewSchema,
+  }),
+  openRouter: OpenRouterSpendSchema,
+});
+export type BudgetsResponse = z.infer<typeof BudgetsResponseSchema>;

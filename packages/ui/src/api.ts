@@ -1,4 +1,5 @@
 import {
+  BudgetsResponseSchema,
   DevCycleRunDetailSchema,
   DevCycleTargetsResponseSchema,
   ListAgentSchedulesResponseSchema,
@@ -12,6 +13,7 @@ import {
   StartRunResponseSchema,
   z,
   type AgentScheduleSummary,
+  type BudgetsResponse,
   type DevCycleRunDetail,
   type DevCycleTarget,
   type ManagedProject,
@@ -368,3 +370,12 @@ export async function updateSelfHealSettings(
   });
   return parseJsonResponse(res, SelfHealSettingsResponseSchema);
 }
+
+// --- budgets (simple slice) ---
+
+export async function getBudgets(): Promise<BudgetsResponse> {
+  const res = await fetch('/api/budgets');
+  return parseJsonResponse(res, BudgetsResponseSchema);
+}
+
+export type { BudgetsResponse } from '@agentops/contracts';

@@ -8,11 +8,13 @@ import { ChatPage } from './pages/ChatPage';
 import { ChatStartPage } from './pages/ChatStartPage';
 import { TiersPage } from './pages/TiersPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { BudgetsPage } from './pages/BudgetsPage';
 
 const NAV_LINKS = [
   { to: '/projects', label: 'Projects' },
   { to: '/chat', label: 'Chat' },
   { to: '/tiers', label: 'Tiers' },
+  { to: '/budgets', label: 'Budgets' },
   { to: '/settings', label: 'Settings' },
 ];
 
@@ -48,6 +50,7 @@ export function App() {
         <Route path="/chat" element={<ChatStartPage />} />
         <Route path="/chats/:chatId" element={<ChatPage />} />
         <Route path="/tiers" element={<TiersPage />} />
+        <Route path="/budgets" element={<BudgetsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </BrowserRouter>
