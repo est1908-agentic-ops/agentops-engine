@@ -221,12 +221,12 @@ describe('GithubScmPort — getPrFeedback', () => {
     expect(feedback.ciStatus).toBe('failed');
   });
 
-  it('maps zero check runs to pending, not a vacuous green', async () => {
+  it('maps confirmed-zero CI on both sources (no check runs, no legacy statuses) to green -- nothing configured to wait on', async () => {
     const scm = setupPrFeedback({ checkRuns: [] });
 
     const feedback = await scm.getPrFeedback('octocat/hello-world#7');
 
-    expect(feedback.ciStatus).toBe('pending');
+    expect(feedback.ciStatus).toBe('green');
   });
 
   // Independent control of both CI sources for the merge/permission cases.
@@ -286,6 +286,43 @@ describe('GithubScmPort — getPrFeedback', () => {
       status: { data: { state: 'success', total_count: 1 } },
     });
     await expect(scm.getPrFeedback('octocat/hello-world#7')).rejects.toMatchObject({ status: 500 });
+  });
+
+  it('confirmed-zero on both sources (no check runs, no legacy statuses) resolves to green, not an eternal pending', async () => {
+    const scm = setupCi({
+      checks: { data: { total_count: 0, check_runs: [] } },
+      status: { data: { state: 'pending', total_count: 0 } },
+    });
+    expect((await scm.getPrFeedback('octocat/hello-world#7')).ciStatus).toBe('green');
+  });
+
+  // Real scenario: est1908/agents PR #5 (2026-07-13) -- Checks API 403s (this
+  // PAT can't read check runs at all) while the Statuses API genuinely has zero
+  // statuses. One source is a confirmed `none`, but the other is truly
+  // `unknown` (could be anything), so this must stay conservative -- unlike the
+  // both-confirmed-none case above, this does NOT resolve to green.
+  it('stays pending when checks are unreadable (403) even though statuses confirm zero -- one unknown side blocks green', async () => {
+    const scm = setupCi({
+      checks: forbidden,
+      status: { data: { state: 'pending', total_count: 0 } },
+    });
+    expect((await scm.getPrFeedback('octocat/hello-world#7')).ciStatus).toBe('pending');
+  });
+
+  it('confirmed-zero checks combined with a real green from statuses is green', async () => {
+    const scm = setupCi({
+      checks: { data: { total_count: 0, check_runs: [] } },
+      status: { data: { state: 'success', total_count: 1 } },
+    });
+    expect((await scm.getPrFeedback('octocat/hello-world#7')).ciStatus).toBe('green');
+  });
+
+  it('confirmed-zero checks combined with a real failure from statuses is failed', async () => {
+    const scm = setupCi({
+      checks: { data: { total_count: 0, check_runs: [] } },
+      status: { data: { state: 'failure', total_count: 1 } },
+    });
+    expect((await scm.getPrFeedback('octocat/hello-world#7')).ciStatus).toBe('failed');
   });
 
   it('counts unresolved review threads via GraphQL, not REST', async () => {

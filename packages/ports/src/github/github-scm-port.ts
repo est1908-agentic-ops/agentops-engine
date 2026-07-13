@@ -33,10 +33,20 @@ const REVIEW_THREADS_QUERY = `
 // personal access token", 403) because it's App-oriented, and a repo may report
 // via one API or the other. So getPrFeedback reads BOTH, tolerates a 403/404 on
 // either (treating that source as `unknown` rather than throwing), and merges.
-// This keeps a run that already opened a PR alive even when CI can't be read --
-// `unknown` never becomes merge-ready, so the babysit loop just waits/brakes.
 // See est1908/agents getPrFeedback 403 (2026-07-13).
-type CiSignal = 'green' | 'failed' | 'pending' | 'unknown';
+//
+// `unknown` and `none` are both "zero signal" but mean different things and
+// merge differently: `unknown` is a source we COULDN'T read (403/404, or GitHub
+// itself defaulting an empty combined-status to "pending") -- it must never
+// become merge-ready, since the real CI could be anything. `none` is a source
+// that answered with a genuine 200 reporting zero check runs / zero statuses --
+// a confirmed fact, not a gap. When BOTH sources confirm `none`, there is no CI
+// configured for this ref at all, and nothing will ever arrive to babysit-poll
+// for, so that combination resolves to `green` instead of hanging until the
+// babysit brake trips. See est1908/agents PR #5 (2026-07-13): zero check runs
+// (Checks API 403'd -> unknown) and zero statuses (confirmed `none`) -- that
+// PR still correctly stays `pending`, since one side remains unreadable.
+type CiSignal = 'green' | 'failed' | 'pending' | 'unknown' | 'none';
 
 function isNotAccessible(err: unknown): boolean {
   const status = (err as { status?: number }).status;
@@ -44,24 +54,28 @@ function isNotAccessible(err: unknown): boolean {
 }
 
 function mapCheckRuns(checkRuns: Array<{ status: string; conclusion: string | null }>): CiSignal {
-  if (checkRuns.length === 0) return 'unknown'; // no check runs -> let the Statuses API decide
+  if (checkRuns.length === 0) return 'none'; // confirmed: no check runs exist for this ref
   if (checkRuns.some((run) => run.status !== 'completed')) return 'pending';
   return checkRuns.every((run) => run.conclusion === 'success') ? 'green' : 'failed';
 }
 
 function mapCombinedStatus(state: string, total: number): CiSignal {
-  if (total === 0) return 'unknown'; // no legacy statuses on this ref
+  if (total === 0) return 'none'; // confirmed: no legacy statuses on this ref
   if (state === 'success') return 'green';
   if (state === 'failure' || state === 'error') return 'failed';
   return 'pending';
 }
 
-// Failure dominates; then pending; then green; if neither source is readable or
-// present, `pending` (unknown CI must never read as green / merge-ready).
+// Failure dominates; then pending; then green; two confirmed-empty sources
+// (`none`) mean no CI is configured anywhere for this ref, so that combination
+// is merge-ready too. Anything else touching `unknown` (a source we couldn't
+// read at all) stays conservative -- `pending` -- since that source's real
+// state could be anything, unlike a confirmed `none`.
 export function mergeCiSignals(a: CiSignal, b: CiSignal): 'green' | 'failed' | 'pending' {
   if (a === 'failed' || b === 'failed') return 'failed';
   if (a === 'pending' || b === 'pending') return 'pending';
   if (a === 'green' || b === 'green') return 'green';
+  if (a === 'none' && b === 'none') return 'green';
   return 'pending';
 }
 
@@ -143,7 +157,7 @@ export class GithubScmPort implements ScmPort {
     try {
       const { data } = await this.client.rest.checks.listForRef({ owner, repo, ref });
       const total = data.total_count ?? data.check_runs.length;
-      return total === 0 ? 'unknown' : mapCheckRuns(data.check_runs);
+      return total === 0 ? 'none' : mapCheckRuns(data.check_runs);
     } catch (err) {
       if (isNotAccessible(err)) return 'unknown';
       throw err;
