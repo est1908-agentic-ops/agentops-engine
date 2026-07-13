@@ -221,6 +221,32 @@ describe('GithubScmPort — getPrFeedback', () => {
     expect(feedback.ciStatus).toBe('failed');
   });
 
+  it('does not treat a skipped check run as a failure (e.g. a path-filtered job that had nothing to do)', async () => {
+    const scm = setupPrFeedback({
+      checkRuns: [
+        { status: 'completed', conclusion: 'skipped' },
+        { status: 'completed', conclusion: 'success' },
+      ],
+    });
+
+    const feedback = await scm.getPrFeedback('octocat/hello-world#7');
+
+    expect(feedback.ciStatus).toBe('green');
+  });
+
+  it('still treats a genuine failure conclusion as failed even alongside a skipped run', async () => {
+    const scm = setupPrFeedback({
+      checkRuns: [
+        { status: 'completed', conclusion: 'skipped' },
+        { status: 'completed', conclusion: 'failure' },
+      ],
+    });
+
+    const feedback = await scm.getPrFeedback('octocat/hello-world#7');
+
+    expect(feedback.ciStatus).toBe('failed');
+  });
+
   it('maps confirmed-zero CI on both sources (no check runs, no legacy statuses) to green -- nothing configured to wait on', async () => {
     const scm = setupPrFeedback({ checkRuns: [] });
 

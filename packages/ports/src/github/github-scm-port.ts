@@ -53,10 +53,17 @@ function isNotAccessible(err: unknown): boolean {
   return status === 403 || status === 404;
 }
 
+// Not every non-'success' conclusion is a failure: 'skipped' (e.g. a
+// path-filtered job that didn't need to run) and 'neutral' are explicitly
+// non-blocking per GitHub's own semantics -- only these represent a real,
+// merge-blocking CI failure.
+const FAILING_CHECK_CONCLUSIONS = new Set(['failure', 'cancelled', 'timed_out', 'action_required', 'stale']);
+
 function mapCheckRuns(checkRuns: Array<{ status: string; conclusion: string | null }>): CiSignal {
   if (checkRuns.length === 0) return 'none'; // confirmed: no check runs exist for this ref
   if (checkRuns.some((run) => run.status !== 'completed')) return 'pending';
-  return checkRuns.every((run) => run.conclusion === 'success') ? 'green' : 'failed';
+  const hasFailure = checkRuns.some((run) => run.conclusion !== null && FAILING_CHECK_CONCLUSIONS.has(run.conclusion));
+  return hasFailure ? 'failed' : 'green';
 }
 
 function mapCombinedStatus(state: string, total: number): CiSignal {
