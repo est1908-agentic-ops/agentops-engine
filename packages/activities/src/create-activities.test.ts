@@ -745,6 +745,11 @@ describe('createActivities — resolveRepoConfig', () => {
     } as any;
     await activities.applyScheduleChanges('acme', 'acme/web', plan);
     expect(create.mock.calls[0][0].action.taskQueue).toBe('proj-acme');
+    // The schedule spec must use the SDK's cronExpressions shape, not
+    // spec.cron.cronString (which the client ignores -> schedule never fires).
+    expect(create.mock.calls[0][0].spec.cronExpressions).toEqual(['0 2 * * *']);
+    expect(create.mock.calls[0][0].spec.timezone).toBe('UTC');
+    expect(create.mock.calls[0][0].spec.cron).toBeUndefined();
   });
 
   it('applyScheduleChanges stamps repo + project/agentName/workflowType and search attributes', async () => {

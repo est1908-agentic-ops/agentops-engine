@@ -26,6 +26,9 @@ describe('applyScheduleChanges (mocked ScheduleClient)', () => {
     expect(client.create).toHaveBeenCalled();
     const arg = client.create.mock.calls[0][0];
     expect(arg.scheduleId).toMatch(/agent:acme:nightly/);
+    // SDK ScheduleSpec shape (cronExpressions), not the ignored spec.cron.cronString.
+    expect(arg.spec.cronExpressions).toEqual(['0 2 * * *']);
+    expect(arg.spec.cron).toBeUndefined();
   });
 
   it('deletes for toDelete', async () => {

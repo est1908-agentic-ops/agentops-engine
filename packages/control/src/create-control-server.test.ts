@@ -870,7 +870,7 @@ describe('createControlServer agents API', () => {
       yield {
         scheduleId: 'agent:acme:nb',
         memo: { project: 'acme', agentName: 'nb', workflowType: 'whiteboxBugHunt' },
-        schedule: { spec: { cron: { cronString: '0 2 * * *' } } },
+        schedule: { spec: { cronExpressions: ['0 2 * * *'] } },
         info: { paused: false },
       };
       yield { scheduleId: 'reconcile:all' };

@@ -4,17 +4,54 @@ import { scheduleId } from '@agentops/policies';
 import { ENGINE_QUEUE } from '@agentops/contracts';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
+
+// The Temporal SDK ScheduleSpec expresses cron as `cronExpressions: string[]`
+// with a top-level `timezone` (the client maps it to the proto's cronString
+// internally). A `{ cron: { cronString } }` shape is NOT part of the public
+// ScheduleSpec — the client silently ignores it, producing a schedule with no
+// recurrence that never fires. Every create/update site MUST build its spec via
+// `cronScheduleSpec` so the shape is correct-by-construction and typed.
+export interface CronScheduleSpec {
+  cronExpressions: string[];
+  timezone: string;
+}
+export function cronScheduleSpec(cron: string, timezone = 'UTC'): CronScheduleSpec {
+  return { cronExpressions: [cron], timezone };
+}
+
+export interface ScheduleStartWorkflowAction {
+  type: 'startWorkflow';
+  workflowType: string;
+  args: unknown[];
+  taskQueue: string;
+  memo?: Record<string, unknown>;
+  searchAttributes?: Record<string, unknown[]>;
+}
+export interface ScheduleCreateOpts {
+  scheduleId: string;
+  spec: CronScheduleSpec;
+  action: ScheduleStartWorkflowAction;
+  memo?: Record<string, unknown>;
+  searchAttributes?: Record<string, unknown[]>;
+}
+export interface ScheduleUpdateOpts {
+  schedule: { spec: CronScheduleSpec; action: ScheduleStartWorkflowAction };
+  memo?: Record<string, unknown>;
+  searchAttributes?: Record<string, unknown[]>;
+}
+
 // Minimal surface we use from Temporal's ScheduleClient / ScheduleHandle.
-// This lets tests inject a vi.fn() mock without depending on the full SDK shape.
+// This lets tests inject a vi.fn() mock without depending on the full SDK shape,
+// while the create/update opts are typed so a malformed spec can't compile.
 export interface ScheduleHandleLike {
-  update?: (opts: any) => Promise<void>;
+  update?: (opts: ScheduleUpdateOpts) => Promise<void>;
   pause?: () => Promise<void>;
   unpause?: () => Promise<void>;
   delete?: () => Promise<void>;
 }
 
 export interface ScheduleClientLike {
-  create?: (opts: any) => Promise<ScheduleHandleLike>;
+  create?: (opts: ScheduleCreateOpts) => Promise<ScheduleHandleLike>;
   getHandle: (id: string) => ScheduleHandleLike;
   list?: () => AsyncIterable<any>;
 }
@@ -56,7 +93,7 @@ export async function listAgentSchedules(project: string, client?: ScheduleClien
       if (!id || !id.startsWith(`agent:${project}:`)) continue;
       // Best-effort extraction; real objects have more structure.
       const spec = (s as any)?.schedule?.spec;
-      const scheduleSpec = typeof spec === 'string' ? spec : (spec?.cron?.cronString ?? 'continuous');
+      const scheduleSpec = typeof spec === 'string' ? spec : (spec?.cronExpressions?.[0] ?? spec?.cron?.cronString ?? 'continuous');
       const workflow = (s as any)?.action?.type ?? 'whiteboxBugHunt';
       const taskQueue = (s as any)?.action?.taskQueue as string | undefined;
       // paused not directly on list item in all SDK versions; default false and rely on apply
@@ -85,7 +122,7 @@ export async function applyScheduleChanges(
     if (client.create) {
       await client.create({
         scheduleId: id,
-        spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } },
+        spec: cronScheduleSpec(spec.schedule, spec.timezone),
         action: {
           type: 'startWorkflow',
           workflowType: spec.workflow,
@@ -96,7 +133,7 @@ export async function applyScheduleChanges(
         },
         memo,
         searchAttributes,
-      } as any);
+      });
     }
   }
 
@@ -109,7 +146,7 @@ export async function applyScheduleChanges(
     const searchAttributes = { project: [project], agentName: [spec.name], workflowType: [spec.workflow] };
     await h.update?.({
       schedule: {
-        spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } },
+        spec: cronScheduleSpec(spec.schedule, spec.timezone),
         action: {
           type: 'startWorkflow',
           workflowType: spec.workflow,
@@ -121,7 +158,7 @@ export async function applyScheduleChanges(
       },
       memo,
       searchAttributes,
-    } as any);
+    });
   }
 
   for (const id of plan.toPause) {
