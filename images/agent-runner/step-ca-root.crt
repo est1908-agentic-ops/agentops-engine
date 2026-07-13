@@ -2,7 +2,8 @@
 PLACEHOLDER -- replace with the real step-ca root CA certificate
 once platform components (M2 sub-project 2, agentops-platform repo)
 issues one. See that sub-project's design doc for the export command.
-Building this image with this placeholder is expected to succeed;
-`update-ca-certificates` skips invalid entries with a warning, it
-does not fail the build.
+The build validates this file with openssl x509 and skips it because
+it is not a real certificate, so the system CA bundle is left unchanged.
+When a real step-ca root replaces this file in place, it is validated
+and trusted automatically with no Dockerfile change required.
 -----END CERTIFICATE-----
