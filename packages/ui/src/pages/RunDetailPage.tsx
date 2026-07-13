@@ -108,7 +108,7 @@ export function RunDetailPage() {
         <>
           <div className="mb-5">
             <Label className="mb-1 block">Summary</Label>
-            <div className="rounded-md border bg-card p-4 text-sm leading-relaxed [&>*:first-child]:mt-0 [&>*:last-child]:mb-0">
+            <div className="summary-text">
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
                 {run.result.summary}
               </ReactMarkdown>
