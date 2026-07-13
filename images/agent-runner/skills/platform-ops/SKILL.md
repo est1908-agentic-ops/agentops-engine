@@ -19,11 +19,18 @@ curl -s "https://<temporal-host>/api/v1/namespaces/<namespace>/workflows/<workfl
 curl -s "https://<temporal-host>/api/v1/namespaces/<namespace>/workflows/<workflowId>/history?historyEventFilterType=HISTORY_EVENT_FILTER_TYPE_ALL_EVENT"
 ```
 
-To list recent workflows (e.g. "the last workflow failures"):
+## Finding recent failures
+
+Before triaging, enumerate what actually failed. Query the Temporal **visibility** API for recently-closed workflows with a failed or terminated status, over a recent time window, using the same Temporal REST base URL and auth this skill already uses for history:
 
 ```
-curl -s "https://<temporal-host>/api/v1/namespaces/<namespace>/workflows?query=$(python3 -c "import urllib.parse; print(urllib.parse.quote('ExecutionStatus=\"Failed\" OR ExecutionStatus=\"Canceled\"'))")"
+# List workflows that Failed or were Terminated recently (adjust the window).
+curl -s "https://<temporal-host>/api/v1/namespaces/<namespace>/workflows" \
+  --data-urlencode 'query=ExecutionStatus="Failed" OR ExecutionStatus="Terminated"' \
+  -G | jq '.executions[] | {workflowId: .execution.workflowId, type: .type.name, status: .status, closeTime: .closeTime}'
 ```
+
+Filter the results to the window you care about (e.g. the last 30 minutes by `closeTime`). Note that a `devCycle` that ended **blocked** *completes* at the Temporal level rather than failing — those will not appear under `ExecutionStatus="Failed"`; a self-heal sweep focuses on Failed/Terminated first. For each failure worth acting on, then use the per-workflow history + Loki technique below to diagnose it.
 
 **Safe actions you may take directly** (see this task's prompt for the exact allow-list):
 terminate a workflow via `POST .../workflows/<workflowId>/terminate`, or send an existing
