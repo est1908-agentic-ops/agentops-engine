@@ -46,8 +46,8 @@ export interface ControlDeps {
   // with `projectCredentialPublicKey`; control holds ONLY the public key and
   // the store, so it can write credentials it cannot read (design §5). All
   // five routes are gated behind `projectCrudAuthToken` (a bearer token);
-  // with any of these three unset the routes return 503. Issue #4 (Traefik
-  // basic-auth) is still required before the control ingress goes public.
+  // with any of these three unset the routes return 503. The public control
+  // ingress is additionally protected by Traefik basic-auth at the edge (issue #4).
   managedProjectStore?: PostgresManagedProjectStore;
   // Tier table CRUD (SP3-B). Only needs ENGINE_DB_HOST; not credential-gated
   // like managed projects (tier edits are operational, not secret-bearing).
@@ -346,8 +346,8 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
     // PUT rewrites the whole fleet's model routing -- gate it behind the same
     // bearer token as /api/projects (GET stays open). Reuses projectCrudAuthToken
     // rather than introducing a second token: one operator secret governs all
-    // fleet-mutating writes. Issue #4 (Traefik basic-auth) is still required
-    // before the control ingress goes public.
+    // fleet-mutating writes. The public control ingress is additionally protected
+    // by Traefik basic-auth at the edge (issue #4).
     if (req.method === 'PUT') {
       if (!deps.tierStore || !authorizeProjectCrud(deps, req)) {
         return { status: 401, body: { error: 'unauthorized' } };

@@ -29,3 +29,11 @@ Serves `packages/ui`'s built static assets itself once
 `images/engine/Dockerfile`'s `control` target. Locally, run `packages/ui`'s
 own Vite dev server instead (see `packages/ui/README.md`), which proxies
 `/api/*` here.
+
+### Access control
+
+The public console (API + UI) is protected by Traefik HTTP basic-auth at the
+ingress edge (issue #4). The `Authorization` header is consumed by Traefik and
+never reaches the application. Mutating API routes (`POST`/`PUT` to `/api/projects`
+and `/api/tiers`) additionally require the `X-Control-Crud-Token` custom header as
+a second factor.

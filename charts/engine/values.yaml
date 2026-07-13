@@ -190,10 +190,13 @@ control:
     enabled: false
     host: ""
     clusterIssuer: letsencrypt
-    # Name of a Traefik basicAuth Middleware (CRD) deployed platform-side to
-    # guard the public control ingress. Empty => no middleware attached.
-    # agentops-platform sets this to control-basic-auth (issue #4).
-    basicAuthSecretName: ""
+    # Basic-auth protection for the public control ingress (GitHub issue #4).
+    # The Middleware CRD is rendered by this chart; the htpasswd Secret is
+    # created platform-side (agentops-platform external-secrets). Disabled by
+    # default => ingress stays open (no change to current behavior).
+    basicAuth:
+      enabled: false          # attach the basic-auth middleware to the control ingress
+      usersSecretName: ""     # name of an htpasswd k8s Secret (created by agentops-platform); required when enabled
   resources:
     requests:
       cpu: 100m
