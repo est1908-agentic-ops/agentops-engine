@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { Worker } from '@temporalio/worker';
-import type { ExecutePlatformActionRequest } from '@agentops/contracts';
+import type { AgentRunRequest, ExecutePlatformActionRequest } from '@agentops/contracts';
 import type { PlatformActivities } from './platform-activities-api';
 import { conversationQuery, decisionSignal, platformChat, userTurnSignal } from './platform-chat';
 
@@ -92,6 +92,49 @@ describe('platformChat', () => {
       expect(result.actionsExecuted).toHaveLength(1);
       expect(result.actionsExecuted[0].workflowId).toBe('wf-9');
     });
+  });
+
+  it('gives each turn a distinct runAgent `attempt` so K8sJobRunner cannot 409-reuse a stale Job/output across turns', async () => {
+    // taskId is the chatId, which is constant for the whole conversation (unlike
+    // the one-shot `platform` workflow's per-run taskId), so k8sJobName's
+    // `${taskId}-${stage}-${attempt}-${callIndex}` key only stays collision-free
+    // across turns if `attempt` varies per turn.
+    const attempts: number[] = [];
+    const outputs = ['CHAT_TURN: {"message":"turn one"}', 'CHAT_TURN: {"message":"turn two","done":true}'];
+    let i = 0;
+    const activities: PlatformActivities = {
+      async prepareScratchWorkspace() {
+        return { workspaceRef: 'ws-1' };
+      },
+      async cleanupScratchWorkspace() {},
+      async runAgent(req: AgentRunRequest) {
+        attempts.push(req.attempt);
+        const output = outputs[Math.min(i, outputs.length - 1)];
+        i += 1;
+        return { output, tokensIn: 1, tokensOut: 1, wallMs: 1, resolvedBackend: 'stub', resolvedModel: 'stub' } as never;
+      },
+      async recordRunStats() {},
+      async resolveRepoConfig() {
+        return { registered: false } as never;
+      },
+      async executePlatformAction(req: ExecutePlatformActionRequest) {
+        return { ok: true, detail: `did ${req.type}` };
+      },
+    } as unknown as PlatformActivities;
+
+    await withTestEnv(activities, async ({ env, taskQueue }) => {
+      const handle = await env.client.workflow.start(platformChat, {
+        taskQueue,
+        workflowId: 'chat-attempt-uniqueness',
+        args: [{ prompt: 'first' }],
+      });
+      await env.sleep('2 seconds');
+      await handle.signal(userTurnSignal, 'second');
+      await handle.result();
+    });
+
+    expect(attempts).toHaveLength(2);
+    expect(attempts[0]).not.toBe(attempts[1]);
   });
 
   it(
