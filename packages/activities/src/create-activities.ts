@@ -478,11 +478,17 @@ export function createActivities(deps: ActivityDependencies) {
       const client = deps.workflowClient;
       if (!client?.list) return [];
       const ids: string[] = [];
-      const prefix = `agent:${project}:`;
       try {
         for await (const wf of client.list(`ExecutionStatus="Running"`)) {
           const id = (wf as any).workflowId as string | undefined;
-          if (id && id.startsWith(prefix)) ids.push(id);
+          const agentName = (wf as any).searchAttributes?.agentName?.[0] as string | undefined;
+          // A Temporal Schedule fires workflows as `<scheduleId>-workflow-<timestamp>`,
+          // which shares the `agent:<project>:` id prefix with a genuine continuous
+          // singleton (started at the bare `agent:<project>:<name>` id, no suffix).
+          // Matching on prefix alone sweeps up an in-flight *scheduled* run and gets
+          // it terminated as an "orphaned continuous agent" -- require an exact match
+          // against the deterministic singleton id instead.
+          if (id && agentName && id === scheduleId(project, agentName)) ids.push(id);
         }
       } catch { /* best effort */ }
       return ids;
