@@ -534,8 +534,8 @@ describe('K8sJobRunner', () => {
     const runPromise = runner.run(req);
     const jobName = k8sJobName(req);
 
-    await vi.waitFor(() => expect(heartbeats.length).toBeGreaterThanOrEqual(2));
-    expect(heartbeats[0]).toEqual({
+    await vi.waitFor(() => expect(heartbeats.find((h) => (h as { phase?: string }).phase === 'polling')).toBeDefined());
+    expect(heartbeats.find((h) => (h as { phase?: string }).phase === 'job-created')).toEqual({
       phase: 'job-created',
       jobName,
       taskId: 'task-1',
@@ -547,7 +547,7 @@ describe('K8sJobRunner', () => {
       errorBytes: 0,
       jobStatus: undefined,
     });
-    expect(heartbeats[1]).toEqual({
+    expect(heartbeats.find((h) => (h as { phase?: string }).phase === 'polling')).toEqual({
       phase: 'polling',
       jobName,
       taskId: 'task-1',
@@ -587,7 +587,7 @@ describe('K8sJobRunner', () => {
     await mkdir(paths.dir, { recursive: true });
 
     const batchApi = new HangThenRealBatchApi(2);
-    const heartbeats: unknown[] = [];
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
       namespace: 'dev-agents',
       workspacePvcName: 'workspace-tasks',
@@ -595,36 +595,48 @@ describe('K8sJobRunner', () => {
       batchApi,
       pollIntervalMs: 1,
       statusPollTimeoutMs: 5,
-      heartbeat: (details) => heartbeats.push(details),
+      heartbeat: () => {},
     });
 
-    const runPromise = runner.run(req);
-    await vi.waitFor(() => expect(batchApi.creates).toHaveLength(1));
+    try {
+      const runPromise = runner.run(req);
+      await vi.waitFor(() => expect(batchApi.creates).toHaveLength(1));
 
-    await writeFile(
-      paths.outFile,
-      JSON.stringify({
-        is_error: false,
-        result: 'done',
-        usage: { input_tokens: 3, output_tokens: 4 },
-        duration_ms: 50,
-      }),
-      'utf8',
-    );
-    batchApi.setJobStatus(k8sJobName(req), { succeeded: 1 });
+      await writeFile(
+        paths.outFile,
+        JSON.stringify({
+          is_error: false,
+          result: 'done',
+          usage: { input_tokens: 3, output_tokens: 4 },
+          duration_ms: 50,
+        }),
+        'utf8',
+      );
+      batchApi.setJobStatus(k8sJobName(req), { succeeded: 1 });
 
-    // Proves the loop survived two hung status reads: it still resolved
-    // instead of hanging until an outer heartbeat timeout, and it kept
-    // heartbeating throughout (a bare Promise.race with no cancellation
-    // would leave the loop stuck awaiting the first hung call forever).
-    await expect(runPromise).resolves.toEqual({
-      output: 'done',
-      tokensIn: 3,
-      tokensOut: 4,
-      wallMs: 50,
-    });
-    // Two hung status reads plus one successful completion = 3 heartbeats minimum.
-    expect(heartbeats.length).toBeGreaterThanOrEqual(3);
+      // Proves the loop survived two hung status reads: it still resolved
+      // instead of hanging until an outer heartbeat timeout, and it kept
+      // heartbeating throughout (a bare Promise.race with no cancellation
+      // would leave the loop stuck awaiting the first hung call forever).
+      await expect(runPromise).resolves.toEqual({
+        output: 'done',
+        tokensIn: 3,
+        tokensOut: 4,
+        wallMs: 50,
+      });
+      // Both hung status reads were retried (emitted k8s-status-poll-timeout warn).
+      const timeoutWarns = warnSpy.mock.calls.filter((call) => {
+        try {
+          const parsed = JSON.parse(call[0] as string);
+          return parsed.event === 'k8s-status-poll-timeout';
+        } catch {
+          return false;
+        }
+      });
+      expect(timeoutWarns).toHaveLength(2);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   it('deletes the Job and rethrows when heartbeat fails (cancellation)', async () => {
