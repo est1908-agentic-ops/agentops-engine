@@ -63,10 +63,27 @@ No changes were needed in `packages/backends/src/k8s/k8s-job-runner.ts` — the 
 path was already correct and remains the fallback for the rare case where a pod is forced out
 even after the full grace period.
 
+`gateway`/`control` were checked and are unaffected either way: neither installs a
+`process.on('SIGTERM', ...)` handler, and a live test (a bare HTTP server with no handler, under
+both `pnpm run start` and `pnpm exec node`) showed the container dies in ~150ms under **both** —
+`pnpm run`'s signal-swallowing doesn't buy them a 30s "ride it out" window, it just fails fast
+with a different error message. So this fix doesn't change their observed shutdown behavior.
+
 ## How to verify after deploy
 
 - `kubectl -n dev-agents get deploy engine-worker -o jsonpath='{.spec.template.spec.terminationGracePeriodSeconds}{"\n"}'`
   → `2700`.
+- A worker pod lingering in `Terminating` for up to 45 minutes after a rollout is **expected**
+  behavior now, not stuck — force-deleting it just reintroduces the abrupt-kill cost this fix
+  removes. Only investigate if it's still there well past 45m from when it started `Terminating`.
+- **Not yet live-verified**: the worker's `workspace-tasks`/`workspace-cache` PVCs are
+  `ReadWriteOnce` on `local-path` storage. A rollout now has up to a 45m window where the old pod
+  (draining) and the new pod (starting) could both want those volumes mounted. `local-path`
+  pins a PV to the node it was provisioned on, so the new pod should schedule onto that same
+  node and RWO should permit both pods on one node — but this hasn't been confirmed with a real
+  rollout. First time this fix ships, trigger a rollout with a `runAgent` activity genuinely in
+  flight and confirm the *new* pod reaches `Ready` promptly rather than blocking in
+  `ContainerCreating` on a volume attach.
 - Trigger a rollout (`kubectl -n dev-agents rollout restart deploy/engine-worker`) while a
   `runAgent` activity is in flight (check `describe` on an active `devCycle` workflow for a
   `pendingActivities` entry with `activityType.name: "runAgent"`). Watch the outgoing pod's logs

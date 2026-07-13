@@ -81,6 +81,9 @@ USER 1000
 # `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL ... Command failed with signal
 # "SIGTERM"` on the pod a rollout had just evicted; confirmed with a minimal
 # repro that `pnpm run <script>` eats SIGTERM but `pnpm exec <bin>` doesn't.
+# Caveat: `pnpm run` sets npm_lifecycle_event/npm_package_name-style env vars
+# that `pnpm exec` does not -- nothing here reads them today, but code added
+# later that depends on them would need to source it another way.
 CMD ["pnpm", "--filter", "@agentops/worker", "exec", "tsx", "src/main.ts"]
 
 FROM base AS gateway
