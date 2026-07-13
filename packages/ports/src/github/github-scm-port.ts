@@ -111,6 +111,7 @@ export class GithubScmPort implements ScmPort {
         base: repoData.default_branch,
         title: req.title,
         body: req.body,
+        ...(req.labels && { labels: req.labels }),
       });
       return { prRef: `${owner}/${repo}#${prData.number}`, url: prData.html_url };
     } catch (err) {

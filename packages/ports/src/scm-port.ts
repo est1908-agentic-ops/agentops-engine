@@ -5,6 +5,7 @@ export interface OpenPrRequest {
   branch: string;
   title: string;
   body: string;
+  labels?: string[];
 }
 
 export interface OpenPrResult {

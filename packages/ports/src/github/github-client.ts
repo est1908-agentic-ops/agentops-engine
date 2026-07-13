@@ -21,6 +21,7 @@ export interface GithubClient {
         base: string;
         title: string;
         body: string;
+        labels?: string[];
       }): Promise<{ data: { number: number; html_url: string } }>;
       get(params: { owner: string; repo: string; pull_number: number }): Promise<{ data: { head: { sha: string } } }>;
       list(params: {

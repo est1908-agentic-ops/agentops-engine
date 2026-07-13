@@ -161,9 +161,11 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
   };
 
   let issueBody = '';
+  let issueLabels: string[] = [];
   if (input.issueRef) {
     const issue = await activities.getIssue(input.issueRef);
     issueBody = issue.body;
+    issueLabels = issue.labels;
     await activities.labelIssue(input.issueRef, 'agent:working');
   }
 
@@ -372,6 +374,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
       branch: state.branch,
       title: input.goal,
       body: prBody,
+      labels: issueLabels.length > 0 ? issueLabels : undefined,
     });
     state.prRef = prRef;
     await dropAgentWorking();

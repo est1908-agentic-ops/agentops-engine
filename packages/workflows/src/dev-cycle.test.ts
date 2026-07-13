@@ -94,4 +94,38 @@ describe('devCycle agent:working label lifecycle', () => {
     expect(labelIssue).toHaveBeenCalledWith('o/r#5', 'agent:working');
     expect(unlabelIssue).toHaveBeenCalledWith('o/r#5', 'agent:working');
   });
+
+  it('passes issue labels to openPr', async () => {
+    vi.mocked(getIssue).mockResolvedValueOnce({ ref: 'o/r#5', title: 'fix', body: '', labels: ['agentops', 'bug'] });
+    await devCycle({
+      taskId: 't',
+      project: 'p',
+      repo: 'o/r',
+      issueRef: 'o/r#5',
+      goal: 'fix',
+      config,
+    });
+    expect(openPr).toHaveBeenCalledWith(
+      expect.objectContaining({
+        labels: ['agentops', 'bug'],
+      }),
+    );
+  });
+
+  it('does not pass labels to openPr when issue has no labels', async () => {
+    vi.mocked(getIssue).mockResolvedValueOnce({ ref: 'o/r#5', title: 'fix', body: '', labels: [] });
+    await devCycle({
+      taskId: 't',
+      project: 'p',
+      repo: 'o/r',
+      issueRef: 'o/r#5',
+      goal: 'fix',
+      config,
+    });
+    expect(openPr).toHaveBeenCalledWith(
+      expect.objectContaining({
+        labels: undefined,
+      }),
+    );
+  });
 });
