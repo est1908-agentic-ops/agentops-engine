@@ -76,7 +76,7 @@ export function DevCycleRunDetailPage() {
 
   return (
     <PageShell>
-      <a href="/" className="text-sm text-muted-foreground">
+      <a href="/dashboard" className="text-sm text-muted-foreground">
         ← Back
       </a>
       <div className="mb-6 mt-3 flex items-center gap-3">
