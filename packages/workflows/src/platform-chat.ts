@@ -19,7 +19,7 @@ import type {
   TaskInput,
 } from '@agentops/contracts';
 import { PlatformChatResultSchema } from '@agentops/contracts';
-import { parseChatTurn, renderChatTranscript } from '@agentops/policies';
+import { parseChatTurn, renderChatTranscript, slugifyProject } from '@agentops/policies';
 import { devCycle } from './dev-cycle';
 import type { PlatformActivities } from './platform-activities-api';
 
@@ -121,7 +121,11 @@ export async function platformChat(
         if (!resolved.registered) {
           push('system', `cannot fix "${proposal.repo}": no project registered for that repo`, 'error');
         } else {
-          const childTaskId = `${chatId}-fix-${childWorkflows.length + 1}`;
+          // Same slug-vs-readable split as platform.ts: keep chatId-derived workflowId
+          // (which may contain special chars) for Temporal visibility, slug only the
+          // taskId used for git branch and agent task identity.
+          const childWorkflowId = `${chatId}-fix-${childWorkflows.length + 1}`;
+          const childTaskId = `${slugifyProject(chatId)}-fix-${childWorkflows.length + 1}`;
           const taskInput: TaskInput = {
             taskId: childTaskId,
             project: resolved.project,
@@ -129,9 +133,9 @@ export async function platformChat(
             goal: proposal.goal ?? proposal.reason,
             config: resolved.config,
           };
-          await executeChild(devCycle, { workflowId: childTaskId, args: [taskInput] });
-          childWorkflows.push({ workflowId: childTaskId, repo: proposal.repo!, goal: taskInput.goal });
-          push('system', `Started fix devCycle ${childTaskId} for ${proposal.repo}`, 'action-result');
+          await executeChild(devCycle, { workflowId: childWorkflowId, args: [taskInput] });
+          childWorkflows.push({ workflowId: childWorkflowId, repo: proposal.repo!, goal: taskInput.goal });
+          push('system', `Started fix devCycle ${childWorkflowId} for ${proposal.repo}`, 'action-result');
         }
       } else {
         const res = await activities.executePlatformAction({
