@@ -364,8 +364,8 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     state.stage = 'pr';
     const findingsSummary = `full_verify: ${fullVerifyVerdict}; review: ${reviewVerdict ?? 'not-run'}`;
     const prBody = exhausted
-      ? `Repair attempts exhausted after ${state.implementAttempts} implement attempt(s). Opening PR with outstanding findings.\n${findingsSummary}`
-      : `Automated PR for task ${input.taskId}.`;
+      ? `Repair attempts exhausted after ${state.implementAttempts} implement attempt(s). Opening PR with outstanding findings.\n\n**Findings:** ${findingsSummary}\n**Iterations:** ${state.iterations}\n**Tokens Used:** ${state.cumulativeTokens}\n**Task ID:** ${input.taskId}`
+      : `Automated PR for task ${input.taskId}.\n\n**Summary:**\n- Iterations: ${state.iterations}\n- Implementation Attempts: ${state.implementAttempts}\n- Tokens Used: ${state.cumulativeTokens}\n- Status: ${findingsSummary}`;
     await activities.pushBranch(input.repo, state.workspaceRef, state.branch, `${input.taskId}-${implementAttempt}`);
     const { prRef } = await activities.openPr({
       repo: input.repo,
