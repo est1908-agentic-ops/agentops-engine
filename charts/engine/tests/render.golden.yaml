@@ -194,6 +194,10 @@ spec:
               value: "localhost:7233"
             - name: TEMPORAL_NAMESPACE
               value: "dev-agents"
+            - name: SELF_HEAL_ENABLED
+              value: "true"
+            - name: SELF_HEAL_CRON
+              value: "*/30 * * * *"
             - name: AGENT_NAMESPACE
               value: "dev-agents"
             - name: WORKSPACE_PVC_NAME

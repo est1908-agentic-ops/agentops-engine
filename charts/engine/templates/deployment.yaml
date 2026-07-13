@@ -29,6 +29,10 @@ spec:
               value: {{ .Values.temporalAddress | quote }}
             - name: TEMPORAL_NAMESPACE
               value: {{ .Values.temporal.namespace | quote }}
+            - name: SELF_HEAL_ENABLED
+              value: {{ .Values.selfHeal.enabled | quote }}
+            - name: SELF_HEAL_CRON
+              value: {{ .Values.selfHeal.cron | quote }}
             - name: AGENT_NAMESPACE
               value: {{ .Values.namespace | quote }}
             - name: WORKSPACE_PVC_NAME

@@ -55,6 +55,7 @@ import { DEFAULT_TIERS } from '@agentops/policies';
 import type { DevCycleActivities, PlatformActivities } from '@agentops/workflows';
 import { createWorker } from './create-worker';
 import { ensureReconcileSchedule, type ScheduleClientLike } from './ensure-reconcile-schedule';
+import { ensureSelfHealSchedule, type SelfHealScheduleClient } from './ensure-self-heal-schedule';
 import { ensureSearchAttributes, type OperatorConnectionLike } from './ensure-search-attributes';
 import { setupTracing } from './tracing';
 
@@ -464,6 +465,15 @@ async function main(): Promise<void> {
       console.log('agentops worker: reconcile:all periodic schedule ensured');
     } catch (err) {
       console.warn('agentops worker: failed to ensure reconcile:all schedule', err);
+    }
+    try {
+      await ensureSelfHealSchedule(tc.schedule as unknown as SelfHealScheduleClient, ENGINE_QUEUE, {
+        enabled: process.env.SELF_HEAL_ENABLED !== 'false',
+        cron: process.env.SELF_HEAL_CRON ?? '*/30 * * * *',
+      });
+      console.log('agentops worker: self-heal schedule ensured');
+    } catch (err) {
+      console.warn('agentops worker: failed to ensure self-heal schedule', err);
     }
   } catch {
     // In test or no Temporal, schedule ops will no-op or be injected by tests.
