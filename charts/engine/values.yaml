@@ -14,6 +14,11 @@ imagePullSecretName: registry-credentials
 
 replicas: 1
 
+# See charts/engine/templates/deployment.yaml's terminationGracePeriodSeconds
+# comment -- 2700s (45m) matches the longest runAgent startToCloseTimeout any
+# workflow proxies (whitebox-bughunt.ts).
+terminationGracePeriodSeconds: 2700
+
 temporalAddress: "localhost:7233"
 
 # Empty by default -- same "chart ships no cluster assumption" pattern as

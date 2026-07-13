@@ -71,11 +71,24 @@ COPY --chown=1000:1000 . .
 # against a named image user without a matching explicit runAsUser in the
 # pod spec (see charts/engine's podSecurityContext/containerSecurityContext).
 USER 1000
-CMD ["pnpm", "--filter", "@agentops/worker", "run", "start"]
+# `pnpm run start` (a "run script" invocation) does not forward SIGTERM to
+# the tsx/node process it spawns -- pnpm swallows the signal and reports its
+# own lifecycle failure instead, so the child never sees it. `pnpm exec`
+# execs the target directly without that wrapper, so SIGTERM reaches
+# Worker.run()'s built-in handler and it can drain gracefully instead of the
+# pod being SIGKILLed mid runAgent activity. See issue devcycle:...:12
+# (2026-07-13): two runAgent retries in one workflow both traced via Loki to
+# `ERR_PNPM_RECURSIVE_RUN_FIRST_FAIL ... Command failed with signal
+# "SIGTERM"` on the pod a rollout had just evicted; confirmed with a minimal
+# repro that `pnpm run <script>` eats SIGTERM but `pnpm exec <bin>` doesn't.
+# Caveat: `pnpm run` sets npm_lifecycle_event/npm_package_name-style env vars
+# that `pnpm exec` does not -- nothing here reads them today, but code added
+# later that depends on them would need to source it another way.
+CMD ["pnpm", "--filter", "@agentops/worker", "exec", "tsx", "src/main.ts"]
 
 FROM base AS gateway
 USER 1000
-CMD ["pnpm", "--filter", "@agentops/gateway", "run", "start"]
+CMD ["pnpm", "--filter", "@agentops/gateway", "exec", "tsx", "src/main.ts"]
 
 FROM base AS control
 # Build as uid 1000, not root: /app is already fully owned by node:node
@@ -83,4 +96,4 @@ FROM base AS control
 # need for another whole-tree `chown -R` after this writes new files.
 USER 1000
 RUN pnpm --filter @agentops/ui run build
-CMD ["pnpm", "--filter", "@agentops/control", "run", "start"]
+CMD ["pnpm", "--filter", "@agentops/control", "exec", "tsx", "src/main.ts"]
