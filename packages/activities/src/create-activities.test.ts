@@ -851,6 +851,43 @@ describe('createActivities — resolveRepoConfig', () => {
     expect(opts.searchAttributes).toMatchObject({ project: ['acme'] });
     expect(opts.args[0]).toMatchObject({ repo: 'acme/web', project: 'acme' });
   });
+
+  it('listContinuousAgents excludes an in-flight scheduled run sharing the same id prefix', async () => {
+    // A Temporal Schedule fires workflows as `<scheduleId>-workflow-<timestamp>`,
+    // which shares the `agent:<project>:` prefix with a genuine continuous
+    // singleton (started at the bare `agent:<project>:<name>` id). Only the
+    // bare id is a true singleton -- a scheduled agent mid-run must not be
+    // swept up and terminated as an "orphaned continuous agent".
+    const singleton = { workflowId: 'agent:acme:mon', searchAttributes: { agentName: ['mon'] } };
+    const scheduledRun = {
+      workflowId: 'agent:acme:nightly-workflow-2026-07-13T19:09:49Z',
+      searchAttributes: { agentName: ['nightly'] },
+    };
+    const deps = {
+      ...buildDeps(),
+      workflowClient: {
+        list: async function* () {
+          yield singleton;
+          yield scheduledRun;
+        },
+      } as any,
+      registry: [],
+    } as any;
+    const activities = createActivities(deps);
+    expect(await activities.listContinuousAgents('acme')).toEqual(['agent:acme:mon']);
+  });
+
+  it('terminateContinuousAgent terminates the handle with the manifest-removed reason', async () => {
+    const terminate = vi.fn().mockResolvedValue(undefined);
+    const deps = {
+      ...buildDeps(),
+      workflowClient: { getHandle: () => ({ terminate }) } as any,
+      registry: [],
+    } as any;
+    const activities = createActivities(deps);
+    await activities.terminateContinuousAgent('agent:acme:mon');
+    expect(terminate).toHaveBeenCalledWith('agent removed from manifest');
+  });
 });
 
 describe('createActivities — scratch workspace lifecycle', () => {
