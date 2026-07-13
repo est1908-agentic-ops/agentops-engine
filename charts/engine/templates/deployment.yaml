@@ -13,6 +13,15 @@ spec:
       labels:
         app: {{ .Release.Name }}-worker
     spec:
+      # Must cover the longest startToCloseTimeout any workflow gives runAgent
+      # (45m, whitebox-bughunt.ts) -- otherwise k8s SIGKILLs this pod on a
+      # rollout before Worker.run()'s graceful SIGTERM drain (stop polling,
+      # let in-flight activities finish) can complete, forcing a spurious
+      # Temporal heartbeat-timeout retry. Only effective together with the
+      # `pnpm exec` CMD in images/engine/Dockerfile, which is what lets
+      # SIGTERM reach that handler in the first place (plain `pnpm run start`
+      # swallows it).
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds }}
       serviceAccountName: {{ .Release.Name }}-worker
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
