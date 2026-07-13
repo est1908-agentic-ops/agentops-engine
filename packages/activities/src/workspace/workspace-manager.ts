@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import type { GitCommandRunner } from '@agentops/ports';
+import { slugifyProject } from '@agentops/policies';
 import { SpawnCommandRunner, type CommandRunner } from './spawn-command-runner';
 
 export interface WorkspaceManagerOptions {
@@ -71,8 +72,14 @@ export class WorkspaceManager implements Workspaces {
     const cachePath = join(this.cacheDir, sanitizeRepoSlug(repo));
     await this.ensureBaseClone(git, cachePath, repo);
     const baseBranch = await this.detectDefaultBranch(git, cachePath);
-    const branch = `agentops/${taskId}`;
-    const workspacePath = join(this.workspacesDir, taskId);
+    // taskId may arrive from schedule-derived workflowIds containing `:` etc.
+    // Always derive a git-branch-safe suffix (and matching workspace dir) here
+    // so `prepareWorkspace` never emits an invalid `agentops/<taskId>` branch.
+    // Legitimate callers already pass slug-safe taskIds (see slugifyProject usages
+    // in gateway, whitebox-bughunt, platform child creation); this is belt-and-suspenders.
+    const safeId = slugifyProject(taskId);
+    const branch = `agentops/${safeId}`;
+    const workspacePath = join(this.workspacesDir, safeId);
 
     await this.reclaimStaleWorktree(git, cachePath, workspacePath, branch);
 
@@ -192,9 +199,12 @@ export class WorkspaceManager implements Workspaces {
       if (!match) {
         return undefined;
       }
-      const prefix = this.cacheDir.endsWith('/') ? this.cacheDir : `${this.cacheDir}/`;
       const gitdir = match[1].trim();
-      return gitdir.startsWith(prefix) ? gitdir.slice(prefix.length).split('/')[0] || undefined : undefined;
+      // Extract the repo slug (the dir directly under cache) by structure rather than
+      // fragile string prefix match. This is robust to macOS /var -> /private/var
+      // symlink canonicalization differences between Node's mkdtemp and what git records.
+      const m = gitdir.match(/\/([^/]+)\/\.git\/worktrees\//);
+      return m ? m[1] : undefined;
     } catch {
       return undefined;
     }

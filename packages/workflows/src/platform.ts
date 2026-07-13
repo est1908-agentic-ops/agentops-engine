@@ -1,7 +1,7 @@
 import { executeChild, proxyActivities, workflowInfo } from '@temporalio/workflow';
 import type { PlatformAgentInput, PlatformAgentResult, TaskInput } from '@agentops/contracts';
 import { DEFAULT_IDLE_TIMEOUT_MS, PlatformAgentResultSchema } from '@agentops/contracts';
-import { parsePlatformResult } from '@agentops/policies';
+import { parsePlatformResult, slugifyProject } from '@agentops/policies';
 import { devCycle } from './dev-cycle';
 import type { PlatformActivities } from './platform-activities-api';
 
@@ -90,7 +90,14 @@ export async function platform(input: PlatformAgentInput): Promise<PlatformAgent
       skippedFixes.push({ ...fix, reason: `no project registered for repo "${fix.repo}"` });
       continue;
     }
-    const childTaskId = `${taskId}-fix-${index + 1}`;
+    // taskId for the devCycle (and thus the git branch `agentops/<taskId>`) must be
+    // git-ref-safe. Scheduled self-heal/platform workflowIds contain `:` from the
+    // ISO timestamp (e.g. self-heal-...T17:30:00Z-...), which is valid for Temporal
+    // workflowIds but produces "not a valid branch name" in git worktree add.
+    // Keep a readable workflowId (with original casing/time) for UI/traceability;
+    // use the slugified form only for the TaskInput.taskId.
+    const childWorkflowId = `${taskId}-fix-${index + 1}`;
+    const childTaskId = `${slugifyProject(taskId)}-fix-${index + 1}`;
     const taskInput: TaskInput = {
       taskId: childTaskId,
       project: resolved.project,
@@ -98,8 +105,8 @@ export async function platform(input: PlatformAgentInput): Promise<PlatformAgent
       goal: fix.goal,
       config: resolved.config,
     };
-    await executeChild(devCycle, { workflowId: childTaskId, args: [taskInput] });
-    childWorkflows.push({ workflowId: childTaskId, repo: fix.repo, goal: fix.goal });
+    await executeChild(devCycle, { workflowId: childWorkflowId, args: [taskInput] });
+    childWorkflows.push({ workflowId: childWorkflowId, repo: fix.repo, goal: fix.goal });
   }
 
   return PlatformAgentResultSchema.parse({
