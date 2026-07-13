@@ -15,14 +15,16 @@ This spec covers migrating the **entire app** — six routed pages (Home/Console
 
 ## 2. Foundation
 
-- Run `shadcn init` inside `packages/ui` (not at the monorepo root — no sibling package needs these primitives; `agentops-platform` is a separate repo/workspace so a shared local package wouldn't help it anyway). Adds:
-  - Tailwind (v4, via `@tailwindcss/vite`) wired into `vite.config.ts`.
-  - `components.json` — style **new-york**, base color **slate** (matches the mockup's cool-gray neutrals and tighter card density).
-  - `src/lib/utils.ts` (`cn()` helper).
-  - `@/*` path alias added to `packages/ui/tsconfig.json` (`paths`) and `vite.config.ts` (`resolve.alias`) — scoped to this package only.
-- Theme: override the generated `--primary` CSS variable to the app's existing blue (`#2563eb`, today's `.run-button`/link color and the mockup's Save button / primary-tier badge color), so the migration doesn't shift brand color.
-- Icons: `lucide-react` (shadcn's default) replaces today's raw glyph characters (`↑ ↓ ✕ ✓ —`).
-- Primitives added via `shadcn add`: `button`, `card`, `input`, `select`, `table`, `badge`, `label`, `textarea`, `dialog`, `alert-dialog`, `sonner` (toast).
+- The installed `shadcn` CLI (v4-line) uses a **named-preset** system, not the classic style/base-color prompt — confirmed by an actual trial run (`npx shadcn@latest init -t vite -b radix -p nova -c packages/ui -y`) against a scratch copy of this package. Manual prerequisites (Tailwind + path alias) must exist *before* `init` runs, or it fails with "No Tailwind CSS configuration found":
+  1. `pnpm --filter @agentops/ui add tailwindcss @tailwindcss/vite` and `pnpm --filter @agentops/ui add -D @types/node`.
+  2. `src/index.css`: `@import "tailwindcss";`.
+  3. `vite.config.ts`: add the `tailwindcss()` plugin and `resolve.alias['@']`.
+  4. `packages/ui/tsconfig.json`: add `"paths": { "@/*": ["./src/*"] }` to `compilerOptions` — **no `baseUrl`**. This repo pins `typescript@^6.0.3`, which has removed `baseUrl` entirely (`error TS5102: Option 'baseUrl' has been removed`, confirmed in the trial); bare `paths` resolves correctly under `moduleResolution: "Bundler"` without it.
+  5. Then `npx shadcn@latest init -t vite -b radix -p nova -c packages/ui -y` — preset **`nova`** (Lucide icons + Geist font; the CLI's own default) is the closest match to the mockup's clean, professional dashboard look. This writes `packages/ui/components.json` (`"style": "radix-nova"`, `"baseColor": "neutral"`, `"iconLibrary": "lucide"`), creates `src/lib/utils.ts` (`cn()`), `src/components/ui/button.tsx`, and rewrites `src/index.css` with the full CSS-variable theme (adds `@import "tw-animate-css"`, `@import "shadcn/tailwind.css"`, `@import "@fontsource-variable/geist"`, a `:root`/`.dark` oklch variable block, and `@theme inline` mappings).
+  - **New dependencies this adds** (confirmed from the trial's `package.json` diff): `class-variance-authority`, `clsx`, `tailwind-merge`, `lucide-react`, `radix-ui`, `tw-animate-css`, `@fontsource-variable/geist`, `shadcn` (runtime helper the preset's generated CSS imports from), plus dev deps `tailwindcss`, `@tailwindcss/vite`, `@types/node`.
+  - Primitives added via `npx shadcn@latest add button card input select table badge label textarea dialog alert-dialog checkbox sonner -c packages/ui -y` (button already exists from init; the CLI skips re-writing identical files). `sonner` additionally pulls in `sonner` and `next-themes` (its generated `src/components/ui/sonner.tsx` calls `next-themes`'s `useTheme()`; with no `ThemeProvider` mounted — this pass is light-only, §1 — it falls back to its `"system"` default, which is harmless since `.dark` is never applied).
+- Theme override: in `src/index.css`, change `:root`'s `--primary` and `--primary-foreground` from the generated near-black (`oklch(0.205 0 0)` / `oklch(0.985 0 0)`) to the app's existing blue — `--primary: #2563eb; --primary-foreground: #ffffff;` (a plain hex value works identically to `oklch(...)` here; it's substituted as-is into `var(--primary)` wherever Tailwind's generated utilities reference it, confirmed via the trial's generated `button.tsx` which consumes `bg-primary`/`text-primary-foreground`). The `.dark` block's own `--primary` is left as generated (unused — no toggle wires up `.dark` in this pass, §1).
+- Icons: `lucide-react` (already pulled in by the preset) replaces today's raw glyph characters (`↑ ↓ ✕ ✓ —`).
 - `src/styles.css` and `src/chat.css` are deleted; their rules are superseded by Tailwind utilities + the generated theme. The one exception is `.summary-text` (the `react-markdown` output styling in `ChatPage`/`RunDetailPage`) — since that targets dynamically-rendered HTML from markdown, not componentized JSX, it's ported as a scoped Tailwind `@layer components` block (same selectors, Tailwind-equivalent values) rather than removed.
 
 ## 3. App shell (`App.tsx`)
