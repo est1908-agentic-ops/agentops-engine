@@ -1,9 +1,9 @@
 import type { Client } from '@temporalio/client';
 import { WorkflowExecutionAlreadyStartedError, WorkflowIdReusePolicy } from '@temporalio/client';
 import type { ProjectConfig } from '@agentops/contracts';
+import { slugifyProject } from '@agentops/policies';
 import { devCycle } from '@agentops/workflows';
 import type { IssueLabeledEvent } from './parse-issue-labeled';
-import { slugifyProject } from './slug';
 
 export interface StartDevCycleResult {
   taskId: string;

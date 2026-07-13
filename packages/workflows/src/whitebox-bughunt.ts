@@ -1,12 +1,20 @@
 import { proxyActivities, workflowInfo } from '@temporalio/workflow';
-import { findingFingerprint, parseFindings } from '@agentops/policies';
+import { findingFingerprint, parseFindings, slugifyProject } from '@agentops/policies';
 import type { DevCycleActivities } from './activities-api';
 
 const activities = proxyActivities<DevCycleActivities>({ startToCloseTimeout: '10 minutes', retry: { maximumAttempts: 5 } });
 const agentActivities = proxyActivities<Pick<DevCycleActivities, 'runAgent'>>({ startToCloseTimeout: '45 minutes', heartbeatTimeout: '15s', retry: { maximumAttempts: 5 } });
 
 export async function whiteboxBugHunt(input: { repo: string; focus?: string }): Promise<{ filed: number; deduped: number }> {
-  const taskId = workflowInfo().workflowId;
+  // workflowId is schedule-derived (`agent:<project>:<name>-workflow-<ts>`,
+  // see scheduleId in @agentops/policies/reconcile-agents) and keeps the raw,
+  // unslugified project name -- fine for Temporal, but taskId doubles as a git
+  // branch (`agentops/<taskId>`) and workspace dir, so it must be slugified
+  // the same way startDevCycleForIssue's taskId is. See est1908/agents
+  // bughunt-test-workflow-2026-07-13T12:00:00Z: prepareWorkspace failed
+  // ("not a valid branch name") because the raw workflowId contains `:` and
+  // spaces from the project name "Artem private agents".
+  const taskId = slugifyProject(workflowInfo().workflowId);
   const workflowType = workflowInfo().workflowType;
   const { project, config } = await activities.resolveRepoConfig(input.repo);
   const ws = await activities.prepareWorkspace({ taskId, repo: input.repo });
