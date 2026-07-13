@@ -11,7 +11,7 @@ import {
   CreateManagedProjectRequestSchema,
   UpdateManagedProjectRequestSchema,
 } from '@agentops/contracts';
-import type { PostgresManagedProjectStore } from '@agentops/activities';
+import type { PostgresManagedProjectStore, PostgresTierStore } from '@agentops/activities';
 import { platform } from '@agentops/workflows';
 import { listRunsByType, memoPrompt, readJsonBody, type HandlerResponse } from './handler-util';
 import {
@@ -29,6 +29,7 @@ import {
   handleSendTurn,
   handleStartChat,
 } from './chat-routes';
+import { handleListTiers, handleReplaceTiers } from './tiers-routes';
 import { matchPath } from './route';
 import { resolveStaticFile } from './serve-static';
 
@@ -45,6 +46,9 @@ export interface ControlDeps {
   // with any of these three unset the routes return 503. Issue #4 (Traefik
   // basic-auth) is still required before the control ingress goes public.
   managedProjectStore?: PostgresManagedProjectStore;
+  // Tier table CRUD (SP3-B). Only needs ENGINE_DB_HOST; not credential-gated
+  // like managed projects (tier edits are operational, not secret-bearing).
+  tierStore?: PostgresTierStore;
   projectCredentialPublicKey?: string;
   projectCrudAuthToken?: string;
 }
@@ -313,6 +317,22 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
     const chatMatch = matchPath('/api/platform/chats/:chatId', pathname);
     if (req.method === 'GET' && chatMatch) {
       return handleGetChat(deps, chatMatch.params.chatId);
+    }
+  }
+  if (pathname === '/api/tiers') {
+    if (req.method === 'GET') {
+      return handleListTiers(deps);
+    }
+    // PUT rewrites the whole fleet's model routing -- gate it behind the same
+    // bearer token as /api/projects (GET stays open). Reuses projectCrudAuthToken
+    // rather than introducing a second token: one operator secret governs all
+    // fleet-mutating writes. Issue #4 (Traefik basic-auth) is still required
+    // before the control ingress goes public.
+    if (req.method === 'PUT') {
+      if (!deps.tierStore || !authorizeProjectCrud(deps, req)) {
+        return { status: 401, body: { error: 'unauthorized' } };
+      }
+      return handleReplaceTiers(deps, req);
     }
   }
   if (pathname === '/api/projects' || pathname.startsWith('/api/projects/')) {

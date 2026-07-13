@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client, Connection } from '@temporalio/client';
-import { loadEnv, PostgresManagedProjectStore } from '@agentops/activities';
+import { loadEnv, PostgresManagedProjectStore, PostgresTierStore } from '@agentops/activities';
 import { Pool } from 'pg';
 import { createControlServer } from './create-control-server';
 
@@ -24,6 +24,23 @@ function buildManagedProjectStore(): PostgresManagedProjectStore | undefined {
   );
 }
 
+// Tiers table (SP3-B). Only needs ENGINE_DB_HOST (no credential key).
+function buildTierStore(): PostgresTierStore | undefined {
+  const host = process.env.ENGINE_DB_HOST;
+  if (!host) {
+    return undefined;
+  }
+  return new PostgresTierStore(
+    new Pool({
+      host,
+      port: process.env.ENGINE_DB_PORT ? Number(process.env.ENGINE_DB_PORT) : 5432,
+      database: process.env.ENGINE_DB_NAME ?? 'agentops_engine',
+      user: process.env.ENGINE_DB_USER ?? 'temporal',
+      password: process.env.ENGINE_DB_PASSWORD,
+    }),
+  );
+}
+
 async function main(): Promise<void> {
   const temporalUiBaseUrl = process.env.TEMPORAL_UI_BASE_URL;
   if (!temporalUiBaseUrl) {
@@ -35,6 +52,13 @@ async function main(): Promise<void> {
   const client = new Client({ connection, namespace });
 
   const managedProjectStore = buildManagedProjectStore();
+  const tierStore = buildTierStore();
+  if (tierStore) {
+    await tierStore.ensureSchema();
+    console.log('agentops control: /api/tiers ENABLED (ENGINE_DB_HOST set)');
+  } else {
+    console.log('agentops control: /api/tiers disabled (no ENGINE_DB_HOST)');
+  }
   const projectCrudAuthToken = process.env.CONTROL_CRUD_TOKEN;
   if (managedProjectStore) {
     await managedProjectStore.ensureSchema();
@@ -68,6 +92,7 @@ async function main(): Promise<void> {
     temporalUiBaseUrl,
     uiDistPath: existsSync(uiDistPath) ? uiDistPath : undefined,
     managedProjectStore,
+    tierStore,
     projectCredentialPublicKey: process.env.PROJECT_CREDENTIAL_PUBLIC_KEY,
     projectCrudAuthToken,
   });

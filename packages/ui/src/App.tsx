@@ -6,6 +6,7 @@ import { ProjectsPage } from './pages/ProjectsPage';
 import { RunDetailPage } from './pages/RunDetailPage';
 import { ChatPage } from './pages/ChatPage';
 import { ChatStartPage } from './pages/ChatStartPage';
+import { TiersPage } from './pages/TiersPage';
 
 export function App() {
   return (
@@ -15,6 +16,7 @@ export function App() {
         <Link to="/projects">Projects</Link>
         <Link to="/agents">Agents</Link>
         <Link to="/chat">Chat</Link>
+        <Link to="/tiers">Tiers</Link>
       </nav>
       <Routes>
         <Route path="/" element={<HomePage />} />
@@ -24,6 +26,7 @@ export function App() {
         <Route path="/agents" element={<AgentsPage />} />
         <Route path="/chat" element={<ChatStartPage />} />
         <Route path="/chats/:chatId" element={<ChatPage />} />
+        <Route path="/tiers" element={<TiersPage />} />
       </Routes>
     </BrowserRouter>
   );

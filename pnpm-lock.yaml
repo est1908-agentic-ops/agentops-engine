@@ -297,6 +297,9 @@ importers:
       '@agentops/contracts':
         specifier: workspace:*
         version: link:../contracts
+      '@agentops/policies':
+        specifier: workspace:*
+        version: link:../policies
       '@agentops/ports':
         specifier: workspace:*
         version: link:../ports

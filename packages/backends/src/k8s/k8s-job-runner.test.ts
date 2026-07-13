@@ -70,6 +70,17 @@ describe('k8sJobName', () => {
     expect(k8sJobName(primary)).not.toBe(k8sJobName(fallback));
     expect(agentOpsArtifactPaths(primary).outFile).not.toBe(agentOpsArtifactPaths(fallback).outFile);
   });
+
+  // Cross-backend session-limit fallback (TierFallbackBackend) can run the
+  // SAME model string on a DIFFERENT backend (e.g. a tier with the same model
+  // listed under two backends). The key must include the backend, or those
+  // two runs collide on one Job/artifact set.
+  it('derives a distinct key per backend even when the model string is identical', () => {
+    const claude = { ...baseRequest, backend: 'claude', model: 'shared-model' };
+    const pi = { ...baseRequest, backend: 'pi', model: 'shared-model' };
+    expect(k8sJobName(claude)).not.toBe(k8sJobName(pi));
+    expect(agentOpsArtifactPaths(claude).outFile).not.toBe(agentOpsArtifactPaths(pi).outFile);
+  });
 });
 
 describe('buildAgentJob', () => {

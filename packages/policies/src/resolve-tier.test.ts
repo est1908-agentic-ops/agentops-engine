@@ -40,4 +40,20 @@ describe('resolveTier', () => {
   it('throws a clear error when the tier is found in neither project-local nor global', () => {
     expect(() => resolveTier(undefined, 'nonexistent')).toThrow(/nonexistent/);
   });
+
+  it('a caller-supplied globalTiers map overrides the hardcoded DEFAULT_TIERS seed', () => {
+    // This is the path the worker exercises: it loads the tiers table from
+    // Postgres and passes it here so operator edits take effect.
+    const dbTiers = { smart: [{ backend: 'pi' as const, model: 'operator-changed-glm' }] };
+    const result = resolveTier(undefined, 'smart', undefined, dbTiers);
+    expect(result).toEqual([{ backend: 'pi', model: 'operator-changed-glm' }]);
+  });
+
+  it('project-local still wins over a caller-supplied global map', () => {
+    const projectLocal = { smart: [{ backend: 'claude' as const, model: 'project-override' }] };
+    const global = { smart: [{ backend: 'pi' as const, model: 'global-default' }] };
+    expect(resolveTier(projectLocal, 'smart', undefined, global)).toEqual([
+      { backend: 'claude', model: 'project-override' },
+    ]);
+  });
 });

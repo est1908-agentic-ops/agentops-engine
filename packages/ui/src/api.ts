@@ -4,6 +4,7 @@ import {
   ListAgentSchedulesResponseSchema,
   ManagedProjectListResponseSchema,
   ManagedProjectSchema,
+  ModelRefSchema,
   RepoListResponseSchema,
   RunDetailSchema,
   RunListItemSchema,
@@ -322,4 +323,23 @@ export async function closeChat(chatId: string): Promise<void> {
     headers: crudHeaders(false),
   });
   await parseEmptyResponse(res);
+}
+
+// --- tiers (SP3-C: model tier matrix editor) ---
+
+export const TiersTableSchema = z.record(z.string().min(1), z.array(ModelRefSchema));
+export type TiersTable = z.infer<typeof TiersTableSchema>;
+
+export async function listTiers(): Promise<TiersTable> {
+  const res = await fetch('/api/tiers');
+  return parseJsonResponse(res, TiersTableSchema);
+}
+
+export async function replaceTiers(tiers: TiersTable): Promise<TiersTable> {
+  const res = await fetch('/api/tiers', {
+    method: 'PUT',
+    headers: { ...crudHeaders(false), 'content-type': 'application/json' },
+    body: JSON.stringify(tiers),
+  });
+  return parseJsonResponse(res, TiersTableSchema);
 }
