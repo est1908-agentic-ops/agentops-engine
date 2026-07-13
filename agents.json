@@ -5,7 +5,7 @@
       "workflow": "whiteboxBugHunt",
       "schedule": "0 2 * * *",
       "input": {
-        "focus": "security, correctness, and this repo's hard rules from AGENTS.md: determinism-boundary violations in packages/workflows (I/O, Date.now, Math.random, timers, or imports from activities/ports/backends), forge/vendor SDK calls outside ports or backends, and secrets in code or fixtures"
+        "focus": "security, correctness, and this repo's hard rules from AGENTS.md: determinism-boundary violations in packages/workflows (I/O, Date.now, Math.random, timers, or imports from activities/ports/backends), forge/vendor SDK calls outside ports or backends, and secrets in code or fixtures. Issues filed for these findings need an 'agentops' label."
       },
       "enabled": true
     }
