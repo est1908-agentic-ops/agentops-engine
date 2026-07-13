@@ -25,11 +25,9 @@ export const DEFAULT_TIERS: Record<string, ModelRef[]> = {
   ],
   // The 'platform' role uses a distinct worker backend entry ('platform', not
   // 'claude') carrying its own ServiceAccount/secrets/pod-label -- see
-  // platform.ts. ModelRefSchema.backend's enum doesn't include 'platform'
-  // today; the cast bypasses TS enum narrowing for this hardcoded constant.
-  // SP3's DB promotion will widen the enum.
+  // platform.ts.
   platform: [
-    { backend: 'platform' as ModelRef['backend'], model: 'claude-sonnet-5', effort: 'high' },
+    { backend: 'platform', model: 'claude-sonnet-5', effort: 'high' },
     { backend: 'pi', model: 'openrouter/deepseek-v4-pro' },
   ],
   bughunt: [

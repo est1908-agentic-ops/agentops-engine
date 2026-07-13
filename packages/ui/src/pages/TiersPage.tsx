@@ -3,7 +3,7 @@ import { listTiers, replaceTiers, type TiersTable } from '../api';
 import type { ModelRef } from '@agentops/contracts';
 
 const EMPTY_ENTRY: ModelRef = { backend: 'claude', model: '' };
-const ALLOWED_BACKENDS = ['claude', 'cursor', 'pi', 'codex', 'stub', 'litellm'] as const;
+const ALLOWED_BACKENDS = ['claude', 'cursor', 'pi', 'codex', 'stub', 'litellm', 'platform'] as const;
 const ALLOWED_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 // Deep-clone the tier table into local editable state.
