@@ -10,11 +10,28 @@ import {
   updateProject,
   type UpdateProjectInput,
 } from '../api';
+import { PageShell } from '../components/PageShell';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 type TrackerType = 'github' | 'linear';
 
-// The subset of form fields relevant to an update. Used by buildUpdatePayload
-// to compute the minimal change set against the stored project.
 interface UpdateFieldValues {
   token: string;
   configJson: string;
@@ -23,19 +40,12 @@ interface UpdateFieldValues {
   linearToken: string;
 }
 
-// Builds the minimal PUT payload: a field is included only when it is a
-// genuine change. Blank = keep (the server's omit-means-keep semantics). For
-// the non-secret Linear fields -- which are prefilled on edit -- "unchanged
-// from the stored value" is also treated as keep, so editing a Linear project
-// never re-sends its current team key/label id and Save stays disabled until
-// a real change, matching the GitHub edit path.
 function buildUpdatePayload(existing: ManagedProject, v: UpdateFieldValues): UpdateProjectInput {
   const payload: UpdateProjectInput = {};
   if (v.token) payload.token = v.token;
   if (v.configJson) payload.configJson = v.configJson;
   if (existing.trackerType === 'linear') {
-    if (v.linearTeamKey && v.linearTeamKey !== existing.linearTeamKey)
-      payload.linearTeamKey = v.linearTeamKey;
+    if (v.linearTeamKey && v.linearTeamKey !== existing.linearTeamKey) payload.linearTeamKey = v.linearTeamKey;
     if (v.linearTriggerLabelId && v.linearTriggerLabelId !== existing.linearTriggerLabelId)
       payload.linearTriggerLabelId = v.linearTriggerLabelId;
     if (v.linearToken) payload.linearToken = v.linearToken;
@@ -43,14 +53,11 @@ function buildUpdatePayload(existing: ManagedProject, v: UpdateFieldValues): Upd
   return payload;
 }
 
-// A flat bag of every field the form can collect. The page handlers project
-// this down to CreateProjectInput / UpdateProjectInput depending on mode, so
-// the form itself stays tracker-agnostic about request shapes.
 interface ProjectFormValues {
   project: string;
   repo: string;
   trackerType: TrackerType;
-  token: string; // GitHub/SCM token (always required on create, regardless of tracker)
+  token: string;
   configJson: string;
   linearTeamKey: string;
   linearTriggerLabelId: string;
@@ -68,6 +75,7 @@ export function ProjectsPage() {
   const [mode, setMode] = useState<Mode>(null);
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -148,12 +156,7 @@ export function ProjectsPage() {
     }
   }
 
-  async function handleRemove(repo: string): Promise<void> {
-    if (
-      !window.confirm(`Remove managed project for ${repo}? This deletes its stored credential.`)
-    ) {
-      return;
-    }
+  async function performRemove(repo: string): Promise<void> {
     setBusy(true);
     setFormError(null);
     try {
@@ -163,71 +166,67 @@ export function ProjectsPage() {
       setFormError(err instanceof Error ? err.message : 'failed to remove project');
     } finally {
       setBusy(false);
+      setDeleteTarget(null);
     }
   }
 
   if (!hasToken) {
     return (
-      <div className="page">
-        <h1>Managed Projects</h1>
-        <div className="section">
-          <p className="muted-text">
-            The project-management routes require an operator bearer token (
-            <code>CONTROL_CRUD_TOKEN</code>). Paste it below — it is stored only in this browser
-            (localStorage) and sent as an X-Control-Crud-Token header on each request.
-          </p>
-          <label className="field-label" htmlFor="crud-token">
-            Control CRUD token
-          </label>
-          <input
-            id="crud-token"
-            className="text-input"
-            type="password"
-            placeholder="paste CONTROL_CRUD_TOKEN"
-            value={tokenDraft}
-            onChange={(event) => setTokenDraft(event.target.value)}
-          />
-          <div className="actions">
-            <button
-              type="button"
-              className="run-button"
-              disabled={!tokenDraft.trim()}
-              onClick={handleSaveToken}
-            >
-              Save token
-            </button>
-          </div>
-        </div>
-        <p>
-          <Link to="/" className="back-link">
+      <PageShell>
+        <h1 className="mb-6 text-2xl font-semibold">Managed Projects</h1>
+        <Card>
+          <CardContent className="pt-6">
+            <p className="mb-4 text-sm text-muted-foreground">
+              The project-management routes require an operator bearer token (
+              <code>CONTROL_CRUD_TOKEN</code>). Paste it below — it is stored only in this browser (localStorage)
+              and sent as an X-Control-Crud-Token header on each request.
+            </p>
+            <Label htmlFor="crud-token" className="mb-1 block">
+              Control CRUD token
+            </Label>
+            <Input
+              id="crud-token"
+              type="password"
+              placeholder="paste CONTROL_CRUD_TOKEN"
+              value={tokenDraft}
+              onChange={(event) => setTokenDraft(event.target.value)}
+            />
+            <div className="mt-4">
+              <Button type="button" disabled={!tokenDraft.trim()} onClick={handleSaveToken}>
+                Save token
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+        <p className="mt-4">
+          <Link to="/" className="text-sm text-muted-foreground">
             ← Back to console
           </Link>
         </p>
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="page">
-      <div className="projects-header">
-        <h1>Managed Projects</h1>
-        <div className="header-actions">
-          <button
-            type="button"
-            className="ghost-button"
-            onClick={() => void refresh()}
-            disabled={loading}
-          >
+    <PageShell>
+      <div className="mb-6 flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Managed Projects</h1>
+        <div className="flex gap-2">
+          <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
             {loading ? 'Refreshing…' : 'Refresh'}
-          </button>
-          <button type="button" className="ghost-button" onClick={handleClearToken}>
+          </Button>
+          <Button type="button" variant="outline" size="sm" onClick={handleClearToken}>
             Clear token
-          </button>
+          </Button>
         </div>
       </div>
 
-      {loadError && <div className="error-box section">{loadError}</div>}
-      {formError && <div className="error-box section">{formError}</div>}
+      {loadError && (
+        <div className="mb-4 rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm">{loadError}</div>
+      )}
+      {formError && (
+        <div className="mb-4 rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm">{formError}</div>
+      )}
 
       {mode === 'add' ? (
         <ProjectForm
@@ -243,10 +242,10 @@ export function ProjectsPage() {
           }}
         />
       ) : (
-        <div className="section">
-          <button type="button" className="run-button" onClick={() => setMode('add')}>
+        <div className="mb-5">
+          <Button type="button" onClick={() => setMode('add')}>
             + Add project
-          </button>
+          </Button>
         </div>
       )}
 
@@ -268,27 +267,27 @@ export function ProjectsPage() {
         />
       )}
 
-      <h2>Registered projects ({projects.length})</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Project</th>
-            <th>Repo</th>
-            <th>Tracker</th>
-            <th>Credential</th>
-            <th>Config</th>
-            <th>Updated</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
+      <h2 className="mb-3 mt-8 text-base font-semibold">Registered projects ({projects.length})</h2>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Project</TableHead>
+            <TableHead>Repo</TableHead>
+            <TableHead>Tracker</TableHead>
+            <TableHead>Credential</TableHead>
+            <TableHead>Config</TableHead>
+            <TableHead>Updated</TableHead>
+            <TableHead />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {projects.map((project) => (
-            <tr key={project.repo}>
-              <td>{project.project}</td>
-              <td>
+            <TableRow key={project.repo}>
+              <TableCell>{project.project}</TableCell>
+              <TableCell>
                 <code>{project.repo}</code>
-              </td>
-              <td>
+              </TableCell>
+              <TableCell>
                 {project.trackerType === 'linear' ? (
                   <span>
                     Linear · <code>{project.linearTeamKey}</code>
@@ -296,58 +295,73 @@ export function ProjectsPage() {
                 ) : (
                   'GitHub'
                 )}
-              </td>
-              <td>
+              </TableCell>
+              <TableCell>
                 <CredentialBadges project={project} />
-              </td>
-              <td>{project.config ? 'custom' : 'file'}</td>
-              <td>{formatTimestamp(project.updatedAt)}</td>
-              <td className="row-actions">
-                <Link className="link-button" to={`/?target=${encodeURIComponent(project.repo)}`}>
+              </TableCell>
+              <TableCell>{project.config ? 'custom' : 'file'}</TableCell>
+              <TableCell>{formatTimestamp(project.updatedAt)}</TableCell>
+              <TableCell className="flex gap-3 whitespace-nowrap">
+                <Link className="text-sm text-primary" to={`/?target=${encodeURIComponent(project.repo)}`}>
                   Run
                 </Link>
-                <button
+                <Button
                   type="button"
-                  className="link-button"
+                  variant="link"
+                  className="h-auto p-0 text-sm"
                   disabled={busy}
                   onClick={() => setMode({ project })}
                 >
                   Edit
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="link-button danger"
+                  variant="link"
+                  className="h-auto p-0 text-sm text-destructive"
                   disabled={busy}
-                  onClick={() => void handleRemove(project.repo)}
+                  onClick={() => setDeleteTarget(project.repo)}
                 >
                   Remove
-                </button>
-              </td>
-            </tr>
+                </Button>
+              </TableCell>
+            </TableRow>
           ))}
           {projects.length === 0 && !loading && (
-            <tr>
-              <td colSpan={7} className="muted-text">
-                No managed projects yet. Click “Add project” to register a repo.
-              </td>
-            </tr>
+            <TableRow>
+              <TableCell colSpan={7} className="text-muted-foreground">
+                No managed projects yet. Click "Add project" to register a repo.
+              </TableCell>
+            </TableRow>
           )}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
 
-      <p>
-        <Link to="/" className="back-link">
+      <p className="mt-4">
+        <Link to="/" className="text-sm text-muted-foreground">
           ← Back to console
         </Link>
       </p>
-    </div>
+
+      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove managed project for {deleteTarget}?</AlertDialogTitle>
+            <AlertDialogDescription>This deletes its stored credential.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction disabled={busy} onClick={() => deleteTarget && void performRemove(deleteTarget)}>
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </PageShell>
   );
 }
 
 function CredentialBadges({ project }: { project: ManagedProject }) {
   if (project.trackerType === 'linear') {
-    // A linear project carries both a GitHub SCM credential and a Linear
-    // API credential; show both. Never the token value itself.
     return (
       <>
         <CredentialBadge set={project.credentialSet} label="GH" />
@@ -360,13 +374,13 @@ function CredentialBadges({ project }: { project: ManagedProject }) {
 
 function CredentialBadge({ set, label }: { set: boolean; label: string }) {
   return (
-    <span
-      className="status-badge"
-      style={{ backgroundColor: set ? '#16a34a' : '#9ca3af', marginRight: 4 }}
+    <Badge
+      className="mr-1 border-transparent text-white"
+      style={{ backgroundColor: set ? '#16a34a' : '#9ca3af' }}
       title={set ? `${label} credential set` : `no ${label} credential`}
     >
       {label} {set ? '✓' : '—'}
-    </span>
+    </Badge>
   );
 }
 
@@ -374,38 +388,20 @@ interface ProjectFormProps {
   title: string;
   submitLabel: string;
   isUpdate?: boolean;
-  /** Present iff isUpdate — the project being edited. */
   existing?: ManagedProject;
   disabled: boolean;
   onCancel: () => void;
   onSubmit: (values: ProjectFormValues) => Promise<void>;
 }
 
-function ProjectForm({
-  title,
-  submitLabel,
-  isUpdate,
-  existing,
-  disabled,
-  onCancel,
-  onSubmit,
-}: ProjectFormProps) {
-  // trackerType is chosen on create (default github) and immutable on update
-  // (derived from the existing project, never sent in the PUT body).
+function ProjectForm({ title, submitLabel, isUpdate, existing, disabled, onCancel, onSubmit }: ProjectFormProps) {
   const existingTracker: TrackerType = existing?.trackerType ?? 'github';
   const [trackerType, setTrackerType] = useState<TrackerType>(existingTracker);
   const [project, setProject] = useState('');
   const [repo, setRepo] = useState('');
-  // `token` is the GitHub/SCM token (always present, required on create; on
-  // update blank means "keep"). Labelled "GitHub token" to disambiguate from
-  // the Linear token below.
   const [token, setToken] = useState('');
   const [configJson, setConfigJson] = useState('');
-  // Linear fields are pre-filled from the existing project on update (the
-  // non-secret ones); linearToken is never echoed back, blank = keep/rotate.
-  const [linearTeamKey, setLinearTeamKey] = useState(
-    existing?.trackerType === 'linear' ? existing.linearTeamKey : '',
-  );
+  const [linearTeamKey, setLinearTeamKey] = useState(existing?.trackerType === 'linear' ? existing.linearTeamKey : '');
   const [linearTriggerLabelId, setLinearTriggerLabelId] = useState(
     existing?.trackerType === 'linear' ? existing.linearTriggerLabelId : '',
   );
@@ -415,10 +411,6 @@ function ProjectForm({
 
   const isLinear = trackerType === 'linear';
 
-  // Client-side validation mirrors the contract's superRefine: when the
-  // tracker is linear, the three linear fields are required (on create);
-  // repo/project/token are always required on create. On update at least one
-  // field must change; tracker/repo/project are immutable.
   const trimmed = {
     project: project.trim(),
     repo: repo.trim(),
@@ -429,12 +421,7 @@ function ProjectForm({
     configJson: configJson.trim(),
   };
   const linearReady = trimmed.linearTeamKey && trimmed.linearTriggerLabelId && trimmed.linearToken;
-  const createReady =
-    trimmed.project && trimmed.repo && trimmed.token && (!isLinear || linearReady);
-  // Update is submittable only when at least one field genuinely changed.
-  // buildUpdatePayload encodes "blank = keep" and, for prefilled non-secret
-  // Linear fields, "unchanged = keep" -- so editing a Linear project keeps
-  // Save disabled until a real change, same as the GitHub edit path.
+  const createReady = trimmed.project && trimmed.repo && trimmed.token && (!isLinear || linearReady);
   const updatePayload = isUpdate && existing ? buildUpdatePayload(existing, trimmed) : null;
   const canSubmit = isUpdate
     ? !!updatePayload && Object.keys(updatePayload).length > 0 && !submitting
@@ -444,8 +431,6 @@ function ProjectForm({
     setError(null);
     setSubmitting(true);
     try {
-      // Validate config JSON up front so the user gets a clear local error
-      // rather than a 400 from the server.
       if (trimmed.configJson && trimmed.configJson !== 'null') {
         JSON.parse(trimmed.configJson);
       }
@@ -471,134 +456,116 @@ function ProjectForm({
   }
 
   return (
-    <div className="card form-card section">
-      <h3>{title}</h3>
-      {/* Tracker selector: create = editable, update = read-only (immutable identity). */}
-      <label className="field-label" htmlFor="form-tracker">
-        Tracker
-      </label>
-      <select
-        id="form-tracker"
-        className="text-input"
-        value={trackerType}
-        onChange={(event) => setTrackerType(event.target.value as TrackerType)}
-        disabled={isUpdate}
-      >
-        <option value="github">GitHub</option>
-        <option value="linear">Linear</option>
-      </select>
-      {isUpdate && (
-        <p className="muted-text" style={{ marginTop: 4 }}>
-          Immutable — delete and recreate to change tracker.
-        </p>
-      )}
-      {!isUpdate && (
-        <>
-          <label className="field-label" htmlFor="form-project">
-            Project slug
-          </label>
-          <input
-            id="form-project"
-            className="text-input"
-            placeholder="acme-web"
-            value={project}
-            onChange={(event) => setProject(event.target.value)}
-          />
-          <label className="field-label" htmlFor="form-repo">
-            Repo (owner/repo)
-          </label>
-          <input
-            id="form-repo"
-            className="text-input"
-            placeholder="acme/web"
-            value={repo}
-            onChange={(event) => setRepo(event.target.value)}
-          />
-        </>
-      )}
-      <label className="field-label" htmlFor="form-token">
-        {isUpdate ? 'GitHub token (rotate — leave blank to keep)' : 'GitHub token'}
-      </label>
-      <input
-        id="form-token"
-        className="text-input"
-        type="password"
-        placeholder={isUpdate ? 'ghp_… (optional)' : 'ghp_…'}
-        value={token}
-        onChange={(event) => setToken(event.target.value)}
-      />
-      {isLinear && (
-        <>
-          <label className="field-label" htmlFor="form-linear-team-key">
-            Linear team key
-          </label>
-          <input
-            id="form-linear-team-key"
-            className="text-input"
-            placeholder="ENG"
-            value={linearTeamKey}
-            onChange={(event) => setLinearTeamKey(event.target.value)}
-          />
-          <label className="field-label" htmlFor="form-linear-trigger-label">
-            Linear trigger label ID
-          </label>
-          <input
-            id="form-linear-trigger-label"
-            className="text-input"
-            placeholder="550e8400-e29b-41d4-a716-446655440000"
-            value={linearTriggerLabelId}
-            onChange={(event) => setLinearTriggerLabelId(event.target.value)}
-          />
-          <p className="muted-text" style={{ marginTop: 4 }}>
-            A Linear label <strong>UUID</strong>, not its name — find it via the label settings URL
-            or Linear’s GraphQL API (
-            <code>
-              query &#123; team(key: "ENG") &#123; labels &#123; nodes &#123; id name &#125; &#125;
-              &#125;
-            </code>
-            ).
-          </p>
-          <label className="field-label" htmlFor="form-linear-token">
-            {isUpdate ? 'Linear API token (rotate — leave blank to keep)' : 'Linear API token'}
-          </label>
-          <input
-            id="form-linear-token"
-            className="text-input"
+    <Card className="mb-5">
+      <CardContent className="space-y-4 pt-6">
+        <h3 className="font-semibold">{title}</h3>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="form-tracker">Tracker</Label>
+          <Select value={trackerType} onValueChange={(value) => setTrackerType(value as TrackerType)} disabled={isUpdate}>
+            <SelectTrigger id="form-tracker" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="github">GitHub</SelectItem>
+              <SelectItem value="linear">Linear</SelectItem>
+            </SelectContent>
+          </Select>
+          {isUpdate && <p className="text-sm text-muted-foreground">Immutable — delete and recreate to change tracker.</p>}
+        </div>
+
+        {!isUpdate && (
+          <>
+            <div className="space-y-1.5">
+              <Label htmlFor="form-project">Project slug</Label>
+              <Input id="form-project" placeholder="acme-web" value={project} onChange={(e) => setProject(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="form-repo">Repo (owner/repo)</Label>
+              <Input id="form-repo" placeholder="acme/web" value={repo} onChange={(e) => setRepo(e.target.value)} />
+            </div>
+          </>
+        )}
+
+        <div className="space-y-1.5">
+          <Label htmlFor="form-token">{isUpdate ? 'GitHub token (rotate — leave blank to keep)' : 'GitHub token'}</Label>
+          <Input
+            id="form-token"
             type="password"
-            placeholder={isUpdate ? 'lin_api_… (optional)' : 'lin_api_…'}
-            value={linearToken}
-            onChange={(event) => setLinearToken(event.target.value)}
+            placeholder={isUpdate ? 'ghp_… (optional)' : 'ghp_…'}
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
           />
-        </>
-      )}
-      <label className="field-label" htmlFor="form-config">
-        Config JSON (optional — {isUpdate ? 'null clears to file-based' : 'omit = file-based'})
-      </label>
-      <textarea
-        id="form-config"
-        className="prompt-input"
-        rows={3}
-        placeholder={
-          '{\n  "fastVerifyCommands": ["pnpm lint"],\n  "fullVerifyCommands": ["pnpm test"]\n}'
-        }
-        value={configJson}
-        onChange={(event) => setConfigJson(event.target.value)}
-      />
-      {error && <p className="error-text">{error}</p>}
-      <div className="actions">
-        <button
-          type="button"
-          className="run-button"
-          disabled={!canSubmit || disabled}
-          onClick={() => void handleSubmit()}
-        >
-          {submitting ? 'Saving…' : submitLabel}
-        </button>
-        <button type="button" className="ghost-button" onClick={onCancel} disabled={disabled}>
-          Cancel
-        </button>
-      </div>
-    </div>
+        </div>
+
+        {isLinear && (
+          <>
+            <div className="space-y-1.5">
+              <Label htmlFor="form-linear-team-key">Linear team key</Label>
+              <Input
+                id="form-linear-team-key"
+                placeholder="ENG"
+                value={linearTeamKey}
+                onChange={(e) => setLinearTeamKey(e.target.value)}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="form-linear-trigger-label">Linear trigger label ID</Label>
+              <Input
+                id="form-linear-trigger-label"
+                placeholder="550e8400-e29b-41d4-a716-446655440000"
+                value={linearTriggerLabelId}
+                onChange={(e) => setLinearTriggerLabelId(e.target.value)}
+              />
+              <p className="text-sm text-muted-foreground">
+                A Linear label <strong>UUID</strong>, not its name — find it via the label settings URL or Linear's
+                GraphQL API (
+                <code>
+                  query &#123; team(key: "ENG") &#123; labels &#123; nodes &#123; id name &#125; &#125; &#125;
+                </code>
+                ).
+              </p>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="form-linear-token">
+                {isUpdate ? 'Linear API token (rotate — leave blank to keep)' : 'Linear API token'}
+              </Label>
+              <Input
+                id="form-linear-token"
+                type="password"
+                placeholder={isUpdate ? 'lin_api_… (optional)' : 'lin_api_…'}
+                value={linearToken}
+                onChange={(e) => setLinearToken(e.target.value)}
+              />
+            </div>
+          </>
+        )}
+
+        <div className="space-y-1.5">
+          <Label htmlFor="form-config">
+            Config JSON (optional — {isUpdate ? 'null clears to file-based' : 'omit = file-based'})
+          </Label>
+          <Textarea
+            id="form-config"
+            rows={3}
+            placeholder={'{\n  "fastVerifyCommands": ["pnpm lint"],\n  "fullVerifyCommands": ["pnpm test"]\n}'}
+            value={configJson}
+            onChange={(e) => setConfigJson(e.target.value)}
+          />
+        </div>
+
+        {error && <p className="text-sm text-destructive">{error}</p>}
+
+        <div className="flex gap-2">
+          <Button type="button" disabled={!canSubmit || disabled} onClick={() => void handleSubmit()}>
+            {submitting ? 'Saving…' : submitLabel}
+          </Button>
+          <Button type="button" variant="outline" onClick={onCancel} disabled={disabled}>
+            Cancel
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }
 
