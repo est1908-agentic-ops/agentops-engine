@@ -155,7 +155,16 @@ export async function platformChat(
       const result = await agentActivities.runAgent({
         taskId: chatId,
         stage: 'platform',
-        attempt: 1,
+        // `taskId` is constant for the whole chat (unlike the one-shot `platform`
+        // workflow, where every run gets a fresh taskId), so a hardcoded `attempt: 1`
+        // would build the identical K8s Job name/output path on every turn --
+        // K8sJobRunner only cleans up a Job on failure, so turn 2+ would 409-reuse
+        // turn 1's already-succeeded Job and replay its stale output forever
+        // instead of re-running the agent. `seq` is already carried across
+        // continueAsNew and strictly increases before every runAgent call (a
+        // message is always pushed first), so it doubles as a collision-free
+        // per-turn attempt number.
+        attempt: seq,
         callIndex: call,
         tier: CHAT_TIER,
         promptRef: 'platform-chat.md',
