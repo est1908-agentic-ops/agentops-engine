@@ -45,7 +45,7 @@ import {
 import { loadProjectConfig } from './load-project-config';
 import { ApplicationFailure } from '@temporalio/common';
 import { Context } from '@temporalio/activity';
-import { assertProjectOwnsRepo } from './project-context';
+import { assertProjectOwnsRepo, getCallerProject } from './project-context';
 
 export interface ActivityDependencies {
   backends: Record<string, AgentBackend>;
@@ -124,6 +124,22 @@ export function createActivities(deps: ActivityDependencies) {
         // is safe: req.backend was set by a workflow that knows its registry.
         primaryModelRef = { backend: req.backend! as ModelRef['backend'], model: req.model!, effort: req.effort };
         chain = [];
+      }
+
+      // The 'platform' backend carries a distinct, more-privileged K8s
+      // ServiceAccount/secret (see buildBackends in worker/main.ts) than any
+      // project-facing backend. A Tier-2 project workflow can freely name any
+      // tier/backend in its own request (req.backend and req.projectTiers are
+      // caller-supplied), so without this check a project could reach the
+      // platform identity purely by asking for it. Absent caller project =>
+      // engine-internal call (e.g. platform.ts itself) -- no restriction.
+      // Checked against the whole resolved chain, not just the primary, since
+      // a session-limit fallback could also resolve to 'platform'.
+      if (getCallerProject() && [primaryModelRef, ...chain].some((m) => m.backend === 'platform')) {
+        throw ApplicationFailure.nonRetryable(
+          'project workflows may not route runAgent through the platform backend',
+          'ProjectAuthorizationError',
+        );
       }
 
       const prompt = deps.prompts.render(req.promptRef, req.promptContext);

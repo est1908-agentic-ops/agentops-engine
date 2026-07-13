@@ -55,6 +55,14 @@ describe('PromptPack', () => {
     expect(rendered).toContain('check the logs');
   });
 
+  it('renders the generic agent template with instructions and the FINDINGS contract', () => {
+    const pack = new PromptPack();
+    const rendered = pack.render('agent.md', { taskId: 'agent-1', instructions: 'Look for feature gaps.' });
+    expect(rendered).toContain('Task agent-1');
+    expect(rendered).toContain('Look for feature gaps.');
+    expect(rendered).toContain('FINDINGS:');
+  });
+
   it('throws a clear error for an unknown template ref', () => {
     const pack = new PromptPack();
     expect(() => pack.render('nonexistent.md', {})).toThrow(/nonexistent\.md/);
