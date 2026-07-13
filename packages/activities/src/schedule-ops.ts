@@ -43,8 +43,12 @@ export interface ScheduleUpdateOpts {
 // Minimal surface we use from Temporal's ScheduleClient / ScheduleHandle.
 // This lets tests inject a vi.fn() mock without depending on the full SDK shape,
 // while the create/update opts are typed so a malformed spec can't compile.
+// update() takes an updater function -- (previous) => newSchedule -- matching
+// the real @temporalio/client ScheduleHandle.update signature. deps.scheduleClient
+// is a raw cast of the real client (see worker/src/main.ts), so a mismatched
+// shape here type-checks but throws at runtime.
 export interface ScheduleHandleLike {
-  update?: (opts: ScheduleUpdateOpts) => Promise<void>;
+  update?: (updateFn: (previous: unknown) => ScheduleUpdateOpts) => Promise<void>;
   pause?: () => Promise<void>;
   unpause?: () => Promise<void>;
   delete?: () => Promise<void>;
@@ -144,7 +148,7 @@ export async function applyScheduleChanges(
     const args = [{ repo, project, ...spec.input }];
     const memo = { project, agentName: spec.name, workflowType: spec.workflow };
     const searchAttributes = { project: [project], agentName: [spec.name], workflowType: [spec.workflow] };
-    await h.update?.({
+    await h.update?.(() => ({
       schedule: {
         spec: cronScheduleSpec(spec.schedule, spec.timezone),
         action: {
@@ -158,7 +162,7 @@ export async function applyScheduleChanges(
       },
       memo,
       searchAttributes,
-    });
+    }));
   }
 
   for (const id of plan.toPause) {
