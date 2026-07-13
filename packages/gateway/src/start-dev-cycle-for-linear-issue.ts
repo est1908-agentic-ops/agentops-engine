@@ -1,10 +1,10 @@
 import type { Client } from '@temporalio/client';
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import type { ProjectConfig } from '@agentops/contracts';
+import { slugifyProject } from '@agentops/policies';
 import { linearRef } from '@agentops/ports';
 import { devCycle } from '@agentops/workflows';
 import type { LinearIssueEvent } from './parse-linear-issue-event';
-import { slugifyProject } from './slug';
 import type { StartDevCycleResult } from './start-dev-cycle';
 
 // Parallel to startDevCycleForIssue rather than a shared/generalized

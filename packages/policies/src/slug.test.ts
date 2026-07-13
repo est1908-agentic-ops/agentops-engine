@@ -21,4 +21,13 @@ describe('slugifyProject', () => {
     expect(slug).toMatch(/^[a-z0-9-]+$/);
     expect(`agentops/issue-${slug}-1`).toBe('agentops/issue-artem-private-agents-1');
   });
+
+  it('slugifies a full Temporal workflowId, not just a bare project name', () => {
+    // Regression: whiteboxBugHunt used workflowInfo().workflowId directly as
+    // taskId. A schedule-derived workflowId like
+    // `agent:Artem private agents:bughunt-test-workflow-2026-07-13T12:00:00Z`
+    // contains `:` and spaces, both invalid in a git branch name.
+    const slug = slugifyProject('agent:Artem private agents:bughunt-test-workflow-2026-07-13T12:00:00Z');
+    expect(slug).toMatch(/^[a-z0-9-]+$/);
+  });
 });
