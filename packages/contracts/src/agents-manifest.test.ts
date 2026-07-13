@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { parseAgentsManifest, BUILTIN_WORKFLOW_INPUTS, InvalidAgentsManifestError } from './agents-manifest';
+import {
+  parseAgentsManifest,
+  BUILTIN_WORKFLOW_INPUTS,
+  InvalidAgentsManifestError,
+  ProjectWorkerSchema,
+  isBuiltinWorkflow,
+  BUILTIN_WORKFLOWS,
+} from './agents-manifest';
 
 const opts = { workflowInputs: BUILTIN_WORKFLOW_INPUTS };
 
@@ -48,5 +55,51 @@ describe('parseAgentsManifest', () => {
     expect(m.agents[0].taskQueue).toBe('proj-acme');
     const m2 = parseAgentsManifest({ agents: [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *' }] }, opts);
     expect(m2.agents[0].taskQueue).toBeUndefined();
+  });
+
+  it('accepts an optional worker block and applies its defaults', () => {
+    const m = parseAgentsManifest(
+      {
+        agents: [{ name: 'r', workflow: 'rollbarMonitor', schedule: 'continuous' }],
+        worker: { image: 'reg/broccoli/agentops-worker:abc123', externalSecrets: ['rollbar-token'] },
+      },
+      opts,
+    );
+    expect(m.worker).toEqual({
+      image: 'reg/broccoli/agentops-worker:abc123',
+      replicas: 1,
+      externalSecrets: ['rollbar-token'],
+    });
+  });
+
+  it('omits worker when absent (config-only / Tier-1)', () => {
+    const m = parseAgentsManifest({ agents: [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *' }] }, opts);
+    expect(m.worker).toBeUndefined();
+  });
+
+  it('rejects a worker block without an image, and unknown worker keys (strict)', () => {
+    expect(() => parseAgentsManifest({ agents: [], worker: { replicas: 2 } }, opts)).toThrow(InvalidAgentsManifestError);
+    expect(() => parseAgentsManifest({ agents: [], worker: { image: 'x', nope: 1 } }, opts)).toThrow(InvalidAgentsManifestError);
+  });
+});
+
+describe('ProjectWorkerSchema', () => {
+  it('defaults replicas to 1 and externalSecrets to []', () => {
+    expect(ProjectWorkerSchema.parse({ image: 'reg/w:tag' })).toEqual({ image: 'reg/w:tag', replicas: 1, externalSecrets: [] });
+  });
+  it('rejects a non-positive replicas', () => {
+    expect(() => ProjectWorkerSchema.parse({ image: 'reg/w:tag', replicas: 0 })).toThrow();
+  });
+});
+
+describe('isBuiltinWorkflow', () => {
+  it('recognizes the built-in fleet workflows', () => {
+    expect(isBuiltinWorkflow('devCycle')).toBe(true);
+    expect(isBuiltinWorkflow('whiteboxBugHunt')).toBe(true);
+    expect(isBuiltinWorkflow('platform')).toBe(true);
+  });
+  it('treats any other name as a project (Tier-2) workflow', () => {
+    expect(isBuiltinWorkflow('rollbarMonitor')).toBe(false);
+    expect(BUILTIN_WORKFLOWS.has('rollbarMonitor')).toBe(false);
   });
 });

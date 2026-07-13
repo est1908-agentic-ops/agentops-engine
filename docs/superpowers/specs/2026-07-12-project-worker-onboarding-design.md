@@ -5,20 +5,22 @@ Tracks: follow-on to [#31](https://github.com/est1908-agentic-ops/agentops-engin
 Builds on: SP2 (`docs/superpowers/specs/2026-07-12-custom-agent-workflows-sp2-design.md`, shipped in #37) — the per-project worker mechanism, `ENGINE_QUEUE`, `AgentSpec.taskQueue`, identity binding; and the managed project registry (`docs/superpowers/specs/2026-07-08-managed-project-registry-design.md`, shipped) — the `managed_projects` DB table (repo + credential + config) and the `CONTROL_CRUD_TOKEN`-gated control API.
 Design authority: this doc governs *how a Tier-2 worker is deployed and onboarded*. It does not change the Tier ladder, the delegation/authorization model (SP2 §7), or the Temporal topology — it fills the gap SP2 left open (§15 named the *mechanism*; onboarding *ergonomics* were unaddressed).
 
-> **v2 change:** the worker spec is **read from the project repo** (a `worker` block in `agents.json`), read by `control` through the per-project token `managed_projects` already stores — **not** stored in new `managed_projects` columns. This keeps the single source of truth in the git-sourced, PR-reviewed manifest (consistent with the whole custom-agent-workflows model) and needs **no DB schema change**. v1's DB-column approach is superseded.
+> **v2 change:** the worker spec is **read from the project repo** (a `worker` block in `agents.json`) through the per-project token `managed_projects` already stores — **not** stored in new `managed_projects` columns. This keeps the single source of truth in the git-sourced, PR-reviewed manifest (consistent with the whole custom-agent-workflows model) and needs **no DB schema change**. v1's DB-column approach is superseded.
+>
+> **v3 change (Option A):** the repo-reading generator endpoint is hosted on the **`gateway`**, not `control`. `control` is deliberately **encrypt-only** (registry design §5: it holds only the public key so a console compromise yields ciphertext it cannot decrypt); reading a repo needs the *private* key, which only `worker`/`gateway`/`cli` hold. The gateway already decrypts project tokens and reads repos, so hosting the endpoint there adds **zero new trust surface**, whereas giving `control` the private key would reopen the browser-facing attack surface the registry design closed. v2's "`control` reads repos" is superseded; §5.2/§6.2/§6.3 below reflect Option A.
 
 ## 1. Why
 
 SP2 made Tier-2 real: a project authors a custom Temporal workflow, runs it in its own worker, and delegates privileged work back to the engine. But it shipped the **mechanism** (a per-project worker), not the **onboarding ergonomics**. Today, to ship one custom workflow a developer must touch multiple places, the worst of which is a **hand-authored ArgoCD `Application` + Deployment/values/kustomization in the platform repo (`agentops-platform`)** — a separate infra repo the app developer may not own, registered in the root kustomization, that is a *second, manual declaration of "this project has a worker."* The `examples/project-worker/` reference in this repo underlines the gap: it ships the workflow, `worker.ts`, and `agents.json` but **no deploy manifest** — because there was no clean way to author one.
 
-The custom-agent-workflows model already says config is **git-sourced, PR-reviewed, agent-improvable** (master spec §1) — `agents.json` and `worker.ts` already live in the project repo. So the worker's *deployment* spec belongs there too, not split into a second system. This design makes worker deployment **derive from a `worker` block in the project's `agents.json`**, read by `control` via the token the registry already holds, and rendered into the cluster by ArgoCD. The end state: onboarding a Tier-2 worker is **one PR in the project repo** — no DB step, no platform-repo step.
+The custom-agent-workflows model already says config is **git-sourced, PR-reviewed, agent-improvable** (master spec §1) — `agents.json` and `worker.ts` already live in the project repo. So the worker's *deployment* spec belongs there too, not split into a second system. This design makes worker deployment **derive from a `worker` block in the project's `agents.json`**, read by the **gateway** (which already decrypts project tokens and reads repos) via the token the registry already holds, and rendered into the cluster by ArgoCD. The end state: onboarding a Tier-2 worker is **one PR in the project repo** — no DB step, no platform-repo step.
 
 ## 2. Scope
 
 **In scope:**
 - A generic **`project-worker` Helm chart** (engine repo, OCI-published) that renders one worker Deployment from a small parameter set.
 - A single **ArgoCD `ApplicationSet`** (platform repo) that fans out one Application per project worker, staged from a git-file generator (Stage 1, bootstrap) to a **repo-sourced plugin generator** (Stage 2).
-- An optional **`worker` block in `AgentsManifestSchema`** (`agents.json`), and a `control` **generator endpoint** that reads it from each managed project's repo via `ScmPort.readFile`.
+- An optional **`worker` block in `AgentsManifestSchema`** (`agents.json`), and a **`gateway` generator endpoint** that reads it from each managed project's repo via `ScmPort.readFile`.
 - The **`proj-<project>` task-queue convention** and the invariant tying the worker Deployment to the `agents.json` schedule.
 
 **Out of scope** (explicitly deferred, not forgotten):
@@ -86,11 +88,11 @@ This ships the generic chart + ApplicationSet and proves the deploy path end-to-
 
 ### 5.2 Stage 2 — repo-sourced plugin generator (the end state)
 
-Swap the git-file generator for an ArgoCD **plugin generator** pointed at a new `control` endpoint (§6.2). Control reads the `worker` block from **each managed project's repo** (via `ScmPort.readFile` with the token in `managed_projects`) and returns one element per project that declares a worker. Onboarding then is **one PR in the project repo** — the `worker` block + the workflow; the project's CI writes the image tag into `agents.json` on release (§6.3). **The platform repo is never touched per project;** it holds only the one-time ApplicationSet.
+Swap the git-file generator for an ArgoCD **plugin generator** pointed at the **gateway** endpoint (§6.2). The gateway reads the `worker` block from **each managed project's repo** (via `ScmPort.readFile` with the token in `managed_projects`) and returns one element per project that declares a worker. Onboarding then is **one PR in the project repo** — the `worker` block + the workflow; the project's CI writes the image tag into `agents.json` on release (§6.3). **The platform repo is never touched per project;** it holds only the one-time ApplicationSet + the plugin-generator config (base URL + token Secret).
 
 **Fail-safe (§6.4)** governs what happens when a repo read fails: the generator serves last-good and never prunes a live worker on a transient read error.
 
-## 6. Repo-sourced worker spec & control surface
+## 6. Repo-sourced worker spec & generator endpoint
 
 ### 6.1 The `worker` block (`agents.json`)
 
@@ -106,8 +108,7 @@ Swap the git-file generator for an ArgoCD **plugin generator** pointed at a new 
     "image": "gitactions.est1908.top/broccoli/agentops-worker:<sha>",  // required if `worker` present
     "taskQueue": "proj-broccoli",        // optional; default proj-<project>
     "replicas": 1,                        // optional; default 1
-    "externalSecrets": ["rollbar-token"], // optional; K8s Secret names, no values
-    "resources": { /* optional */ }
+    "externalSecrets": ["rollbar-token"]  // optional; K8s Secret names, no values
   }
 }
 ```
@@ -118,21 +119,24 @@ export const ProjectWorkerSchema = z.object({
   taskQueue: z.string().min(1).optional(),
   replicas: z.number().int().positive().default(1),
   externalSecrets: z.array(z.string().min(1)).default([]),
-  resources: ResourcesSchema.optional(),
 }).strict();
 // AgentsManifestSchema += worker: ProjectWorkerSchema.optional()
 ```
 
-Read once per project via the existing `load-project-config.ts` / `ScmPort.readFile` path — the **same read ConfigSync already does** for the `agents` array, so the worker spec and the schedule spec come from one parse of one file. No secret ever appears in it (only Secret *names*).
+(Pod `resources` are left to the chart's default rather than the manifest — YAGNI until a project needs to tune them; adding a `resources` field later is additive.)
 
-### 6.2 Control generator endpoint (`packages/control`)
+The `worker` block is parsed by the same `parseAgentsManifest` that already parses `agents`, so the worker spec and the schedule spec come from one parse of one file. No secret ever appears in it (only Secret *names*).
 
-New route: `GET /api/argocd/project-workers` → `[{ project, image, taskQueue, replicas, externalSecrets, resources }]`, one entry per managed project whose `agents.json` has a `worker` block. Shaped for the ApplicationSet plugin generator. `CONTROL_CRUD_TOKEN`-gated (via `X-Control-Crud-Token`, as the CRUD routes already are). It:
-1. lists `managed_projects` (repo + token — the store `control` already uses);
-2. for each, reads `agents.json` via `ScmPort.readFile` and parses the `worker` block (reusing `load-project-config.ts`);
-3. defaults `taskQueue` to `proj-<project>` and returns the flattened list.
+### 6.2 Generator endpoint (`packages/gateway`)
 
-`control` needs an `ScmPort` to read repos. It already resolves per-project credentials for the registry; reading a file with the same token is the same capability the gateway/worker use — no new secret class. (No decryption of anything beyond the repo token it already handles for reads.)
+The endpoint lives on the **gateway**, not `control` — see the v3 note: `control` is encrypt-only and cannot read repos, but the gateway already holds the private key (`PROJECT_CREDENTIAL_PRIVATE_KEY`) and reads project repos for its webhook flows, so this adds zero new trust surface.
+
+New route **`POST /api/v1/getparams.execute`** (ArgoCD's plugin-generator wire contract) → `{ output: { parameters: [{ project, image, taskQueue, replicas }] } }`, one entry per managed project whose `agents.json` has a `worker` block. Gated by `Authorization: Bearer <ARGOCD_PLUGIN_TOKEN>` (ArgoCD's plugin generator sends this from a Secret); the route 404s when the token is unset (feature off, same posture as the Linear webhook route). A `createProjectWorkerParamsProvider({ managedProjectDeps, buildScm })` (reusing the gateway's existing `loadManagedProjectRegistry` + `buildScm`):
+1. lists + resolves each managed project (decrypting its token — the gateway already does this);
+2. reads `agents.json` via `ScmPort.readFile`, parses it, and emits a param **only** if it has a `worker` block;
+3. defaults `taskQueue` to `proj-<project>` and stringifies `replicas` (ArgoCD params are string-valued).
+
+No secret is ever returned (only image/queue/replicas/project).
 
 ### 6.3 Image-tag flow
 
@@ -182,15 +186,15 @@ Called out, not solved, because: (a) it is a *smaller* coupling than the workloa
 **Stage 2 (repo-sourced — the end state):**
 1. In the **project repo**, one PR: the workflow + `worker.ts` + an `agents.json` with a `worker` block and the agent entries.
 2. Project CI builds the image and writes the tag into `agents.json`'s `worker.image` (git-write-back).
-3. `control`'s generator reads the block; the ApplicationSet plugin generator deploys the worker on the next reconcile; ConfigSync schedules the agents on `proj-<project>`. **No platform PR, no DB step.**
+3. the gateway's generator reads the block; the ApplicationSet plugin generator deploys the worker on the next reconcile; ConfigSync schedules the agents on `proj-<project>`. **No platform PR, no DB step.**
 
 ## 11. Contract & vocabulary changes (summary)
 
 | Change | Location | Why | Deliberate? |
 |---|---|---|---|
 | `ProjectWorkerSchema`; `AgentsManifestSchema += worker?` | `contracts` (strict) | Repo-sourced worker spec; presence ⇒ Tier-2 (§6.1) | strict-schema change |
-| `GET /api/argocd/project-workers` (reads repos) | `control` | ApplicationSet plugin-generator source (§6.2) | new route |
-| `control` gains an `ScmPort` to read `agents.json` | `control` | Read the `worker` block via the registry token (§6.2) | wiring |
+| `POST /api/v1/getparams.execute` (reads repos) | `gateway` | ArgoCD plugin-generator source (§6.2) | new route |
+| `createProjectWorkerParamsProvider` (reuses `loadManagedProjectRegistry` + `buildScm`) | `gateway` | Read the `worker` block via the registry token, keeping `control` encrypt-only (§6.2) | new |
 | Project-workflow queue defaults to `proj-<project>` | reconciler (`policies`/`activities`) | Deploy↔schedule invariant (§7) | behavior (additive) |
 | `charts/project-worker/` | engine repo (OCI-published) | Generic worker Deployment (§4) | new chart |
 | `clusters/ops/project-workers/` ApplicationSet (+ root kustomization) | `agentops-platform` | Fan-out per worker (§5) | new (one-time) |
@@ -201,18 +205,18 @@ Called out, not solved, because: (a) it is a *smaller* coupling than the workloa
 | # | Sub-project | Delivers |
 |---|---|---|
 | **SP-a** | **Chart + git-file ApplicationSet** | `charts/project-worker/` (+ render golden test); the ApplicationSet with the Stage-1 git-file generator + `workers.yaml`; `examples/project-worker/` gains its deploy note; docs. Proves the deploy path with **no engine/control code** — Stage-1 projects set an explicit `taskQueue` in `agents.json` (already supported since SP2), so the `proj-<project>` default isn't needed yet. |
-| SP-b | Repo-sourced generator + queue convention | `ProjectWorkerSchema` + `AgentsManifestSchema.worker?` (§6.1); `control`'s `GET /api/argocd/project-workers` reading repos via `ScmPort` + the read fail-safe (§6.2, §6.4); the `proj-<project>` reconciler default + the deploy↔schedule safety warning (§7, which needs the `worker` block to check against); swap the ApplicationSet to the plugin generator + read-token Secret; Mission Control surface (folds into #30's SP4 line). **Onboarding = one project PR.** |
+| SP-b | Repo-sourced generator + queue convention | `ProjectWorkerSchema` + `AgentsManifestSchema.worker?` (§6.1); the **gateway** `POST /api/v1/getparams.execute` reading repos via `ScmPort` + the read fail-safe (§6.2, §6.4); the `proj-<project>` reconciler default + the deploy↔schedule safety warning (§7, which needs the `worker` block to check against); swap the ApplicationSet to the plugin generator + read-token Secret; Mission Control surface (folds into #30's SP4 line). **Onboarding = one project PR.** |
 
 Order SP-a → SP-b. SP-a de-risks the chart/deploy path independently (no engine/control changes); SP-b makes onboarding repo-sourced and adds the queue-default convenience on a proven surface. (SP-a's `workers.yaml` is an explicit throwaway; its entries migrate into repo `worker` blocks in SP-b — §15.)
 
 ## 13. Testing strategy
 
 - **`contracts`:** `ProjectWorkerSchema` tests (image required; `replicas`/`externalSecrets` defaults; `resources` optional; strictness rejects unknown keys); `AgentsManifestSchema` accepts a manifest with and without `worker`.
-- **`control`:** generator route mocks `ScmPort` + the store — returns only projects whose manifest has a `worker` block, defaults `taskQueue` to `proj-<project>`, exposes no secrets; **fail-safe test** — a read error for one project serves its last-good entry and never yields an empty/partial list; auth gate (401 without the token).
+- **`gateway`:** the params provider unit-tested with a fake registry + fake `ScmPort` — returns only projects whose manifest has a `worker` block, defaults `taskQueue` to `proj-<project>`, exposes no secrets; **fail-safe test** — a transient read error serves last-good and never drops a live worker (and a *successful* read removing the block does drop it); the route: 404 when unconfigured, 401 on a bad bearer token, and the `{ output: { parameters } }` shape on success.
 - **`policies`/reconciler:** queue resolution — built-in → `ENGINE_QUEUE`; project workflow, no `taskQueue` → `proj-<project>`; explicit override respected; the "custom workflow scheduled but manifest has no `worker`" warning fires.
 - **Chart:** `charts/project-worker/` render golden test (mirrors `charts/engine/tests/render.golden.yaml`): the Deployment polls `proj-<project>` by default, mounts `externalSecrets`, and mounts **no** engine secrets / **no** namespace-job / **no** search-attribute registration.
 - **ApplicationSet:** template render for a sample `workers.yaml` (Stage 1) producing a valid Application with the right OCI chart source + inline values.
-- **Green bar:** `pnpm lint && pnpm typecheck && pnpm test`; `pnpm e2e` (touches the reconciler queue-resolution change; `control` repo-read path).
+- **Green bar:** `pnpm lint && pnpm typecheck && pnpm test`; `pnpm e2e` (touches the reconciler queue-resolution change; the gateway repo-read path).
 
 ## 14. Definition of done
 
@@ -226,14 +230,14 @@ Order SP-a → SP-b. SP-a de-risks the chart/deploy path independently (no engin
 **SP-b**
 - [ ] `ProjectWorkerSchema` + `AgentsManifestSchema.worker?` in `contracts` (+ tests); `examples/project-worker/` gains its `worker` block.
 - [ ] Reconciler defaults a project workflow's queue to `proj-<project>` and warns when scheduling a custom workflow whose manifest declares no `worker` — with tests.
-- [ ] `GET /api/argocd/project-workers` in `control` reads `agents.json` via `ScmPort` (token from the registry), returns worker specs, no secrets, token-gated, with the read fail-safe — all tested.
-- [ ] ApplicationSet swapped to the plugin generator + read-token Secret; onboarding a worker via a **project PR only** (no platform PR) verified on dev-agents.
-- [ ] Mission Control shows the repo-derived worker state.
+- [ ] Gateway `POST /api/v1/getparams.execute` reads `agents.json` via `ScmPort` (token from the registry), returns worker specs, no secrets, bearer-token-gated, with the read fail-safe — all tested. (`control` stays encrypt-only — Option A.)
+- [ ] ApplicationSet swapped to the plugin generator + read-token Secret; onboarding a worker via a **project PR only** (no platform PR) verified on dev-agents. *(agentops-platform follow-on PR — can only land after this deploys.)*
+- [ ] Mission Control shows the repo-derived worker state. *(Deferred to #30's SP4 line — the generator's consumer is ArgoCD, not the UI; not required for repo-sourced onboarding.)*
 - [ ] Specs updated if implementation deviates.
 
 ## 15. Open questions
 
 - **`worker` block location** (§6.1) — top-level key in `agents.json` (chosen: one file, one read, presence encodes Tier-2) vs. a sibling `agentops/worker.json`. Lean `agents.json`; revisit only if the two concerns need independent PR ownership.
-- **Plugin-generator token** (§5.2) — reuse `CONTROL_CRUD_TOKEN` or mint a dedicated read-only token? Lean dedicated read-only (least privilege). Settle in the SP-b plan.
-- **`control`'s `ScmPort` construction** (§6.2) — `control` doesn't build project-scoped ports today; the SP-b plan pins whether it reuses `createProjectScopedPorts` read-only or a lighter read-only `ScmPort`. It must stay encrypt-only for *writes* (registry design §5) — this adds only repo *reads*.
+- **Plugin-generator token** (§5.2) — **resolved:** a dedicated `ARGOCD_PLUGIN_TOKEN` on the gateway (least privilege; the generator only reads), sent as `Authorization: Bearer`. Not `CONTROL_CRUD_TOKEN`.
+- **Endpoint host** (§6.2) — **resolved (Option A):** hosted on the `gateway`, which already decrypts project tokens and reads repos. `control` stays encrypt-only; it never gains the private key or an `ScmPort`. (Superseded v2's "control reads repos".)
 - **`workers.yaml` → repo migration** (§10, §12) — when SP-b lands, each Stage-1 `workers.yaml` entry becomes a `worker` block in that project's `agents.json`; the platform `workers.yaml` is then deleted. One PR per project; no tooling.

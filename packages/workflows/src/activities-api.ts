@@ -1,5 +1,5 @@
 import type { AgentRunRequest, AgentRunResult, PrFeedback, ProjectConfig, RunStats, StageResult } from '@agentops/contracts';
-import type { AgentSpec } from '@agentops/contracts';
+import type { AgentSpec, AgentsManifest } from '@agentops/contracts';
 import type { ExistingSchedule, ReconcilePlan } from '@agentops/policies';
 
 export interface Issue {
@@ -58,7 +58,7 @@ export interface DevCycleActivities {
 
 export interface ConfigSyncActivities {
   listManagedProjects(): Promise<Array<{ project: string; repo: string }>>;
-  loadAgentsManifest(project: string, repo: string): Promise<AgentSpec[]>;
+  loadAgentsManifest(project: string, repo: string): Promise<AgentsManifest>;
   listAgentSchedules(project: string): Promise<ExistingSchedule[]>;
   applyScheduleChanges(project: string, repo: string, plan: ReconcilePlan): Promise<void>;
   listContinuousAgents(project: string): Promise<string[]>;

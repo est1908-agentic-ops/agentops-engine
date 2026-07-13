@@ -4,6 +4,7 @@ import type { ResolvedProjectEntry } from '@agentops/contracts';
 import { createGithubPorts } from '@agentops/ports';
 import { Pool } from 'pg';
 import { createGatewayServer } from './create-gateway-server';
+import { createProjectWorkerParamsProvider } from './argocd-project-workers';
 
 loadEnv();
 
@@ -56,6 +57,17 @@ async function main(): Promise<void> {
       : 'agentops gateway: Linear webhook route disabled (LINEAR_WEBHOOK_SECRET unset)',
   );
 
+  // ArgoCD ApplicationSet plugin generator: serves per-project worker specs read
+  // from each project's agents.json (spec §5.2/§6, Option A — hosted here, not on
+  // the encrypt-only control). Off unless ARGOCD_PLUGIN_TOKEN is set.
+  const argocdPluginToken = process.env.ARGOCD_PLUGIN_TOKEN;
+  const argocdParams = createProjectWorkerParamsProvider({ managedProjectDeps, buildScm });
+  console.log(
+    argocdPluginToken
+      ? 'agentops gateway: ArgoCD project-workers generator ENABLED (ARGOCD_PLUGIN_TOKEN set)'
+      : 'agentops gateway: ArgoCD project-workers generator disabled (ARGOCD_PLUGIN_TOKEN unset)',
+  );
+
   const server = createGatewayServer({
     client,
     taskQueue: TASK_QUEUE,
@@ -64,6 +76,8 @@ async function main(): Promise<void> {
     buildScm,
     managedProjectDeps,
     linearWebhookSecret,
+    argocdParams,
+    argocdPluginToken,
   });
 
   const port = Number(process.env.PORT ?? 3000);

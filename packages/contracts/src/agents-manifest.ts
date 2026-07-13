@@ -24,8 +24,34 @@ export const AgentSpecSchema = z
   .strict();
 export type AgentSpec = z.infer<typeof AgentSpecSchema>;
 
-export const AgentsManifestSchema = z.object({ agents: z.array(AgentSpecSchema) }).strict();
+// The project's Tier-2 worker (spec 2026-07-12-project-worker-onboarding §6.1).
+// Its presence marks the project Tier-2: a config-only Tier-1 project has
+// `agents` but no `worker` (its agents run on ENGINE_QUEUE). Never carries a
+// secret — `externalSecrets` are K8s Secret *names*, not values.
+export const ProjectWorkerSchema = z
+  .object({
+    image: z.string().min(1), // project-built worker image ref (repo:tag or repo@digest)
+    taskQueue: z.string().min(1).optional(), // default proj-<project> at resolution time
+    replicas: z.number().int().positive().default(1),
+    externalSecrets: z.array(z.string().min(1)).default([]),
+  })
+  .strict();
+export type ProjectWorker = z.infer<typeof ProjectWorkerSchema>;
+
+export const AgentsManifestSchema = z
+  .object({ agents: z.array(AgentSpecSchema), worker: ProjectWorkerSchema.optional() })
+  .strict();
 export type AgentsManifest = z.infer<typeof AgentsManifestSchema>;
+
+// The built-in workflows the engine's shared fleet runs (they poll ENGINE_QUEUE).
+// Any other `workflow` name in a manifest is a project (Tier-2) workflow, which
+// runs on the project's own queue (proj-<project>) — see resolveAgentQueue in
+// @agentops/policies. Keep in sync with the workflows registered by the worker
+// (packages/workflows). Adding a built-in is a deliberate change here.
+export const BUILTIN_WORKFLOWS: ReadonlySet<string> = new Set(['devCycle', 'whiteboxBugHunt', 'platform']);
+export function isBuiltinWorkflow(name: string): boolean {
+  return BUILTIN_WORKFLOWS.has(name);
+}
 
 // Manifest-facing input schemas for built-ins (the reconciler injects `repo`).
 export const WhiteboxBugHuntManifestInputSchema = z.object({ focus: z.string().optional() }).strict();
