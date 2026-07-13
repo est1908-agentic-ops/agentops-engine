@@ -1,5 +1,4 @@
 import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
-import { AgentsPage } from './pages/Agents';
 import { DevCycleRunDetailPage } from './pages/DevCycleRunDetailPage';
 import { HomePage } from './pages/HomePage';
 import { ProjectsPage } from './pages/ProjectsPage';
@@ -13,9 +12,7 @@ export function App() {
   return (
     <BrowserRouter>
       <nav className="top-nav">
-        <Link to="/">Console</Link>
         <Link to="/projects">Projects</Link>
-        <Link to="/agents">Agents</Link>
         <Link to="/chat">Chat</Link>
         <Link to="/tiers">Tiers</Link>
         <Link to="/settings">Settings</Link>
@@ -25,7 +22,6 @@ export function App() {
         <Route path="/runs/:workflowId" element={<RunDetailPage />} />
         <Route path="/dev-runs/:workflowId" element={<DevCycleRunDetailPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
-        <Route path="/agents" element={<AgentsPage />} />
         <Route path="/chat" element={<ChatStartPage />} />
         <Route path="/chats/:chatId" element={<ChatPage />} />
         <Route path="/tiers" element={<TiersPage />} />
