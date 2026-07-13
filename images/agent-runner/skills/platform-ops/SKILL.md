@@ -10,13 +10,27 @@ goes through three channels: two HTTP APIs (Temporal REST, Grafana's datasource 
 of Loki and Prometheus) and read-only `kubectl` (this role's ServiceAccount only — get/list/
 watch, no exec/delete/patch/create).
 
+## Credentials
+
+This role's Job has `TEMPORAL_HOST`, `GRAFANA_HOST`, `GRAFANA_USER`, and `GRAFANA_PASSWORD`
+available directly as environment variables — read them from the environment, don't ask anyone
+for them. `TEMPORAL_HOST`/`GRAFANA_HOST` are full base URLs (e.g.
+`https://temporal.agentic-ops.est1908.top`), so use them as-is wherever `<temporal-host>` or
+`<grafana-host>` appears below; `GRAFANA_USER`/`GRAFANA_PASSWORD` go in curl's `-u` flag wherever
+`<user>:<pass>` appears below.
+
+If any of these four are unset (e.g. a cluster where this role's credential secret isn't
+provisioned yet), say so plainly in your `summary` as an environment note and fall back to
+whatever channels remain available (Temporal history, kubectl, repo clones) rather than treating
+it as a fatal error.
+
 ## Temporal — workflow status and history
 
 Same technique as `debug-devcycle-issue`:
 
 ```
-curl -s "https://<temporal-host>/api/v1/namespaces/<namespace>/workflows/<workflowId>"
-curl -s "https://<temporal-host>/api/v1/namespaces/<namespace>/workflows/<workflowId>/history?historyEventFilterType=HISTORY_EVENT_FILTER_TYPE_ALL_EVENT"
+curl -s "$TEMPORAL_HOST/api/v1/namespaces/<namespace>/workflows/<workflowId>"
+curl -s "$TEMPORAL_HOST/api/v1/namespaces/<namespace>/workflows/<workflowId>/history?historyEventFilterType=HISTORY_EVENT_FILTER_TYPE_ALL_EVENT"
 ```
 
 ## Finding recent failures
@@ -25,7 +39,7 @@ Before triaging, enumerate what actually failed. Query the Temporal **visibility
 
 ```
 # List workflows that Failed or were Terminated recently (adjust the window).
-curl -s "https://<temporal-host>/api/v1/namespaces/<namespace>/workflows" \
+curl -s "$TEMPORAL_HOST/api/v1/namespaces/<namespace>/workflows" \
   --data-urlencode 'query=ExecutionStatus="Failed" OR ExecutionStatus="Terminated"' \
   -G | jq '.executions[] | {workflowId: .execution.workflowId, type: .type.name, status: .status, closeTime: .closeTime}'
 ```
@@ -40,8 +54,9 @@ did and why in the `actionsTaken` field of your final `PLATFORM_RESULT:` line.
 ## Grafana → Loki (logs)
 
 Identical to `debug-devcycle-issue`: find the Loki datasource UID via
-`/api/datasources`, then GET (never POST) `/api/datasources/proxy/uid/<uid>/loki/api/v1/query_range`
-with `-G --data-urlencode`, `start`/`end` in nanoseconds since epoch.
+`$GRAFANA_HOST/api/datasources` (basic auth `$GRAFANA_USER:$GRAFANA_PASSWORD`), then GET (never
+POST) `/api/datasources/proxy/uid/<uid>/loki/api/v1/query_range` with `-G --data-urlencode`,
+`start`/`end` in nanoseconds since epoch.
 
 ## Grafana → Prometheus (cluster/resource state)
 
@@ -49,7 +64,7 @@ Same proxy pattern, different datasource UID (look for `"type": "prometheus"` in
 `/api/datasources`):
 
 ```
-curl -s -u '<user>:<pass>' -G "https://<grafana-host>/api/datasources/proxy/uid/<uid>/api/v1/query" \
+curl -s -u "$GRAFANA_USER:$GRAFANA_PASSWORD" -G "$GRAFANA_HOST/api/datasources/proxy/uid/<uid>/api/v1/query" \
   --data-urlencode 'query=container_memory_usage_bytes{namespace="dev-agents"}'
 ```
 
