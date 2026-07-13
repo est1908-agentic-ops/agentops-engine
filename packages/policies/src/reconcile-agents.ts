@@ -8,6 +8,23 @@ export function scheduleId(project: string, name: string): string {
   return `agent:${project}:${name}`;
 }
 
+// Agent schedules are keyed `agent:<project>:<name>`. When a project is removed
+// from the managed registry, reconcileAllProjects stops iterating it, so
+// reconcileAgents never runs for it and its schedules are never deleted -- they
+// linger and keep firing onto a queue nothing serves (proj-<project>) or run a
+// removed project's workflow. Given every `agent:*` schedule id and the set of
+// still-managed projects, return the orphans to delete: any `agent:` schedule
+// not owned by a live project. Matches by `agent:<project>:` PREFIX rather than
+// splitting on ':' so project or agent names containing ':' (or spaces) are safe,
+// and only ever targets `agent:` ids -- platform schedules (reconcile:all,
+// self-heal) can never match.
+export function orphanScheduleIds(agentScheduleIds: string[], liveProjects: string[]): string[] {
+  const livePrefixes = liveProjects.map((p) => `agent:${p}:`);
+  return agentScheduleIds.filter(
+    (id) => id.startsWith('agent:') && !livePrefixes.some((prefix) => id.startsWith(prefix)),
+  );
+}
+
 // A Tier-2 project worker polls this queue (proj-worker chart default). Both the
 // worker Deployment and the agent's schedule derive their queue from the project
 // slug so they can't drift (spec 2026-07-12-project-worker-onboarding §7).

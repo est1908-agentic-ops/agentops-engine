@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { reconcileAgents, scheduleId, reconcileContinuous, resolveAgentQueue, projectQueue, workerWarnings } from './reconcile-agents';
+import { reconcileAgents, scheduleId, reconcileContinuous, resolveAgentQueue, projectQueue, workerWarnings, orphanScheduleIds } from './reconcile-agents';
 import { ENGINE_QUEUE, LEGACY_ENGINE_QUEUE } from '@agentops/contracts';
 import type { AgentSpec, AgentsManifest } from '@agentops/contracts';
 
@@ -127,3 +127,39 @@ it('excludes a disabled continuous agent (treated as terminate)', () => {
   expect(plan.toTerminate).toEqual([scheduleId('acme', 'mon')]);
 });
 
+
+describe('orphanScheduleIds', () => {
+  it('flags agent schedules whose project is no longer managed', () => {
+    const ids = [
+      scheduleId('broccoli', 'smoke-test'),
+      scheduleId('broccoli', 'nightly-bughunt'),
+      scheduleId('acme', 'nightly'),
+    ];
+    expect(orphanScheduleIds(ids, ['acme'])).toEqual([
+      scheduleId('broccoli', 'smoke-test'),
+      scheduleId('broccoli', 'nightly-bughunt'),
+    ]);
+  });
+
+  it('keeps schedules for live projects and never touches non-agent schedules', () => {
+    const ids = [scheduleId('acme', 'nightly'), 'reconcile:all', 'self-heal'];
+    expect(orphanScheduleIds(ids, ['acme'])).toEqual([]);
+  });
+
+  it('matches by project prefix, so a project name is not confused with a longer one', () => {
+    const ids = [scheduleId('acme', 'a'), scheduleId('acme-staging', 'a')];
+    // only 'acme' is live -> 'acme-staging' is an orphan (prefix is `agent:acme:`, not `agent:acme`)
+    expect(orphanScheduleIds(ids, ['acme'])).toEqual([scheduleId('acme-staging', 'a')]);
+  });
+
+  it('handles project/agent names containing spaces or colons via prefix match', () => {
+    const live = 'Artem private agents';
+    const ids = [scheduleId(live, 'smoke'), scheduleId('gone', 'x')];
+    expect(orphanScheduleIds(ids, [live])).toEqual([scheduleId('gone', 'x')]);
+  });
+
+  it('returns everything when no projects are live', () => {
+    const ids = [scheduleId('acme', 'a'), scheduleId('broccoli', 'b')];
+    expect(orphanScheduleIds(ids, [])).toEqual(ids);
+  });
+});

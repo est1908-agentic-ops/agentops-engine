@@ -33,7 +33,7 @@ import type { FiledFindingStore } from './filed-finding-store';
 import { cronScheduleSpec, type ScheduleClientLike } from './schedule-ops';
 import { ENGINE_QUEUE } from '@agentops/contracts';
 import type { ReconcilePlan } from '@agentops/policies';
-import { resolveAgentQueue, resolveTier, scheduleId } from '@agentops/policies';
+import { orphanScheduleIds, resolveAgentQueue, resolveTier, scheduleId } from '@agentops/policies';
 import type { PromptPack } from '@agentops/prompts';
 import type { StageResultRecord, StageResultStore } from './stage-result-store';
 import type { StatsStore } from './stats-store';
@@ -387,6 +387,33 @@ export function createActivities(deps: ActivityDependencies) {
         // best effort
       }
       return out;
+    },
+
+    async pruneOrphanAgentSchedules(liveProjects: string[]): Promise<{ deleted: string[] }> {
+      const client = deps.scheduleClient;
+      if (!client || !client.list) return { deleted: [] };
+      const ids: string[] = [];
+      try {
+        for await (const s of client.list!()) {
+          const sid = (s as Record<string, unknown>).scheduleId as string | undefined;
+          if (sid && sid.startsWith('agent:')) ids.push(sid);
+        }
+      } catch {
+        // Can't enumerate schedules right now -- skip this sweep; the next
+        // reconcile (~15 min) retries. Never delete on a partial/failed list.
+        return { deleted: [] };
+      }
+      const orphans = orphanScheduleIds(ids, liveProjects);
+      const deleted: string[] = [];
+      for (const id of orphans) {
+        try {
+          await client.getHandle(id).delete?.();
+          deleted.push(id);
+        } catch {
+          // Best-effort; a transient delete failure is retried next sweep.
+        }
+      }
+      return { deleted };
     },
 
     async applyScheduleChanges(project: string, repo: string, plan: ReconcilePlan): Promise<void> {
