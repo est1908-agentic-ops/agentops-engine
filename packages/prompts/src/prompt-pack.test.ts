@@ -30,18 +30,25 @@ describe('PromptPack', () => {
     expect(() => pack.render('review.md', { taskId: 't1', goal: 'g' })).not.toThrow();
   });
 
-  it('renders design.md with the unattended-mode instruction and skill pointer', () => {
+  it('renders design.md with the unattended-mode instruction, skill pointer, and artifact persistence', () => {
     const pack = new PromptPack();
     const rendered = pack.render('design.md', { taskId: 't1', goal: 'g' });
     expect(rendered).toContain('There is no human here. Do not ask anything');
     expect(rendered).toContain('design-brainstorm');
+    expect(rendered).toContain('agentops/specs/t1-design.md');
+    expect(rendered).toContain('git add');
+    expect(rendered).toContain('git commit');
   });
 
-  it('renders plan.md with the unattended-mode instruction and skill pointer', () => {
+  it('renders plan.md with the unattended-mode instruction, skill pointer, design read pointer, and artifact persistence', () => {
     const pack = new PromptPack();
     const rendered = pack.render('plan.md', { taskId: 't1', goal: 'g' });
     expect(rendered).toContain('There is no human here. Do not ask anything');
     expect(rendered).toContain('plan-writer');
+    expect(rendered).toContain('agentops/specs/t1-design.md');
+    expect(rendered).toContain('agentops/specs/t1-plan.md');
+    expect(rendered).toContain('git add');
+    expect(rendered).toContain('git commit');
   });
 
   it('renders the platform-chat template with a transcript', () => {
@@ -53,6 +60,18 @@ describe('PromptPack', () => {
     });
     expect(rendered).toContain('CHAT_TURN:');
     expect(rendered).toContain('check the logs');
+  });
+
+  it('renders implement.md with design and plan read pointers', () => {
+    const pack = new PromptPack();
+    const rendered = pack.render('implement.md', {
+      taskId: 't1',
+      goal: 'g',
+      fullVerifyFindings: '',
+      reviewFindings: '',
+    });
+    expect(rendered).toContain('agentops/specs/t1-design.md');
+    expect(rendered).toContain('agentops/specs/t1-plan.md');
   });
 
   it('renders the generic agent template with instructions and the FINDINGS contract', () => {

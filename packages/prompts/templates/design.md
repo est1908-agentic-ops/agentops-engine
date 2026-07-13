@@ -18,3 +18,9 @@ Propose a design for this change:
 - Do not write implementation code yet.
 
 If a `design-brainstorm` skill is available, use it for the full methodology.
+
+## Persist the artifact
+
+When you are done with the design, write it to `agentops/specs/{{taskId}}-design.md` in this
+workspace and commit it with `git add` / `git commit`. This spec will be carried forward to the
+plan and implementation stages, and nothing you don't commit will ever be pushed or reviewed.

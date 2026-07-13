@@ -26,3 +26,9 @@ the plan before implementation starts. Keep the structure, drop the review gate.
 - **Steps** — ordered; each with the file(s) touched, what changes, and how it's verified.
 - **Sequencing notes** — anything you deliberately ordered a particular way, and why.
 - **Assumptions** — anything you decided yourself in lieu of asking.
+
+## Persist the artifact
+
+When your plan is complete, write the full output to `agentops/specs/<taskId>-plan.md` in the
+workspace and commit it with `git add` / `git commit`. The plan will be carried forward to the
+implementation stage for review, and nothing you don't commit will ever be pushed.

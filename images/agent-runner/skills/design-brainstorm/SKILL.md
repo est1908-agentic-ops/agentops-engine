@@ -31,3 +31,10 @@ questions of or get section-by-section approval from. Keep the rigor, drop the b
 - **Assumptions** — anything you decided yourself in lieu of asking.
 - **Design** — components/files affected, data flow, error handling; scale detail to the
   complexity of the change.
+
+## Persist the artifact
+
+When your design is complete, write the full output to `agentops/specs/<taskId>-design.md` in
+the workspace and commit it with `git add` / `git commit`. The spec will be carried forward to
+the planning and implementation stages for review, and nothing you don't commit will ever be
+pushed.

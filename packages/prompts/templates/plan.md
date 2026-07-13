@@ -6,6 +6,9 @@ There is no human here. Do not ask anything — decide yourself and record the a
 This run is unattended: nobody will review this plan before implementation starts, so resolve
 every open question yourself instead of raising it.
 
+Before planning, read the design specification in `agentops/specs/{{taskId}}-design.md` to
+understand the approach you're planning for.
+
 Turn the design into a concrete, ordered implementation plan:
 
 - List the files that change, in the order you'll change them.
@@ -18,3 +21,9 @@ Turn the design into a concrete, ordered implementation plan:
 - Do not write implementation code yet.
 
 If a `plan-writer` skill is available, use it for the full methodology.
+
+## Persist the artifact
+
+When you are done with the plan, write it to `agentops/specs/{{taskId}}-plan.md` in this
+workspace and commit it with `git add` / `git commit`. This plan will be carried forward to the
+implementation stage, and nothing you don't commit will ever be pushed or reviewed.
