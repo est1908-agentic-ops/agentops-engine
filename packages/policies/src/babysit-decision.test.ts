@@ -10,6 +10,7 @@ const failedFeedback: PrFeedback = {
   comments: [],
 };
 const pendingFeedback: PrFeedback = { ciStatus: 'pending', unresolvedThreads: 0, comments: [] };
+const unreadableFeedback: PrFeedback = { ciStatus: 'unreadable', unresolvedThreads: 0, comments: [] };
 
 describe('babysitDecision', () => {
   it('is merge_ready when CI is green and there are zero unresolved threads', () => {
@@ -64,5 +65,15 @@ describe('babysitDecision', () => {
 
   it('defaults to unbounded waiting for the legacy 4-arg call', () => {
     expect(babysitDecision(pendingFeedback, new Set(), 0, 5)).toBe('waiting');
+  });
+
+  it('brakes immediately when CI is unreadable (permission problem), without waiting on the no-progress cap', () => {
+    // Unlike `pending`, `unreadable` means retrying can never resolve it -- no
+    // point burning maxWaitingRounds worth of no-op polls first.
+    expect(babysitDecision(unreadableFeedback, new Set(), 0, 5)).toBe('braked');
+  });
+
+  it('brakes on unreadable CI even on the very first round, before any waiting rounds have accrued', () => {
+    expect(babysitDecision(unreadableFeedback, new Set(), 0, 5, 0, 10)).toBe('braked');
   });
 });

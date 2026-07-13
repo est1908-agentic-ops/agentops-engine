@@ -250,10 +250,10 @@ describe('GithubScmPort — getPrFeedback', () => {
   }
   const forbidden = Object.assign(new Error('Resource not accessible by personal access token'), { status: 403 });
 
-  it('degrades to pending (never throws) when BOTH check-runs and statuses are inaccessible (403)', async () => {
+  it('degrades to unreadable (never throws) when BOTH check-runs and statuses are inaccessible (403)', async () => {
     const scm = setupCi({ checks: forbidden, status: forbidden });
     const feedback = await scm.getPrFeedback('octocat/hello-world#7');
-    expect(feedback.ciStatus).toBe('pending');
+    expect(feedback.ciStatus).toBe('unreadable');
   });
 
   it('falls back to the Statuses API when the Checks API is 403', async () => {
@@ -300,13 +300,14 @@ describe('GithubScmPort — getPrFeedback', () => {
   // PAT can't read check runs at all) while the Statuses API genuinely has zero
   // statuses. One source is a confirmed `none`, but the other is truly
   // `unknown` (could be anything), so this must stay conservative -- unlike the
-  // both-confirmed-none case above, this does NOT resolve to green.
-  it('stays pending when checks are unreadable (403) even though statuses confirm zero -- one unknown side blocks green', async () => {
+  // both-confirmed-none case above, this does NOT resolve to green, and unlike
+  // a real in-progress CI it should not be conflated with `pending` either.
+  it('reports unreadable when checks are inaccessible (403) even though statuses confirm zero -- one unknown side blocks green', async () => {
     const scm = setupCi({
       checks: forbidden,
       status: { data: { state: 'pending', total_count: 0 } },
     });
-    expect((await scm.getPrFeedback('octocat/hello-world#7')).ciStatus).toBe('pending');
+    expect((await scm.getPrFeedback('octocat/hello-world#7')).ciStatus).toBe('unreadable');
   });
 
   it('confirmed-zero checks combined with a real green from statuses is green', async () => {

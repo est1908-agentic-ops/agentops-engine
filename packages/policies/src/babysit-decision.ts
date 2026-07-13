@@ -21,6 +21,14 @@ export function babysitDecision(
   if (isMergeReady) {
     return 'merge_ready';
   }
+  // `unreadable` means a source (Checks API, Statuses API, or both) is
+  // structurally unreadable with the current credentials -- not "still
+  // running." No amount of polling fixes a permission problem, so brake
+  // immediately instead of burning through `maxWaitingRounds` worth of
+  // no-op polls first.
+  if (feedback.ciStatus === 'unreadable') {
+    return 'braked';
+  }
   if (rounds >= cap) {
     return 'braked';
   }

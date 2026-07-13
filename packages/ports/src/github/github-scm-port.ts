@@ -45,7 +45,8 @@ const REVIEW_THREADS_QUERY = `
 // for, so that combination resolves to `green` instead of hanging until the
 // babysit brake trips. See est1908/agents PR #5 (2026-07-13): zero check runs
 // (Checks API 403'd -> unknown) and zero statuses (confirmed `none`) -- that
-// PR still correctly stays `pending`, since one side remains unreadable.
+// PR still correctly resolves to `unreadable` rather than `green`, since one
+// side remains unreadable and its real state could be anything.
 type CiSignal = 'green' | 'failed' | 'pending' | 'unknown' | 'none';
 
 function isNotAccessible(err: unknown): boolean {
@@ -66,17 +67,24 @@ function mapCombinedStatus(state: string, total: number): CiSignal {
   return 'pending';
 }
 
-// Failure dominates; then pending; then green; two confirmed-empty sources
-// (`none`) mean no CI is configured anywhere for this ref, so that combination
-// is merge-ready too. Anything else touching `unknown` (a source we couldn't
-// read at all) stays conservative -- `pending` -- since that source's real
-// state could be anything, unlike a confirmed `none`.
-export function mergeCiSignals(a: CiSignal, b: CiSignal): 'green' | 'failed' | 'pending' {
+// Failure dominates; then pending (a real signal from the other side means CI
+// is genuinely still running -- worth waiting on); then green; two
+// confirmed-empty sources (`none`) mean no CI is configured anywhere for this
+// ref, so that combination is merge-ready too. Every remaining combination
+// necessarily involves an `unknown` paired with `none` or another `unknown`
+// (see the exhaustive case analysis: anything with `failed`/`pending`/`green`
+// is already handled above) -- i.e. neither source gave a real signal at all.
+// That's not "still running," it's "we structurally can't tell" (e.g. a token
+// that can't read the Checks API, see est1908/agents getPrFeedback 403
+// (2026-07-13)) -- retrying won't change it, so surface it distinctly as
+// `unreadable` instead of defaulting to `pending`, which would babysit-poll
+// forever on a permission problem no amount of waiting will fix.
+export function mergeCiSignals(a: CiSignal, b: CiSignal): 'green' | 'failed' | 'pending' | 'unreadable' {
   if (a === 'failed' || b === 'failed') return 'failed';
   if (a === 'pending' || b === 'pending') return 'pending';
   if (a === 'green' || b === 'green') return 'green';
   if (a === 'none' && b === 'none') return 'green';
-  return 'pending';
+  return 'unreadable';
 }
 
 export class GithubScmPort implements ScmPort {
@@ -145,7 +153,7 @@ export class GithubScmPort implements ScmPort {
   // 403/404 on either (e.g. a PAT that can't read check runs) degrades that
   // source to `unknown` instead of failing the whole activity; other errors
   // (5xx/network) still propagate so Temporal's retry can absorb them.
-  private async readCiStatus(owner: string, repo: string, ref: string): Promise<'green' | 'failed' | 'pending'> {
+  private async readCiStatus(owner: string, repo: string, ref: string): Promise<'green' | 'failed' | 'pending' | 'unreadable'> {
     const [checks, status] = await Promise.all([
       this.readCheckRuns(owner, repo, ref),
       this.readCombinedStatus(owner, repo, ref),
