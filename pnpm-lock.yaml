@@ -366,6 +366,13 @@ importers:
       '@temporalio/workflow':
         specifier: ^1.11.0
         version: 1.19.0
+    devDependencies:
+      '@temporalio/testing':
+        specifier: ^1.11.0
+        version: 1.19.0(esbuild@0.28.1)(tslib@2.8.1)
+      '@temporalio/worker':
+        specifier: ^1.11.0
+        version: 1.19.0(esbuild@0.28.1)(tslib@2.8.1)
 
 packages:
 
@@ -5406,6 +5413,31 @@ snapshots:
       '@temporalio/core-bridge': 1.19.0
       '@temporalio/proto': 1.19.0
       '@temporalio/worker': 1.19.0(esbuild@0.28.1)
+      '@temporalio/workflow': 1.19.0
+    transitivePeerDependencies:
+      - '@minify-html/node'
+      - '@swc/css'
+      - '@swc/helpers'
+      - '@swc/html'
+      - clean-css
+      - cssnano
+      - csso
+      - esbuild
+      - html-minifier-terser
+      - lightningcss
+      - postcss
+      - tslib
+      - uglify-js
+      - webpack-cli
+
+  '@temporalio/testing@1.19.0(esbuild@0.28.1)(tslib@2.8.1)':
+    dependencies:
+      '@temporalio/activity': 1.19.0
+      '@temporalio/client': 1.19.0
+      '@temporalio/common': 1.19.0
+      '@temporalio/core-bridge': 1.19.0
+      '@temporalio/proto': 1.19.0
+      '@temporalio/worker': 1.19.0(esbuild@0.28.1)(tslib@2.8.1)
       '@temporalio/workflow': 1.19.0
     transitivePeerDependencies:
       - '@minify-html/node'

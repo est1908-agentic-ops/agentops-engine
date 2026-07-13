@@ -21,6 +21,14 @@ import {
   handleStartDevCycleRun,
 } from './devcycle-routes';
 import { handleListAgents, handleTriggerAgent } from './agents-routes';
+import {
+  handleCloseChat,
+  handleDecision,
+  handleGetChat,
+  handleListChats,
+  handleSendTurn,
+  handleStartChat,
+} from './chat-routes';
 import { handleListTiers, handleReplaceTiers } from './tiers-routes';
 import { matchPath } from './route';
 import { resolveStaticFile } from './serve-static';
@@ -143,6 +151,10 @@ function authorizeProjectCrud(deps: ControlDeps, req: IncomingMessage): boolean 
   // ingress consumes the Authorization header, so the CRUD bearer token uses a
   // custom header to avoid collision. Works with or without basic-auth in front.
   return req.headers['x-control-crud-token'] === deps.projectCrudAuthToken;
+}
+
+function authorizeControlToken(deps: ControlDeps, req: IncomingMessage): boolean {
+  return Boolean(deps.projectCrudAuthToken) && req.headers['x-control-crud-token'] === deps.projectCrudAuthToken;
 }
 
 async function handleListProjects(deps: ControlDeps): Promise<HandlerResponse> {
@@ -279,6 +291,33 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
       return { status: 401, body: { error: 'unauthorized' } };
     }
     return handleTriggerAgent(deps, agentRun.params.scheduleId);
+  }
+  if (pathname === '/api/platform/chats' || pathname.startsWith('/api/platform/chats/')) {
+    if (!authorizeControlToken(deps, req)) {
+      return { status: 401, body: { error: 'unauthorized' } };
+    }
+    if (req.method === 'POST' && pathname === '/api/platform/chats') {
+      return handleStartChat(deps, req);
+    }
+    if (req.method === 'GET' && pathname === '/api/platform/chats') {
+      return handleListChats(deps, url);
+    }
+    const turnMatch = matchPath('/api/platform/chats/:chatId/turns', pathname);
+    if (req.method === 'POST' && turnMatch) {
+      return handleSendTurn(deps, turnMatch.params.chatId, req);
+    }
+    const decisionMatch = matchPath('/api/platform/chats/:chatId/decisions', pathname);
+    if (req.method === 'POST' && decisionMatch) {
+      return handleDecision(deps, decisionMatch.params.chatId, req);
+    }
+    const closeMatch = matchPath('/api/platform/chats/:chatId/close', pathname);
+    if (req.method === 'POST' && closeMatch) {
+      return handleCloseChat(deps, closeMatch.params.chatId);
+    }
+    const chatMatch = matchPath('/api/platform/chats/:chatId', pathname);
+    if (req.method === 'GET' && chatMatch) {
+      return handleGetChat(deps, chatMatch.params.chatId);
+    }
   }
   if (pathname === '/api/tiers') {
     if (req.method === 'GET') {

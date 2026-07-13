@@ -44,6 +44,17 @@ describe('PromptPack', () => {
     expect(rendered).toContain('plan-writer');
   });
 
+  it('renders the platform-chat template with a transcript', () => {
+    const pack = new PromptPack();
+    const rendered = pack.render('platform-chat.md', {
+      taskId: 'chat-1',
+      transcript: 'Operator: check the logs',
+      hintRepos: '(none provided)',
+    });
+    expect(rendered).toContain('CHAT_TURN:');
+    expect(rendered).toContain('check the logs');
+  });
+
   it('throws a clear error for an unknown template ref', () => {
     const pack = new PromptPack();
     expect(() => pack.render('nonexistent.md', {})).toThrow(/nonexistent\.md/);

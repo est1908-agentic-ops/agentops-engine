@@ -11,6 +11,7 @@ export * from './pr-feedback';
 export * from './resolved-project-entry';
 export * from './managed-project';
 export * from './platform-agent';
+export * from './platform-chat';
 export * from './control-api';
 export * from './control-devcycle-api';
 export * from './control-projects-api';
