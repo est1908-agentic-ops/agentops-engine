@@ -1,7 +1,13 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client, Connection } from '@temporalio/client';
-import { loadEnv, PostgresEngineSettingsStore, PostgresManagedProjectStore, PostgresTierStore } from '@agentops/activities';
+import {
+  loadEnv,
+  PostgresEngineSettingsStore,
+  PostgresManagedProjectStore,
+  PostgresStatsStore,
+  PostgresTierStore,
+} from '@agentops/activities';
 import { Pool } from 'pg';
 import { createControlServer } from './create-control-server';
 
@@ -57,6 +63,22 @@ function buildEngineSettingsStore(): PostgresEngineSettingsStore | undefined {
   );
 }
 
+function buildStatsStore(): PostgresStatsStore | undefined {
+  const host = process.env.ENGINE_DB_HOST;
+  if (!host) {
+    return undefined;
+  }
+  return new PostgresStatsStore(
+    new Pool({
+      host,
+      port: process.env.ENGINE_DB_PORT ? Number(process.env.ENGINE_DB_PORT) : 5432,
+      database: process.env.ENGINE_DB_NAME ?? 'agentops_engine',
+      user: process.env.ENGINE_DB_USER ?? 'temporal',
+      password: process.env.ENGINE_DB_PASSWORD,
+    }),
+  );
+}
+
 async function main(): Promise<void> {
   const temporalUiBaseUrl = process.env.TEMPORAL_UI_BASE_URL;
   if (!temporalUiBaseUrl) {
@@ -70,6 +92,7 @@ async function main(): Promise<void> {
   const managedProjectStore = buildManagedProjectStore();
   const tierStore = buildTierStore();
   const engineSettingsStore = buildEngineSettingsStore();
+  const statsStore = buildStatsStore();
   if (tierStore) {
     await tierStore.ensureSchema();
     console.log('agentops control: /api/tiers ENABLED (ENGINE_DB_HOST set)');
@@ -81,6 +104,12 @@ async function main(): Promise<void> {
     console.log('agentops control: /api/settings/self-heal ENABLED (ENGINE_DB_HOST set)');
   } else {
     console.log('agentops control: /api/settings/self-heal disabled (requires ENGINE_DB_HOST)');
+  }
+  if (statsStore) {
+    await statsStore.ensureSchema();
+    console.log('agentops control: /api/budgets ENABLED (ENGINE_DB_HOST set)');
+  } else {
+    console.log('agentops control: /api/budgets disabled (no ENGINE_DB_HOST)');
   }
   const projectCrudAuthToken = process.env.CONTROL_CRUD_TOKEN;
   if (managedProjectStore) {
@@ -117,6 +146,7 @@ async function main(): Promise<void> {
     managedProjectStore,
     tierStore,
     engineSettingsStore,
+    statsStore,
     projectCredentialPublicKey: process.env.PROJECT_CREDENTIAL_PUBLIC_KEY,
     projectCrudAuthToken,
   });

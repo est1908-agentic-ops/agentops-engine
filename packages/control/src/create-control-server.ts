@@ -10,6 +10,7 @@ import {
   StartRunResponseSchema,
   CreateManagedProjectRequestSchema,
   UpdateManagedProjectRequestSchema,
+  type RunStats,
 } from '@agentops/contracts';
 import type { PostgresEngineSettingsStore, PostgresManagedProjectStore, PostgresTierStore } from '@agentops/activities';
 import { platform } from '@agentops/workflows';
@@ -31,6 +32,7 @@ import {
 } from './chat-routes';
 import { handleListTiers, handleReplaceTiers } from './tiers-routes';
 import { handleGetSelfHealSettings, handleUpdateSelfHealSettings } from './settings-routes';
+import { handleGetBudgets } from './budgets-routes';
 import { matchPath } from './route';
 import { resolveStaticFile } from './serve-static';
 
@@ -51,6 +53,8 @@ export interface ControlDeps {
   // like managed projects (tier edits are operational, not secret-bearing).
   tierStore?: PostgresTierStore;
   engineSettingsStore?: PostgresEngineSettingsStore;
+  // Stats reader for budgets dashboard (simple slice). Same ENGINE_DB connection.
+  statsStore?: { all(): Promise<RunStats[]> };
   projectCredentialPublicKey?: string;
   projectCrudAuthToken?: string;
 }
@@ -283,6 +287,9 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
   }
   if (req.method === 'GET' && pathname === '/api/registry/repos') {
     return handleListRepos(deps);
+  }
+  if (req.method === 'GET' && pathname === '/api/budgets') {
+    return handleGetBudgets(deps);
   }
   if (req.method === 'GET' && pathname === '/api/agents') {
     return handleListAgents(deps);
