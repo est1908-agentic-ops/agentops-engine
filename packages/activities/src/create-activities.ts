@@ -354,6 +354,10 @@ export function createActivities(deps: ActivityDependencies) {
       return deps.registry.map((e) => ({ project: e.project, repo: e.repo }));
     },
 
+    async pruneOrphanWorkspaces(liveRepos: string[]): Promise<{ removed: string[] }> {
+      return deps.workspaces.pruneOrphans(liveRepos);
+    },
+
     async loadAgentsManifest(project: string, repo: string): Promise<AgentsManifest> {
       const raw = await deps.scm.readFile(repo, 'agents.json');
       if (raw === null) return { agents: [] };

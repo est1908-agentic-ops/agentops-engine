@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { GitCommandRunner } from '@agentops/ports';
@@ -24,6 +24,7 @@ export interface Workspaces {
   cleanup(workspaceRef: string, repo: string): Promise<void>;
   prepareScratch(taskId: string): Promise<{ workspaceRef: string }>;
   cleanupScratch(workspaceRef: string): Promise<void>;
+  pruneOrphans(liveRepos: string[]): Promise<{ removed: string[] }>;
 }
 
 export class WorkspaceError extends Error {
@@ -109,6 +110,73 @@ export class WorkspaceManager implements Workspaces {
     });
     if (result.exitCode !== 0) {
       throw new WorkspaceError(`git worktree remove failed for ${workspaceRef}: ${result.stderr}`, result.spawnFailed === true);
+    }
+  }
+
+  // Remove on-disk artifacts for repos no longer in the managed registry: their
+  // base clone under cacheDir and any worktrees under workspacesDir that point at
+  // it. A removed project (e.g. one de-registered from the console) otherwise
+  // leaves its full source readable on the shared PVCs indefinitely -- nothing
+  // ever reconciles it away, since prepare/cleanup only run for repos that still
+  // exist. Safe by construction: only base clones/worktrees NOT belonging to a
+  // live repo are touched (a live project's in-flight run is never disturbed),
+  // and clones are disposable (ARCHITECTURE.md §1) -- a repo mis-flagged here
+  // simply re-clones on its next prepare. Best-effort per entry so one failure
+  // doesn't abort the sweep.
+  async pruneOrphans(liveRepos: string[]): Promise<{ removed: string[] }> {
+    const liveSlugs = new Set(liveRepos.map(sanitizeRepoSlug));
+    const removed: string[] = [];
+
+    // Worktrees first, so a removed project's checked-out source goes too (not
+    // just the base clone it links back to).
+    const tasks = await readdir(this.workspacesDir).catch(() => [] as string[]);
+    for (const name of tasks) {
+      // `scratch` holds platform/chat scratch dirs (not repo worktrees); the
+      // pnpm store isn't a worktree either.
+      if (name === 'scratch' || name === '.pnpm-store') {
+        continue;
+      }
+      const slug = await this.worktreeCloneSlug(join(this.workspacesDir, name));
+      if (slug === undefined || liveSlugs.has(slug)) {
+        continue; // not a resolvable worktree, or owned by a live repo -> leave it
+      }
+      await rm(join(this.workspacesDir, name), { recursive: true, force: true }).catch(() => {});
+      removed.push(`tasks/${name}`);
+    }
+
+    // Base clones: <cacheDir>/<sanitizeRepoSlug(repo)>.
+    const cached = await readdir(this.cacheDir).catch(() => [] as string[]);
+    for (const name of cached) {
+      if (liveSlugs.has(name)) {
+        continue;
+      }
+      await rm(join(this.cacheDir, name), { recursive: true, force: true }).catch(() => {});
+      removed.push(`cache/${name}`);
+    }
+
+    return { removed };
+  }
+
+  // The base-clone slug a worktree belongs to, parsed from its `.git` gitdir
+  // pointer (`gitdir: <cacheDir>/<slug>/.git/worktrees/<name>`). undefined if the
+  // entry isn't a worktree with a pointer under this cacheDir (e.g. a stray dir,
+  // or a `git init` repo whose `.git` is a directory) -> caller leaves it alone.
+  private async worktreeCloneSlug(worktreePath: string): Promise<string | undefined> {
+    const dotGit = join(worktreePath, '.git');
+    try {
+      if (!(await stat(dotGit)).isFile()) {
+        return undefined;
+      }
+      const content = await readFile(dotGit, 'utf8');
+      const match = content.match(/gitdir:\s*(.+)/);
+      if (!match) {
+        return undefined;
+      }
+      const prefix = this.cacheDir.endsWith('/') ? this.cacheDir : `${this.cacheDir}/`;
+      const gitdir = match[1].trim();
+      return gitdir.startsWith(prefix) ? gitdir.slice(prefix.length).split('/')[0] || undefined : undefined;
+    } catch {
+      return undefined;
     }
   }
 

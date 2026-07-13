@@ -309,3 +309,44 @@ describe('WorkspaceManager — scratch workspaces', () => {
     expect(existsSync(workspaceRef)).toBe(false);
   });
 });
+
+describe('WorkspaceManager.pruneOrphans', () => {
+  it('removes base clones + worktrees for repos no longer managed, keeping live ones', async () => {
+    const { manager } = buildManager();
+    const live = await manager.prepare('task-live', 'owner/live');
+    const gone = await manager.prepare('task-gone', 'owner/gone');
+    expect(existsSync(join(cacheDir, 'owner-live'))).toBe(true);
+    expect(existsSync(join(cacheDir, 'owner-gone'))).toBe(true);
+    expect(existsSync(gone.workspaceRef)).toBe(true);
+
+    const { removed } = await manager.pruneOrphans(['owner/live']);
+
+    // orphan (removed project) clone + its worktree are gone
+    expect(existsSync(join(cacheDir, 'owner-gone'))).toBe(false);
+    expect(existsSync(gone.workspaceRef)).toBe(false);
+    expect(removed).toEqual(expect.arrayContaining(['cache/owner-gone', 'tasks/task-gone']));
+    // live project untouched
+    expect(existsSync(join(cacheDir, 'owner-live'))).toBe(true);
+    expect(existsSync(live.workspaceRef)).toBe(true);
+    expect(removed).not.toContain('cache/owner-live');
+    expect(removed).not.toContain('tasks/task-live');
+  });
+
+  it('leaves the scratch dir and non-worktree entries alone', async () => {
+    const { manager } = buildManager();
+    await manager.prepareScratch('chat-1'); // creates workspaces/scratch/chat-1
+    await manager.prepare('task-live', 'owner/live');
+    mkdirSync(join(workspacesDir, 'stray-dir'), { recursive: true }); // not a worktree
+
+    const { removed } = await manager.pruneOrphans(['owner/live']);
+
+    expect(existsSync(join(workspacesDir, 'scratch'))).toBe(true);
+    expect(existsSync(join(workspacesDir, 'stray-dir'))).toBe(true);
+    expect(removed).toEqual([]);
+  });
+
+  it('is a no-op when there are no cache/workspaces dirs yet', async () => {
+    const { manager } = buildManager();
+    await expect(manager.pruneOrphans(['owner/live'])).resolves.toEqual({ removed: [] });
+  });
+});
