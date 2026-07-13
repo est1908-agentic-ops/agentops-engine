@@ -6,7 +6,7 @@ import { GithubScmPort } from './github-scm-port';
 function fakeClient(): GithubClient {
   return {
     rest: {
-      issues: { get: vi.fn(), createComment: vi.fn(), addLabels: vi.fn() },
+      issues: { get: vi.fn(), create: vi.fn(), createComment: vi.fn(), addLabels: vi.fn(), removeLabel: vi.fn() },
       pulls: { create: vi.fn(), get: vi.fn(), list: vi.fn() },
       repos: { get: vi.fn(), getContent: vi.fn(), getCombinedStatusForRef: vi.fn() },
       checks: { listForRef: vi.fn() },
@@ -102,6 +102,53 @@ describe('GithubScmPort — openPr', () => {
       scm.openPr({ repo: 'octocat/hello-world', branch: 'agentops/t1', title: 'T', body: 'B' }),
     ).rejects.toBe(serverError);
     expect(client.rest.pulls.list).not.toHaveBeenCalled();
+  });
+
+  it('applies labels to the PR after creating it', async () => {
+    const client = fakeClient();
+    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { default_branch: 'main' } });
+    (client.rest.pulls.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { number: 7, html_url: 'https://github.com/octocat/hello-world/pull/7' },
+    });
+    (client.rest.issues.addLabels as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
+
+    const result = await scm.openPr({
+      repo: 'octocat/hello-world',
+      branch: 'agentops/t1',
+      title: 'T',
+      body: 'B',
+      labels: ['agentops', 'bug'],
+    });
+
+    expect(client.rest.issues.addLabels).toHaveBeenCalledWith({
+      owner: 'octocat',
+      repo: 'hello-world',
+      issue_number: 7,
+      labels: ['agentops', 'bug'],
+    });
+    expect(result).toEqual({ prRef: 'octocat/hello-world#7', url: 'https://github.com/octocat/hello-world/pull/7' });
+  });
+
+  it('does not apply labels if no labels are provided', async () => {
+    const client = fakeClient();
+    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { default_branch: 'main' } });
+    (client.rest.pulls.create as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { number: 7, html_url: 'https://github.com/octocat/hello-world/pull/7' },
+    });
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
+
+    const result = await scm.openPr({
+      repo: 'octocat/hello-world',
+      branch: 'agentops/t1',
+      title: 'T',
+      body: 'B',
+    });
+
+    expect(client.rest.issues.addLabels).not.toHaveBeenCalled();
+    expect(result).toEqual({ prRef: 'octocat/hello-world#7', url: 'https://github.com/octocat/hello-world/pull/7' });
   });
 });
 
