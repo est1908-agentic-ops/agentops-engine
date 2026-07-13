@@ -13,6 +13,10 @@ describe('PrFeedbackSchema', () => {
   it('parses a feedback record', () => {
     expect(feedback().ciStatus).toBe('failed');
   });
+
+  it('accepts unreadable as a ciStatus (a source is structurally unreadable, e.g. a 403 on the Checks API)', () => {
+    expect(feedback({ ciStatus: 'unreadable' }).ciStatus).toBe('unreadable');
+  });
 });
 
 describe('feedbackHash', () => {

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { sha256Hex } from './sha256';
 
-export const CiStatusSchema = z.enum(['pending', 'green', 'failed']);
+export const CiStatusSchema = z.enum(['pending', 'green', 'failed', 'unreadable']);
 export type CiStatus = z.infer<typeof CiStatusSchema>;
 
 export const PrCommentSchema = z.object({
