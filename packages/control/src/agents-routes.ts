@@ -16,7 +16,11 @@ export async function handleListAgents(deps: ControlDeps): Promise<HandlerRespon
       if (!id || !id.startsWith('agent:')) continue;
       const memo = (s as any).memo ?? {};
       const cron =
-        (s as any)?.schedule?.spec?.cron?.cronString ?? (s as any)?.spec?.cron?.[0]?.cronString ?? '';
+        (s as any)?.spec?.cronExpressions?.[0] ??
+        (s as any)?.schedule?.spec?.cronExpressions?.[0] ??
+        (s as any)?.schedule?.spec?.cron?.cronString ??
+        (s as any)?.spec?.cron?.[0]?.cronString ??
+        '';
       agents.push(
         AgentScheduleSummarySchema.parse({
           scheduleId: id,
