@@ -28,7 +28,7 @@ import type {
 import { parseProjectConfig, sha256, type AgentSpec, type AgentsManifest } from '@agentops/contracts';
 import { parseAgentsManifest, BUILTIN_WORKFLOW_INPUTS } from '@agentops/contracts';
 import type { FiledFindingStore } from './filed-finding-store';
-import type { ScheduleClientLike } from './schedule-ops';
+import { cronScheduleSpec, type ScheduleClientLike } from './schedule-ops';
 import { ENGINE_QUEUE } from '@agentops/contracts';
 import type { ReconcilePlan } from '@agentops/policies';
 import { resolveAgentQueue, resolveTier, scheduleId } from '@agentops/policies';
@@ -345,7 +345,7 @@ export function createActivities(deps: ActivityDependencies) {
           const sid = rec.scheduleId as string | undefined;
           if (!sid || !sid.startsWith(`agent:${project}:`)) continue;
           const spec = (rec.schedule as any)?.spec;
-          const scheduleSpec = typeof spec === 'string' ? spec : ((spec as any)?.cron?.cronString ?? String(spec ?? ''));
+          const scheduleSpec = typeof spec === 'string' ? spec : ((spec as any)?.cronExpressions?.[0] ?? (spec as any)?.cron?.cronString ?? String(spec ?? ''));
           const workflow = (rec.action as any)?.workflowType ?? 'whiteboxBugHunt';
           const taskQueue = (rec.action as any)?.taskQueue as string | undefined;
           out.push({ id: sid, scheduleSpec, workflow, paused: false, taskQueue });
@@ -360,7 +360,6 @@ export function createActivities(deps: ActivityDependencies) {
     async applyScheduleChanges(project: string, repo: string, plan: ReconcilePlan): Promise<void> {
       const client = deps.scheduleClient;
       if (!client) return;
-      /* eslint-disable @typescript-eslint/no-explicit-any */
       for (const spec of [...plan.toCreate, ...plan.toUpdate]) {
         if (spec.schedule === 'continuous') continue;
         const actionQueue = resolveAgentQueue(spec, project, deps.taskQueue ?? ENGINE_QUEUE);
@@ -371,18 +370,18 @@ export function createActivities(deps: ActivityDependencies) {
         if (plan.toCreate.some((c) => c.name === spec.name) && client.create) {
           await client.create({
             scheduleId: id,
-            spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } },
+            spec: cronScheduleSpec(spec.schedule, spec.timezone),
             action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: actionQueue, memo, searchAttributes },
             memo,
             searchAttributes,
-          } as any);
+          });
         } else {
           const h = client.getHandle(id);
           await h.update?.({
-            schedule: { spec: { cron: { cronString: spec.schedule, timezone: spec.timezone } }, action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: actionQueue, memo, searchAttributes } },
+            schedule: { spec: cronScheduleSpec(spec.schedule, spec.timezone), action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: actionQueue, memo, searchAttributes } },
             memo,
             searchAttributes,
-          } as any).catch(() => {});
+          })?.catch(() => {});
         }
       }
       for (const id of plan.toPause) {
@@ -394,7 +393,6 @@ export function createActivities(deps: ActivityDependencies) {
       for (const id of plan.toDelete) {
         await client.getHandle(id).delete?.().catch(() => {});
       }
-      /* eslint-enable @typescript-eslint/no-explicit-any */
     },
     /* eslint-disable @typescript-eslint/no-explicit-any */
     async listContinuousAgents(project: string): Promise<string[]> {
