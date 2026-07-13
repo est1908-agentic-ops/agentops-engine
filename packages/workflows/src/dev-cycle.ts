@@ -43,6 +43,14 @@ export type { DevCycleState } from '@agentops/contracts';
 
 const MAX_VERDICT_CALLS = 2;
 const DEFAULT_BABYSIT_POLL_MS = 5000;
+// Cap on consecutive no-progress babysit polls before blocking for a human. A
+// `waiting` round never advances `maxBabysitRounds` (only `actionable` repair
+// rounds do), so a PR whose CI never resolves -- e.g. GitHub Actions checks the
+// project token can't read, so getPrFeedback returns `pending` on every poll --
+// would otherwise poll forever. ~20 min of no actionable change -> braked
+// (resumable), rather than an unbounded spin. See devcycle:Artem private agents.
+const MAX_BABYSIT_WAIT_MS = 20 * 60_000;
+const MAX_BABYSIT_WAITS = Math.ceil(MAX_BABYSIT_WAIT_MS / DEFAULT_BABYSIT_POLL_MS);
 
 // Thrown only by runStageAgent, to unwind out to devCycle's top-level catch
 // when a cancel signal arrives while blocked on a budget-exceeded retry loop
@@ -373,6 +381,11 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
 
     state.stage = 'pr_babysit';
     const seenFeedbackHashes = new Set<string>();
+    let waitingRounds = 0;
+    // Lifted to unbounded once a human resumes a babysit brake -- same escape
+    // hatch as maxBabysitRounds (see resumeSignal): after "keep going" we don't
+    // want the loop to immediately re-brake.
+    let maxBabysitWaits = MAX_BABYSIT_WAITS;
 
     while (true) {
       await sleep(DEFAULT_BABYSIT_POLL_MS);
@@ -382,6 +395,8 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
         seenFeedbackHashes,
         state.babysitRounds,
         effectiveBrakes.maxBabysitRounds,
+        waitingRounds,
+        maxBabysitWaits,
       );
 
       if (decision === 'merge_ready') {
@@ -398,11 +413,17 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
           await activities.cleanupWorkspace(state.workspaceRef, input.repo);
           return state;
         }
+        // Human resumed: stop auto-braking (the round cap is lifted by
+        // resumeSignal; lift the no-progress cap here too) and restart the
+        // no-progress counter so continued babysitting isn't instantly re-braked.
+        maxBabysitWaits = Number.MAX_SAFE_INTEGER;
+        waitingRounds = 0;
         state.stage = 'pr_babysit';
         continue;
       }
 
       if (decision === 'actionable') {
+        waitingRounds = 0; // real progress -- reset the no-progress counter
         seenFeedbackHashes.add(feedbackHash(feedback));
         state.babysitRounds += 1;
         implementAttempt += 1;
@@ -418,7 +439,9 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
         continue;
       }
 
-      // decision === 'waiting': loop again after the next poll interval.
+      // decision === 'waiting': no actionable signal this poll. Count it toward
+      // the no-progress cap, then loop again after the next poll interval.
+      waitingRounds += 1;
     }
 
     state.stage = 'done';

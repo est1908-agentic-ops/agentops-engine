@@ -41,4 +41,28 @@ describe('babysitDecision', () => {
   it('prefers merge_ready over braked when the cap is reached but feedback is clean', () => {
     expect(babysitDecision(greenFeedback, new Set(), 5, 5)).toBe('merge_ready');
   });
+
+  it('keeps waiting on pending CI while under the no-progress cap', () => {
+    expect(babysitDecision(pendingFeedback, new Set(), 0, 5, 3, 10)).toBe('waiting');
+  });
+
+  it('brakes once the no-progress (waiting) cap is reached, so pending CI cannot spin forever', () => {
+    // The regression: CI the token can't read stays `pending` on every poll ->
+    // never actionable -> `rounds` never advances -> without this it waits forever.
+    expect(babysitDecision(pendingFeedback, new Set(), 0, 5, 10, 10)).toBe('braked');
+  });
+
+  it('also brakes on the no-progress cap when actionable feedback was already addressed', () => {
+    const seen = new Set([feedbackHash(failedFeedback)]);
+    expect(babysitDecision(failedFeedback, seen, 0, 5, 10, 10)).toBe('braked');
+  });
+
+  it('still prefers merge_ready / actionable over the no-progress brake', () => {
+    expect(babysitDecision(greenFeedback, new Set(), 0, 5, 99, 10)).toBe('merge_ready');
+    expect(babysitDecision(failedFeedback, new Set(), 0, 5, 99, 10)).toBe('actionable');
+  });
+
+  it('defaults to unbounded waiting for the legacy 4-arg call', () => {
+    expect(babysitDecision(pendingFeedback, new Set(), 0, 5)).toBe('waiting');
+  });
 });
