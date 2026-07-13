@@ -919,3 +919,78 @@ describe('createControlServer agents API', () => {
     expect(trigger).toHaveBeenCalled();
   });
 });
+
+describe('createControlServer self-heal settings API', () => {
+  let server: ReturnType<typeof createControlServer>;
+  let port: number;
+  let create: ReturnType<typeof vi.fn>;
+  let del: ReturnType<typeof vi.fn>;
+  let deps: ControlDeps;
+
+  beforeEach(() => {
+    create = vi.fn().mockResolvedValue({});
+    del = vi.fn().mockResolvedValue(undefined);
+    const engineSettingsStore = {
+      ensureSchema: vi.fn().mockResolvedValue(undefined),
+      seedIfEmpty: vi.fn().mockResolvedValue(false),
+      getSelfHeal: vi.fn().mockResolvedValue({ enabled: true, cron: '*/30 * * * *' }),
+      setSelfHeal: vi.fn().mockImplementation(async (patch: { enabled?: boolean }) => ({
+        enabled: patch.enabled ?? true,
+        cron: '*/30 * * * *',
+      })),
+    };
+    deps = {
+      client: {
+        workflow: { start: vi.fn(), list: async function* () {}, getHandle: vi.fn() },
+        schedule: {
+          list: async function* () {},
+          create,
+          getHandle: (id: string) => ({
+            delete: del,
+            describe: id === 'self-heal' ? vi.fn().mockResolvedValue({}) : vi.fn().mockRejectedValue(new Error('not found')),
+          }),
+        },
+      } as never,
+      taskQueue: 'agentops-engine',
+      namespace: 'default',
+      temporalUiBaseUrl: 'https://temporal.example',
+      projectCrudAuthToken: CRUD_TOKEN,
+      engineSettingsStore: engineSettingsStore as never,
+    };
+    server = createControlServer(deps);
+    return new Promise<void>((resolve) => {
+      server.listen(0, () => {
+        port = (server.address() as AddressInfo).port;
+        resolve();
+      });
+    });
+  });
+
+  afterEach(() => {
+    server?.close();
+  });
+
+  it('GET /api/settings/self-heal returns stored settings (ungated)', async () => {
+    const { status, body } = await getJson(port, '/api/settings/self-heal');
+    expect(status).toBe(200);
+    expect(body).toMatchObject({ enabled: true, cron: '*/30 * * * *', scheduleActive: true });
+  });
+
+  it('PUT /api/settings/self-heal updates enabled and applies the schedule (gated)', async () => {
+    const unauth = await fetch(`http://127.0.0.1:${port}/api/settings/self-heal`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(unauth.status).toBe(401);
+
+    const ok = await fetch(`http://127.0.0.1:${port}/api/settings/self-heal`, {
+      method: 'PUT',
+      headers: { ...CRUD_HEADERS, 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(ok.status).toBe(200);
+    expect(del).toHaveBeenCalled();
+    expect(((await ok.json()) as { enabled: boolean }).enabled).toBe(false);
+  });
+});

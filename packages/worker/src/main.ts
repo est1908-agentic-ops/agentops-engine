@@ -14,6 +14,9 @@ import {
   PostgresManagedProjectStore,
   PostgresStatsStore,
   PostgresTierStore,
+  PostgresEngineSettingsStore,
+  ensureSelfHealSchedule,
+  type SelfHealScheduleClient,
   SpawnGitCommandRunner,
   WorkspaceManager,
   type FiledFindingStore,
@@ -55,6 +58,7 @@ import { DEFAULT_TIERS } from '@agentops/policies';
 import type { DevCycleActivities, PlatformActivities } from '@agentops/workflows';
 import { createWorker } from './create-worker';
 import { ensureReconcileSchedule, type ScheduleClientLike } from './ensure-reconcile-schedule';
+
 import { ensureSearchAttributes, type OperatorConnectionLike } from './ensure-search-attributes';
 import { setupTracing } from './tracing';
 
@@ -464,6 +468,23 @@ async function main(): Promise<void> {
       console.log('agentops worker: reconcile:all periodic schedule ensured');
     } catch (err) {
       console.warn('agentops worker: failed to ensure reconcile:all schedule', err);
+    }
+    try {
+      if (!enginePool) {
+        console.log('agentops worker: self-heal schedule skipped (no ENGINE_DB_HOST — settings live in DB only)');
+      } else {
+        const engineSettingsStore = new PostgresEngineSettingsStore(enginePool);
+        await engineSettingsStore.ensureSchema();
+        const seeded = await engineSettingsStore.seedIfEmpty();
+        if (seeded) {
+          console.log('agentops worker: engine_settings seeded with defaults (first boot)');
+        }
+        const selfHealOpts = await engineSettingsStore.getSelfHeal();
+        await ensureSelfHealSchedule(tc.schedule as unknown as SelfHealScheduleClient, ENGINE_QUEUE, selfHealOpts);
+        console.log(`agentops worker: self-heal schedule ensured (enabled=${selfHealOpts.enabled})`);
+      }
+    } catch (err) {
+      console.warn('agentops worker: failed to ensure self-heal schedule', err);
     }
   } catch {
     // In test or no Temporal, schedule ops will no-op or be injected by tests.

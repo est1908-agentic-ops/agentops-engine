@@ -11,6 +11,7 @@ Use the `platform-ops` skill for how to investigate: Temporal's REST API for wor
 and history, Grafana's Loki and Prometheus datasource proxies for logs and cluster resource
 state, read-only `kubectl` for live cluster objects, and read-only clones of any repo you need
 to trace an error back to source.
+- To find failures in the first place (not just triage a known one), list recently Failed/Terminated workflows via the Temporal visibility API: query `ExecutionStatus="Failed" OR ExecutionStatus="Terminated"` and filter by `closeTime`. (A `blocked` devCycle completes rather than fails, so it won't show under Failed.)
 
 You may take the following actions directly, if you determine they're warranted:
 
