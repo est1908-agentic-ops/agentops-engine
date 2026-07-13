@@ -1,6 +1,9 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { startChat } from '../api';
+import { PageShell } from '../components/PageShell';
+import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 
 export function ChatStartPage() {
   const [prompt, setPrompt] = useState('');
@@ -22,18 +25,18 @@ export function ChatStartPage() {
   }
 
   return (
-    <div className="page">
-      <h1>Chat with the platform agent</h1>
-      <textarea
+    <PageShell>
+      <h1 className="mb-6 text-2xl font-semibold">Chat with the platform agent</h1>
+      <Textarea
         value={prompt}
         onChange={(e) => setPrompt(e.target.value)}
         placeholder="Optional: start with a question or task…"
-        style={{ width: '100%', minHeight: '4rem' }}
+        className="min-h-24"
       />
-      {error && <p className="error-text">{error}</p>}
-      <button type="button" disabled={busy} onClick={() => void start()}>
+      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+      <Button type="button" className="mt-4" disabled={busy} onClick={() => void start()}>
         {busy ? 'Starting…' : 'Start chat'}
-      </button>
-    </div>
+      </Button>
+    </PageShell>
   );
 }

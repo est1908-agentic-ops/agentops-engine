@@ -6,6 +6,10 @@ import remarkGfm from 'remark-gfm';
 import type { RunDetail } from '@agentops/contracts';
 import { getRun, siblingTemporalUrl } from '../api';
 import { StatusBadge } from '../components/StatusBadge';
+import { PageShell } from '../components/PageShell';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 const POLL_INTERVAL_MS = 3000;
 
@@ -58,50 +62,52 @@ export function RunDetailPage() {
 
   if (error) {
     return (
-      <div className="page">
-        <p className="error-text">{error}</p>
-      </div>
+      <PageShell>
+        <p className="text-sm text-destructive">{error}</p>
+      </PageShell>
     );
   }
   if (!run) {
     return (
-      <div className="page">
+      <PageShell>
         <p>Loading…</p>
-      </div>
+      </PageShell>
     );
   }
 
   return (
-    <div className="page">
-      <a href="/" className="back-link">
+    <PageShell>
+      <a href="/" className="text-sm text-muted-foreground">
         ← Back
       </a>
-      <div className="run-header">
+      <div className="mb-6 mt-3 flex items-center gap-3">
         <StatusBadge status={run.status} />
-        <span className="run-id">{run.workflowId}</span>
-        <a className="temporal-link" href={run.temporalUrl} target="_blank" rel="noreferrer">
+        <span className="font-mono text-sm text-muted-foreground">{run.workflowId}</span>
+        <a className="ml-auto text-sm text-primary" href={run.temporalUrl} target="_blank" rel="noreferrer">
           Open in Temporal ↗
         </a>
       </div>
 
       {run.prompt && (
-        <div className="section">
-          <div className="field-label">Prompt</div>
-          <p className="prompt-text">{run.prompt}</p>
+        <div className="mb-5">
+          <Label className="mb-1 block">Prompt</Label>
+          <p className="whitespace-pre-wrap">{run.prompt}</p>
         </div>
       )}
 
       {run.error && (
-        <div className="section error-box">
-          <div className="field-label">Error</div>
-          <p>{run.error}</p>
-        </div>
+        <Card className="mb-5 border-destructive/50 bg-destructive/5">
+          <CardContent className="pt-4">
+            <Label className="mb-1 block">Error</Label>
+            <p>{run.error}</p>
+          </CardContent>
+        </Card>
       )}
 
       {run.result && (
         <>
-          <div className="section">
-            <div className="field-label">Summary</div>
+          <div className="mb-5">
+            <Label className="mb-1 block">Summary</Label>
             <div className="summary-text">
               <ReactMarkdown remarkPlugins={[remarkGfm]} components={MARKDOWN_COMPONENTS}>
                 {run.result.summary}
@@ -110,51 +116,63 @@ export function RunDetailPage() {
           </div>
 
           {run.result.actionsTaken.length > 0 && (
-            <div className="section">
-              <div className="field-label">Actions taken</div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Type</th>
-                    <th>Workflow</th>
-                    <th>Reason</th>
-                  </tr>
-                </thead>
-                <tbody>
+            <div className="mb-5">
+              <Label className="mb-1 block">Actions taken</Label>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Type</TableHead>
+                    <TableHead>Workflow</TableHead>
+                    <TableHead>Reason</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
                   {run.result.actionsTaken.map((action, index) => (
-                    <tr key={index}>
-                      <td>{action.type}</td>
-                      <td>
-                        <a href={siblingTemporalUrl(run.temporalUrl, action.workflowId)} target="_blank" rel="noreferrer">
+                    <TableRow key={index}>
+                      <TableCell>{action.type}</TableCell>
+                      <TableCell>
+                        <a
+                          className="text-primary"
+                          href={siblingTemporalUrl(run.temporalUrl, action.workflowId)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
                           {action.workflowId}
                         </a>
-                      </td>
-                      <td>{action.reason}</td>
-                    </tr>
+                      </TableCell>
+                      <TableCell>{action.reason}</TableCell>
+                    </TableRow>
                   ))}
-                </tbody>
-              </table>
+                </TableBody>
+              </Table>
             </div>
           )}
 
           {run.result.childWorkflows.length > 0 && (
-            <div className="section">
-              <div className="field-label">Child workflows</div>
-              <div className="child-cards">
+            <div>
+              <Label className="mb-1 block">Child workflows</Label>
+              <div className="flex flex-wrap gap-3">
                 {run.result.childWorkflows.map((child) => (
-                  <div className="card" key={child.workflowId}>
-                    <h3>{child.repo}</h3>
-                    <p>{child.goal}</p>
-                    <a href={siblingTemporalUrl(run.temporalUrl, child.workflowId)} target="_blank" rel="noreferrer">
-                      {child.workflowId} ↗
-                    </a>
-                  </div>
+                  <Card key={child.workflowId} className="w-56">
+                    <CardContent className="pt-4">
+                      <p className="mb-1 text-sm font-semibold">{child.repo}</p>
+                      <p className="mb-2 text-sm text-muted-foreground">{child.goal}</p>
+                      <a
+                        className="text-sm text-primary"
+                        href={siblingTemporalUrl(run.temporalUrl, child.workflowId)}
+                        target="_blank"
+                        rel="noreferrer"
+                      >
+                        {child.workflowId} ↗
+                      </a>
+                    </CardContent>
+                  </Card>
                 ))}
               </div>
             </div>
           )}
         </>
       )}
-    </div>
+    </PageShell>
   );
 }

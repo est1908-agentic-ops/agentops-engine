@@ -1,4 +1,5 @@
-import { BrowserRouter, Link, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom';
+import { Toaster } from '@/components/ui/sonner';
 import { DevCycleRunDetailPage } from './pages/DevCycleRunDetailPage';
 import { HomePage } from './pages/HomePage';
 import { ProjectsPage } from './pages/ProjectsPage';
@@ -8,15 +9,37 @@ import { ChatStartPage } from './pages/ChatStartPage';
 import { TiersPage } from './pages/TiersPage';
 import { SettingsPage } from './pages/SettingsPage';
 
+const NAV_LINKS = [
+  { to: '/projects', label: 'Projects' },
+  { to: '/chat', label: 'Chat' },
+  { to: '/tiers', label: 'Tiers' },
+  { to: '/settings', label: 'Settings' },
+];
+
 export function App() {
   return (
     <BrowserRouter>
-      <nav className="top-nav">
-        <Link to="/projects">Projects</Link>
-        <Link to="/chat">Chat</Link>
-        <Link to="/tiers">Tiers</Link>
-        <Link to="/settings">Settings</Link>
-      </nav>
+      <Toaster />
+      <header className="border-b bg-background">
+        <nav className="mx-auto flex max-w-3xl items-center gap-6 px-4 py-3">
+          <span className="text-sm font-semibold">Agentic Ops</span>
+          <div className="flex gap-4">
+            {NAV_LINKS.map((link) => (
+              <NavLink
+                key={link.to}
+                to={link.to}
+                className={({ isActive }) =>
+                  `text-sm font-medium transition-colors ${
+                    isActive ? 'text-primary' : 'text-muted-foreground hover:text-foreground'
+                  }`
+                }
+              >
+                {link.label}
+              </NavLink>
+            ))}
+          </div>
+        </nav>
+      </header>
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/runs/:workflowId" element={<RunDetailPage />} />

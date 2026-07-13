@@ -3,6 +3,13 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import type { DevCycleTarget, RunListItem } from '@agentops/contracts';
 import { listDevCycleRuns, listDevCycleTargets, listRepos, listRuns, startDevCycleRun, startRun } from '../api';
 import { StatusBadge } from '../components/StatusBadge';
+import { PageShell } from '../components/PageShell';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Input } from '@/components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 const SUGGESTED_PROMPTS = [
   'Check recent failed workflows — anything strange?',
@@ -53,7 +60,6 @@ export function HomePage() {
       .catch(() => setRuns([]));
   }, []);
 
-  // /?target=<repo> (the Projects page's Run shortcut) pre-selects a project.
   useEffect(() => {
     const requested = searchParams.get('target');
     if (requested) {
@@ -62,8 +68,6 @@ export function HomePage() {
   }, [searchParams]);
 
   const isPlatformTarget = target === PLATFORM_TARGET;
-  // The requested target may not be in the fetched list (yet, or at all) --
-  // render it as an extra option so the select reflects the real state.
   const knownTarget = isPlatformTarget || targets.some((candidate) => candidate.repo === target);
   const canSubmit = prompt.trim().length > 0 && !submitting;
 
@@ -92,101 +96,117 @@ export function HomePage() {
   }
 
   return (
-    <div className="page">
-      <h1>Platform Console</h1>
+    <PageShell>
+      <h1 className="mb-6 text-2xl font-semibold">Platform Console</h1>
 
-      <label className="field-label" htmlFor="target">
-        Target
-      </label>
-      <select id="target" className="text-input" value={target} onChange={(event) => setTarget(event.target.value)}>
-        <option value={PLATFORM_TARGET}>Platform agent</option>
-        {targets.map((candidate) => (
-          <option key={candidate.repo} value={candidate.repo}>
-            {candidate.project} ({candidate.repo})
-          </option>
-        ))}
-        {!knownTarget && <option value={target}>{target}</option>}
-      </select>
+      <div className="mb-4 space-y-1.5">
+        <Label htmlFor="target">Target</Label>
+        <Select value={target} onValueChange={setTarget}>
+          <SelectTrigger id="target" className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={PLATFORM_TARGET}>Platform agent</SelectItem>
+            {targets.map((candidate) => (
+              <SelectItem key={candidate.repo} value={candidate.repo}>
+                {candidate.project} ({candidate.repo})
+              </SelectItem>
+            ))}
+            {!knownTarget && <SelectItem value={target}>{target}</SelectItem>}
+          </SelectContent>
+        </Select>
+      </div>
 
-      <label className="field-label" htmlFor="prompt">
-        {isPlatformTarget ? 'What should the platform agent investigate?' : `What should the dev agent build in ${target}?`}
-      </label>
-      <textarea
-        id="prompt"
-        className="prompt-input"
-        rows={4}
-        value={prompt}
-        onChange={(event) => setPrompt(event.target.value)}
-      />
+      <div className="mb-4 space-y-1.5">
+        <Label htmlFor="prompt">
+          {isPlatformTarget
+            ? 'What should the platform agent investigate?'
+            : `What should the dev agent build in ${target}?`}
+        </Label>
+        <Textarea id="prompt" rows={4} value={prompt} onChange={(e) => setPrompt(e.target.value)} />
+      </div>
 
       {isPlatformTarget && (
         <>
-          <div className="chip-row">
+          <div className="mb-4 flex flex-wrap gap-2">
             {SUGGESTED_PROMPTS.map((suggestion) => (
-              <button key={suggestion} type="button" className="chip" onClick={() => setPrompt(suggestion)}>
+              <Button
+                key={suggestion}
+                type="button"
+                variant="secondary"
+                size="sm"
+                className="rounded-full"
+                onClick={() => setPrompt(suggestion)}
+              >
                 {suggestion}
-              </button>
+              </Button>
             ))}
           </div>
 
-          <label className="field-label" htmlFor="hint-repos">
-            Hint repos (optional)
-          </label>
-          <input
-            id="hint-repos"
-            className="text-input"
-            placeholder="owner/repo, owner/repo2"
-            value={hintReposText}
-            onChange={(event) => setHintReposText(event.target.value)}
-            list="repo-suggestions"
-          />
-          <datalist id="repo-suggestions">
-            {repoSuggestions.map((repo) => (
-              <option key={repo} value={repo} />
-            ))}
-          </datalist>
+          <div className="mb-4 space-y-1.5">
+            <Label htmlFor="hint-repos">Hint repos (optional)</Label>
+            <Input
+              id="hint-repos"
+              placeholder="owner/repo, owner/repo2"
+              value={hintReposText}
+              onChange={(e) => setHintReposText(e.target.value)}
+              list="repo-suggestions"
+            />
+            <datalist id="repo-suggestions">
+              {repoSuggestions.map((repo) => (
+                <option key={repo} value={repo} />
+              ))}
+            </datalist>
+          </div>
         </>
       )}
 
-      <div className="actions">
-        <button type="button" className="run-button" disabled={!canSubmit} onClick={handleRun}>
+      <div className="mt-5">
+        <Button type="button" disabled={!canSubmit} onClick={handleRun}>
           {submitting ? 'Starting…' : 'Run'}
-        </button>
+        </Button>
       </div>
-      {error && <p className="error-text">{error}</p>}
+      {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
 
-      <h2>Recent runs</h2>
-      <table>
-        <thead>
-          <tr>
-            <th>Status</th>
-            <th>Type</th>
-            <th>Prompt</th>
-            <th>Started</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
+      <h2 className="mb-3 mt-10 text-base font-semibold">Recent runs</h2>
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Status</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead>Prompt</TableHead>
+            <TableHead>Started</TableHead>
+            <TableHead />
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {runs.map(({ kind, run }) => (
-            <tr key={run.workflowId}>
-              <td>
+            <TableRow key={run.workflowId}>
+              <TableCell>
                 <StatusBadge status={run.status} />
-              </td>
-              <td>{kind === 'platform' ? 'platform' : 'dev cycle'}</td>
-              <td>{run.promptSnippet ?? run.workflowId}</td>
-              <td>{new Date(run.startTime).toLocaleString()}</td>
-              <td>
-                <Link to={kind === 'platform' ? `/runs/${run.workflowId}` : `/dev-runs/${run.workflowId}`}>Open</Link>
-              </td>
-            </tr>
+              </TableCell>
+              <TableCell>{kind === 'platform' ? 'platform' : 'dev cycle'}</TableCell>
+              <TableCell>{run.promptSnippet ?? run.workflowId}</TableCell>
+              <TableCell>{new Date(run.startTime).toLocaleString()}</TableCell>
+              <TableCell>
+                <Link
+                  className="text-primary underline underline-offset-2"
+                  to={kind === 'platform' ? `/runs/${run.workflowId}` : `/dev-runs/${run.workflowId}`}
+                >
+                  Open
+                </Link>
+              </TableCell>
+            </TableRow>
           ))}
           {runs.length === 0 && (
-            <tr>
-              <td colSpan={5}>No runs yet.</td>
-            </tr>
+            <TableRow>
+              <TableCell colSpan={5} className="text-muted-foreground">
+                No runs yet.
+              </TableCell>
+            </TableRow>
           )}
-        </tbody>
-      </table>
-    </div>
+        </TableBody>
+      </Table>
+    </PageShell>
   );
 }

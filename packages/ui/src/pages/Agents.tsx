@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AgentScheduleSummary } from '@agentops/contracts';
 import { listAgents, runAgent } from '../api';
+import { PageShell } from '../components/PageShell';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 
 export function AgentsPage() {
   const [agents, setAgents] = useState<AgentScheduleSummary[]>([]);
@@ -48,49 +53,66 @@ export function AgentsPage() {
   }, {});
 
   return (
-    <main className="page">
-      <h1>Agents</h1>
-      <p className="muted">Scheduled agents from Temporal. Run now requires the control CRUD token (set on Projects).</p>
+    <PageShell>
+      <h1 className="mb-2 text-2xl font-semibold">Agents</h1>
+      <p className="mb-4 text-sm text-muted-foreground">
+        Scheduled agents from Temporal. Run now requires the control CRUD token (set on Projects).
+      </p>
       {loading && <p>Loading…</p>}
-      {loadError && <p className="error">{loadError}</p>}
-      {actionError && <p className="error">{actionError}</p>}
-      {lastTriggered && <p className="success">Triggered {lastTriggered}</p>}
+      {loadError && <p className="text-sm text-destructive">{loadError}</p>}
+      {actionError && <p className="text-sm text-destructive">{actionError}</p>}
+      {lastTriggered && <p className="text-sm text-green-600">Triggered {lastTriggered}</p>}
       {Object.entries(byProject).map(([project, projectAgents]) => (
-        <section key={project} className="card">
-          <h2>{project}</h2>
-          <table>
-            <thead>
-              <tr>
-                <th>Agent</th>
-                <th>Workflow</th>
-                <th>Cron</th>
-                <th>Status</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {projectAgents.map((agent) => (
-                <tr key={agent.scheduleId}>
-                  <td>{agent.agentName}</td>
-                  <td>{agent.workflow}</td>
-                  <td><code>{agent.cron}</code></td>
-                  <td>{agent.paused ? <span className="badge badge-muted">paused</span> : <span className="badge badge-ok">active</span>}</td>
-                  <td>
-                    <button
-                      type="button"
-                      disabled={runningId === agent.scheduleId}
-                      onClick={() => void handleRun(agent.scheduleId)}
-                    >
-                      {runningId === agent.scheduleId ? 'Running…' : 'Run now'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
+        <Card key={project} className="mb-4">
+          <CardHeader>
+            <CardTitle>{project}</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Agent</TableHead>
+                  <TableHead>Workflow</TableHead>
+                  <TableHead>Cron</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {projectAgents.map((agent) => (
+                  <TableRow key={agent.scheduleId}>
+                    <TableCell>{agent.agentName}</TableCell>
+                    <TableCell>{agent.workflow}</TableCell>
+                    <TableCell>
+                      <code>{agent.cron}</code>
+                    </TableCell>
+                    <TableCell>
+                      {agent.paused ? (
+                        <Badge variant="secondary">paused</Badge>
+                      ) : (
+                        <Badge className="border-transparent text-white" style={{ backgroundColor: '#16a34a' }}>
+                          active
+                        </Badge>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        type="button"
+                        size="sm"
+                        disabled={runningId === agent.scheduleId}
+                        onClick={() => void handleRun(agent.scheduleId)}
+                      >
+                        {runningId === agent.scheduleId ? 'Running…' : 'Run now'}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
       ))}
       {!loading && agents.length === 0 && !loadError && <p>No agent schedules found.</p>}
-    </main>
+    </PageShell>
   );
 }
