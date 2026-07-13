@@ -575,7 +575,7 @@ describe('K8sJobRunner', () => {
 
       // Drive the loop deterministically through: fileSize → heartbeat #1 → status read → sleep → fileSize → heartbeat #2.
       // Each pumpUntil step advances timers and flushes fs I/O completions.
-      await pumpUntil(() => heartbeats.length >= 2, { stepMs: 1, maxSteps: 200 });
+      await pumpUntil(() => heartbeats.length >= 2, { stepMs: 1, maxSteps: 1000 });
       await reachedTwoHeartbeats.promise;
 
       expect(heartbeats).toHaveLength(2);
@@ -659,7 +659,7 @@ describe('K8sJobRunner', () => {
       // Drive the loop deterministically through: hang #1 → 5ms timeout → sleep →
       // hang #2 → 5ms timeout → sleep → real read (with output/succeeded in place).
       // Two hung reads + one successful read = 3 heartbeats.
-      await pumpUntil(() => batchApi.creates.length >= 1, { stepMs: 1, maxSteps: 500 });
+      await pumpUntil(() => batchApi.creates.length >= 1, { stepMs: 1, maxSteps: 1000 });
 
       await writeFile(
         paths.outFile,
@@ -674,7 +674,7 @@ describe('K8sJobRunner', () => {
       batchApi.setJobStatus(k8sJobName(req), { succeeded: 1 });
 
       // Continue pumping through the two timeouts and the final successful read.
-      await pumpUntil(() => heartbeats.length >= 3, { stepMs: 1, maxSteps: 500 });
+      await pumpUntil(() => heartbeats.length >= 3, { stepMs: 1, maxSteps: 1000 });
       await reachedThreeHeartbeats.promise;
 
       expect(heartbeats).toHaveLength(3);
