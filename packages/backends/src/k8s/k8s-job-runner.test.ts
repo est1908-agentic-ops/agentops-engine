@@ -4,6 +4,37 @@ import { spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+
+// Helpers for deterministic fake-timer tests: a deferred promise (with
+// exposed resolve/reject) and an async pump that advances timers until a
+// predicate holds, flushing microtasks between advances to let real-fs
+// operations complete.
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (v: T) => void;
+  reject: (e: Error) => void;
+} {
+  let resolve: (v: T) => void;
+  let reject: (e: Error) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve: resolve!, reject: reject! };
+}
+
+async function pumpUntil(
+  pred: () => boolean,
+  opts: { stepMs: number; maxSteps: number },
+): Promise<void> {
+  for (let step = 0; step < opts.maxSteps; step++) {
+    if (pred()) return;
+    await vi.advanceTimersByTimeAsync(opts.stepMs);
+    // Flush libuv macrotask queue to let real fs.stat/.writeFile settle.
+    await new Promise((r) => setImmediate(r));
+  }
+  throw new Error(`pumpUntil exceeded maxSteps=${opts.maxSteps}`);
+}
 import type { BackendRunRequest } from '@agentops/contracts';
 import { createClaudeCliSpec } from '../claude/claude-backend';
 import type { CliSpec } from '../cli-spec';
@@ -513,118 +544,155 @@ describe('K8sJobRunner', () => {
   });
 
   it('heartbeats with job-created/polling phase and the last-known Job status', async () => {
-    const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-heartbeat-'));
-    const req = { ...baseRequest, workspaceRef };
-    const paths = agentOpsArtifactPaths(req);
-    await mkdir(paths.dir, { recursive: true });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-heartbeat-'));
+      const req = { ...baseRequest, workspaceRef };
+      const paths = agentOpsArtifactPaths(req);
+      await mkdir(paths.dir, { recursive: true });
 
-    const batchApi = new FakeBatchApi();
-    const heartbeats: unknown[] = [];
-    const now = 1_000;
-    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
-      namespace: 'dev-agents',
-      workspacePvcName: 'workspace-tasks',
-      workspaceMountPath: '/workspace/tasks',
-      batchApi,
-      pollIntervalMs: 1,
-      now: () => now,
-      heartbeat: (details) => heartbeats.push(details),
-    });
+      const batchApi = new FakeBatchApi();
+      const heartbeats: unknown[] = [];
+      const now = 1_000;
+      const reachedTwoHeartbeats = deferred<void>();
+      const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+        batchApi,
+        pollIntervalMs: 1,
+        now: () => now,
+        heartbeat: (details) => {
+          heartbeats.push(details);
+          if (heartbeats.length === 2) {
+            reachedTwoHeartbeats.resolve();
+          }
+        },
+      });
 
-    const runPromise = runner.run(req);
-    const jobName = k8sJobName(req);
+      const runPromise = runner.run(req);
+      const jobName = k8sJobName(req);
 
-    await vi.waitFor(() => expect(heartbeats.length).toBeGreaterThanOrEqual(2));
-    expect(heartbeats[0]).toEqual({
-      phase: 'job-created',
-      jobName,
-      taskId: 'task-1',
-      stage: 'implement',
-      elapsedMs: 0,
-      idleMs: 0,
-      timeoutMs: 30_000,
-      outputBytes: 0,
-      errorBytes: 0,
-      jobStatus: undefined,
-    });
-    expect(heartbeats[1]).toEqual({
-      phase: 'polling',
-      jobName,
-      taskId: 'task-1',
-      stage: 'implement',
-      elapsedMs: 0,
-      idleMs: 0,
-      timeoutMs: 30_000,
-      outputBytes: 0,
-      errorBytes: 0,
-      jobStatus: { active: 1 },
-    });
+      // Drive the loop deterministically through: fileSize → heartbeat #1 → status read → sleep → fileSize → heartbeat #2.
+      // Each pumpUntil step advances timers and flushes fs I/O completions.
+      await pumpUntil(() => heartbeats.length >= 2, { stepMs: 1, maxSteps: 1000 });
+      await reachedTwoHeartbeats.promise;
 
-    await writeFile(
-      paths.outFile,
-      JSON.stringify({
-        is_error: false,
-        result: 'done',
-        usage: { input_tokens: 3, output_tokens: 4 },
-        duration_ms: 50,
-      }),
-      'utf8',
-    );
-    batchApi.setJobStatus(jobName, { succeeded: 1 });
+      expect(heartbeats).toHaveLength(2);
+      expect(heartbeats[0]).toEqual({
+        phase: 'job-created',
+        jobName,
+        taskId: 'task-1',
+        stage: 'implement',
+        elapsedMs: 0,
+        idleMs: 0,
+        timeoutMs: 30_000,
+        outputBytes: 0,
+        errorBytes: 0,
+        jobStatus: undefined,
+      });
+      expect(heartbeats[1]).toEqual({
+        phase: 'polling',
+        jobName,
+        taskId: 'task-1',
+        stage: 'implement',
+        elapsedMs: 0,
+        idleMs: 0,
+        timeoutMs: 30_000,
+        outputBytes: 0,
+        errorBytes: 0,
+        jobStatus: { active: 1 },
+      });
 
-    await expect(runPromise).resolves.toEqual({
-      output: 'done',
-      tokensIn: 3,
-      tokensOut: 4,
-      wallMs: 50,
-    });
+      await writeFile(
+        paths.outFile,
+        JSON.stringify({
+          is_error: false,
+          result: 'done',
+          usage: { input_tokens: 3, output_tokens: 4 },
+          duration_ms: 50,
+        }),
+        'utf8',
+      );
+      batchApi.setJobStatus(jobName, { succeeded: 1 });
+      await vi.advanceTimersByTimeAsync(1);
+
+      await expect(runPromise).resolves.toEqual({
+        output: 'done',
+        tokensIn: 3,
+        tokensOut: 4,
+        wallMs: 50,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('retries the status poll after a client-side timeout instead of freezing the whole activity', async () => {
-    const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-poll-timeout-'));
-    const req = { ...baseRequest, workspaceRef };
-    const paths = agentOpsArtifactPaths(req);
-    await mkdir(paths.dir, { recursive: true });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const workspaceRef = await mkdtemp(path.join(os.tmpdir(), 'agentops-k8s-poll-timeout-'));
+      const req = { ...baseRequest, workspaceRef };
+      const paths = agentOpsArtifactPaths(req);
+      await mkdir(paths.dir, { recursive: true });
 
-    const batchApi = new HangThenRealBatchApi(2);
-    const heartbeats: unknown[] = [];
-    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
-      namespace: 'dev-agents',
-      workspacePvcName: 'workspace-tasks',
-      workspaceMountPath: '/workspace/tasks',
-      batchApi,
-      pollIntervalMs: 1,
-      statusPollTimeoutMs: 5,
-      heartbeat: (details) => heartbeats.push(details),
-    });
+      const batchApi = new HangThenRealBatchApi(2);
+      const heartbeats: unknown[] = [];
+      const reachedThreeHeartbeats = deferred<void>();
+      const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+        batchApi,
+        pollIntervalMs: 1,
+        statusPollTimeoutMs: 5,
+        heartbeat: (details) => {
+          heartbeats.push(details);
+          if (heartbeats.length === 3) {
+            reachedThreeHeartbeats.resolve();
+          }
+        },
+      });
 
-    const runPromise = runner.run(req);
-    await vi.waitFor(() => expect(batchApi.creates).toHaveLength(1));
+      const runPromise = runner.run(req);
 
-    await writeFile(
-      paths.outFile,
-      JSON.stringify({
-        is_error: false,
-        result: 'done',
-        usage: { input_tokens: 3, output_tokens: 4 },
-        duration_ms: 50,
-      }),
-      'utf8',
-    );
-    batchApi.setJobStatus(k8sJobName(req), { succeeded: 1 });
+      // Drive the loop deterministically through: hang #1 → 5ms timeout → sleep →
+      // hang #2 → 5ms timeout → sleep → real read (with output/succeeded in place).
+      // Two hung reads + one successful read = 3 heartbeats.
+      await pumpUntil(() => batchApi.creates.length >= 1, { stepMs: 1, maxSteps: 1000 });
 
-    // Proves the loop survived two hung status reads: it still resolved
-    // instead of hanging until an outer heartbeat timeout, and it kept
-    // heartbeating throughout (a bare Promise.race with no cancellation
-    // would leave the loop stuck awaiting the first hung call forever).
-    await expect(runPromise).resolves.toEqual({
-      output: 'done',
-      tokensIn: 3,
-      tokensOut: 4,
-      wallMs: 50,
-    });
-    // Two hung status reads plus one successful completion = 3 heartbeats minimum.
-    expect(heartbeats.length).toBeGreaterThanOrEqual(3);
+      await writeFile(
+        paths.outFile,
+        JSON.stringify({
+          is_error: false,
+          result: 'done',
+          usage: { input_tokens: 3, output_tokens: 4 },
+          duration_ms: 50,
+        }),
+        'utf8',
+      );
+      batchApi.setJobStatus(k8sJobName(req), { succeeded: 1 });
+
+      // Continue pumping through the two timeouts and the final successful read.
+      await pumpUntil(() => heartbeats.length >= 3, { stepMs: 1, maxSteps: 1000 });
+      await reachedThreeHeartbeats.promise;
+
+      expect(heartbeats).toHaveLength(3);
+
+      // Proves the loop survived two hung status reads: it still resolved
+      // instead of hanging until an outer heartbeat timeout, and it kept
+      // heartbeating throughout (a bare Promise.race with no cancellation
+      // would leave the loop stuck awaiting the first hung call forever).
+      await vi.advanceTimersByTimeAsync(1);
+      await expect(runPromise).resolves.toEqual({
+        output: 'done',
+        tokensIn: 3,
+        tokensOut: 4,
+        wallMs: 50,
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('deletes the Job and rethrows when heartbeat fails (cancellation)', async () => {
