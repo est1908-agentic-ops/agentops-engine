@@ -33,13 +33,18 @@ export interface GithubClient {
     repos: {
       get(params: { owner: string; repo: string }): Promise<{ data: { default_branch: string } }>;
       getContent(params: { owner: string; repo: string; path: string }): Promise<{ data: { content?: string } }>;
+      getCombinedStatusForRef(params: {
+        owner: string;
+        repo: string;
+        ref: string;
+      }): Promise<{ data: { state: string; total_count: number } }>;
     };
     checks: {
       listForRef(params: {
         owner: string;
         repo: string;
         ref: string;
-      }): Promise<{ data: { check_runs: Array<{ status: string; conclusion: string | null }> } }>;
+      }): Promise<{ data: { total_count?: number; check_runs: Array<{ status: string; conclusion: string | null }> } }>;
     };
   };
   graphql<T = unknown>(query: string, variables?: Record<string, unknown>): Promise<T>;
