@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import {
-  getCrudToken,
-  getSelfHealSettings,
-  updateSelfHealSettings,
-  type SelfHealSettingsResponse,
-} from '../api';
+import { getCrudToken, getSelfHealSettings, updateSelfHealSettings, type SelfHealSettingsResponse } from '../api';
+import { PageShell } from '../components/PageShell';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
 
 export function SettingsPage() {
   const [settings, setSettings] = useState<SelfHealSettingsResponse | null>(null);
@@ -53,60 +54,62 @@ export function SettingsPage() {
   }
 
   return (
-    <main className="page">
-      <h1>Settings</h1>
-      <p className="muted">Fleet operator settings. Saves require the control CRUD token (set on Projects).</p>
+    <PageShell>
+      <h1 className="mb-1 text-2xl font-semibold">Settings</h1>
+      <p className="mb-6 text-sm text-muted-foreground">
+        Fleet operator settings. Saves require the control CRUD token (set on Projects).
+      </p>
 
       {loading && <p>Loading…</p>}
-      {loadError && <p className="error">{loadError}</p>}
+      {loadError && <p className="text-sm text-destructive">{loadError}</p>}
 
       {!loading && !loadError && settings && (
-        <section className="card">
-          <h2>Self-heal (M6 Heal)</h2>
-          <p className="muted">
-            Scheduled sweep that drives the platform agent to find recent workflow failures and open fix PRs.
-            Cron: <code>{settings.cron}</code>
-            {settings.scheduleActive ? (
-              <span className="badge badge-ok" style={{ marginLeft: '0.5rem' }}>
-                schedule active
-              </span>
-            ) : (
-              <span className="badge badge-muted" style={{ marginLeft: '0.5rem' }}>
-                schedule absent
-              </span>
+        <Card>
+          <CardHeader>
+            <CardTitle>Self-heal (M6 Heal)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-4 text-sm text-muted-foreground">
+              Scheduled sweep that drives the platform agent to find recent workflow failures and open fix PRs. Cron:{' '}
+              <code className="text-foreground">{settings.cron}</code>{' '}
+              <Badge variant={settings.scheduleActive ? 'default' : 'secondary'}>
+                {settings.scheduleActive ? 'schedule active' : 'schedule absent'}
+              </Badge>
+            </p>
+
+            <div className="mb-4 flex items-center gap-2">
+              <Checkbox
+                id="self-heal-enabled"
+                checked={enabled}
+                disabled={!hasCrudToken}
+                onCheckedChange={(value) => {
+                  setEnabled(value === true);
+                  setDirty(true);
+                }}
+              />
+              <Label htmlFor="self-heal-enabled">Enable self-heal schedule</Label>
+            </div>
+
+            {!hasCrudToken && (
+              <p className="mb-4 text-sm text-muted-foreground">
+                Set the CRUD token on the Projects page to edit this setting.
+              </p>
             )}
-          </p>
 
-          <label style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', marginBottom: '1rem' }}>
-            <input
-              type="checkbox"
-              checked={enabled}
-              disabled={!hasCrudToken}
-              onChange={(e) => {
-                setEnabled(e.target.checked);
-                setDirty(true);
-              }}
-            />
-            <span>Enable self-heal schedule</span>
-          </label>
-
-          {!hasCrudToken && (
-            <p className="muted">Set the CRUD token on the Projects page to edit this setting.</p>
-          )}
-
-          <div>
-            <button type="button" onClick={() => void refresh()} disabled={loading}>
-              Reload
-            </button>{' '}
-            <button type="button" onClick={() => void handleSave()} disabled={!dirty || saving || !hasCrudToken}>
-              {saving ? 'Saving…' : 'Save'}
-            </button>
-            {dirty && <span className="muted"> (unsaved changes)</span>}
-            {savedAt && !dirty && <span className="muted"> (saved {savedAt})</span>}
-            {saveError && <span className="error"> — {saveError}</span>}
-          </div>
-        </section>
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" onClick={() => void refresh()} disabled={loading}>
+                Reload
+              </Button>
+              <Button type="button" onClick={() => void handleSave()} disabled={!dirty || saving || !hasCrudToken}>
+                {saving ? 'Saving…' : 'Save'}
+              </Button>
+              {dirty && <span className="text-sm text-muted-foreground">(unsaved changes)</span>}
+              {savedAt && !dirty && <span className="text-sm text-muted-foreground">(saved {savedAt})</span>}
+              {saveError && <span className="text-sm text-destructive">— {saveError}</span>}
+            </div>
+          </CardContent>
+        </Card>
       )}
-    </main>
+    </PageShell>
   );
 }
