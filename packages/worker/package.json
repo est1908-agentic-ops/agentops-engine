@@ -13,6 +13,7 @@
     "@agentops/activities": "workspace:*",
     "@agentops/backends": "workspace:*",
     "@agentops/contracts": "workspace:*",
+    "@agentops/policies": "workspace:*",
     "@agentops/ports": "workspace:*",
     "@agentops/prompts": "workspace:*",
     "@agentops/workflows": "workspace:*",

@@ -54,6 +54,9 @@ export interface ActivityDependencies {
   workspaces: Workspaces;
   prompts: PromptPack;
   registry: ResolvedProjectEntry[];
+  // Global tier table loaded from Postgres (SP3-A). When omitted, resolveTier
+  // falls back to DEFAULT_TIERS (the hardcoded seed) -- the in-memory/demo path.
+  globalTiers?: Record<string, ModelRef[]>;
   filedFindings?: FiledFindingStore;
   scheduleClient?: ScheduleClientLike;
   taskQueue?: string;
@@ -97,7 +100,7 @@ export function createActivities(deps: ActivityDependencies) {
       let chain: ModelRef[];
 
       if (req.tier) {
-        const entries = resolveTier(req.projectTiers, req.tier, req.effort);
+        const entries = resolveTier(req.projectTiers, req.tier, req.effort, deps.globalTiers);
         primaryModelRef = entries[0];
         chain = entries.slice(1);
         primaryBackend = deps.backends[primaryModelRef.backend];

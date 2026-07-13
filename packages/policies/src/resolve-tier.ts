@@ -25,11 +25,9 @@ export const DEFAULT_TIERS: Record<string, ModelRef[]> = {
   ],
   // The 'platform' role uses a distinct worker backend entry ('platform', not
   // 'claude') carrying its own ServiceAccount/secrets/pod-label -- see
-  // platform.ts. ModelRefSchema.backend's enum doesn't include 'platform'
-  // today; the cast bypasses TS enum narrowing for this hardcoded constant.
-  // SP3's DB promotion will widen the enum.
+  // platform.ts.
   platform: [
-    { backend: 'platform' as ModelRef['backend'], model: 'claude-sonnet-5', effort: 'high' },
+    { backend: 'platform', model: 'claude-sonnet-5', effort: 'high' },
     { backend: 'pi', model: 'openrouter/deepseek-v4-pro' },
   ],
   bughunt: [
@@ -45,15 +43,19 @@ export const DEFAULT_TIERS: Record<string, ModelRef[]> = {
 };
 
 // Resolve a tier name to its ordered ModelRef[], applying an optional effort
-// override. Project-local tiers win over global defaults on name collision.
-// Pure: no I/O, no async. Throws if the tier exists in neither source -- the
-// caller (the activity) maps that to a non-retryable ApplicationFailure.
+// override. Project-local tiers win over global tiers on name collision.
+// `globalTiers` defaults to DEFAULT_TIERS (the hardcoded seed); the worker
+// passes its loaded-from-DB map so operator edits take effect without a
+// code change. Pure: no I/O, no async. Throws if the tier exists in neither
+// source -- the caller (the activity) maps that to a non-retryable
+// ApplicationFailure.
 export function resolveTier(
   projectTiers: Record<string, ModelRef[]> | undefined,
   tierName: string,
   effortOverride?: 'low' | 'medium' | 'high' | 'xhigh' | 'max',
+  globalTiers: Record<string, ModelRef[]> = DEFAULT_TIERS,
 ): ModelRef[] {
-  const entries = projectTiers?.[tierName] ?? DEFAULT_TIERS[tierName];
+  const entries = projectTiers?.[tierName] ?? globalTiers[tierName];
   if (!entries || entries.length === 0) {
     throw new Error(
       `resolveTier: tier "${tierName}" not found in project-local or global defaults`,

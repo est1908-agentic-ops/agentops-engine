@@ -94,15 +94,16 @@ const SHELL_REDIRECT = [
 ].join('\n');
 
 // A call's on-disk artifacts and its K8s Job are keyed by
-// (taskId, stage, attempt, callIndex) AND the model. A TierFallbackBackend
-// retry reruns the exact same call with a different model, so without the model
-// in the key the fallback would 409-reuse the primary model's already-finished
-// Job and re-read its (rate-limited) output instead of actually running the
-// fallback. Folded in as a short stable hash so K8s names stay under the 63-char
-// limit and filenames stay safe; it's deterministic, so Temporal retries of the
-// same call still reuse the same Job/artifacts.
-function modelKey(model: string): string {
-  return createHash('sha256').update(model).digest('hex').slice(0, 8);
+// (taskId, stage, attempt, callIndex) AND the (backend, model). A
+// TierFallbackBackend retry can rerun the exact same call on a DIFFERENT
+// backend (cross-backend session-limit fallback), so the key must include
+// both -- otherwise the fallback 409-reuses the primary's already-finished
+// Job and re-reads its (failed) output instead of actually running the
+// fallback. Folded in as a short stable hash so K8s names stay under the
+// 63-char limit and filenames stay safe; it's deterministic, so Temporal
+// retries of the same call still reuse the same Job/artifacts.
+function runKey(backend: string, model: string): string {
+  return createHash('sha256').update(`${backend}:${model}`).digest('hex').slice(0, 8);
 }
 
 export function agentOpsArtifactPaths(req: BackendRunRequest): {
@@ -111,7 +112,7 @@ export function agentOpsArtifactPaths(req: BackendRunRequest): {
   outFile: string;
   errFile: string;
 } {
-  const id = `${req.stage}-${req.attempt}-${req.callIndex}-${modelKey(req.model)}`;
+  const id = `${req.stage}-${req.attempt}-${req.callIndex}-${runKey(req.backend, req.model)}`;
   const dir = path.join(req.workspaceRef, '.agentops');
   return {
     dir,
@@ -123,7 +124,7 @@ export function agentOpsArtifactPaths(req: BackendRunRequest): {
 
 export function k8sJobName(req: BackendRunRequest): string {
   const raw = `agentops-${req.taskId}-${req.stage}-${req.attempt}-${req.callIndex}`;
-  const suffix = `-${modelKey(req.model)}`;
+  const suffix = `-${runKey(req.backend, req.model)}`;
   const base = raw
     .toLowerCase()
     .replace(/[^a-z0-9-]+/g, '-')

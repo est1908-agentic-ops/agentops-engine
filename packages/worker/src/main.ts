@@ -13,6 +13,7 @@ import {
   PostgresFiledFindingStore,
   PostgresManagedProjectStore,
   PostgresStatsStore,
+  PostgresTierStore,
   SpawnGitCommandRunner,
   WorkspaceManager,
   type FiledFindingStore,
@@ -50,6 +51,7 @@ import {
   type TrackerPort,
 } from '@agentops/ports';
 import { PromptPack } from '@agentops/prompts';
+import { DEFAULT_TIERS } from '@agentops/policies';
 import type { DevCycleActivities, PlatformActivities } from '@agentops/workflows';
 import { createWorker } from './create-worker';
 import { ensureReconcileSchedule, type ScheduleClientLike } from './ensure-reconcile-schedule';
@@ -190,29 +192,6 @@ function wrapWithRateWindow(
   return limiter ? new RateWindowedBackend(backend, limiter, name) : backend;
 }
 
-// Reacts to a real provider-side rate limit (RateLimitError),
-// unlike wrapWithRateWindow's proactive local quota check -- see
-// docs/superpowers/specs/2026-07-08-provider-rate-limit-fallback-design.md.
-// Unset env var (the default) means no fallback, same "off by default"
-// convention as the rate window.
-//
-// NOTE: the same-backend RateLimitFallbackBackend this once wired has been
-// superseded by TierFallbackBackend (cross-backend, tier-resolved), which the
-// activity layer constructs per-call. This env-var wrapper is intentionally
-// kept as a no-op passthrough for now -- its config (PI_RATE_LIMIT_FALLBACK_MODEL)
-// is no longer read, and SP3 removes the env var from the chart entirely.
-function wrapWithRateLimitFallback(backend: AgentBackend, envPrefix: string, _name: string): AgentBackend {
-  if (process.env[`${envPrefix}_RATE_LIMIT_FALLBACK_MODEL`]) {
-    console.warn(
-      `agentops worker: ${envPrefix}_RATE_LIMIT_FALLBACK_MODEL is set but no longer ` +
-        `used -- same-backend fallback was superseded by tier-based cross-backend ` +
-        `fallback (see docs/superpowers/specs/2026-07-10-model-tiering-fallback-design.md). ` +
-        `Remove this env var from the chart (SP3).`,
-    );
-  }
-  return backend;
-}
-
 // In-cluster tasks fail two ways when these are missing or still placeholders:
 // an ImagePullBackOff that eats the whole activity timeout before surfacing
 // anything (AGENT_RUNNER_IMAGE), or a real Job that starts but every call
@@ -263,11 +242,7 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
     return {
       stub: new StubBackend(),
       claude: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), claudeRateWindowLimiter, 'claude'),
-      pi: wrapWithRateLimitFallback(
-        wrapWithRateWindow(new ProcessCliRunner(piSpec), buildRateWindowLimiter('PI'), 'pi'),
-        'PI',
-        'pi',
-      ),
+      pi: wrapWithRateWindow(new ProcessCliRunner(piSpec), buildRateWindowLimiter('PI'), 'pi'),
       // Same CLI/model/rate window as claude (see the in-cluster branch below for why).
       platform: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), claudeRateWindowLimiter, 'platform'),
       litellm,
@@ -290,13 +265,9 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
       claudeRateWindowLimiter,
       'claude',
     ),
-    pi: wrapWithRateLimitFallback(
-      wrapWithRateWindow(
-        new K8sJobRunner(piSpec, buildJobRunnerOptions(batchApi, { authSecretName: process.env.PI_AUTH_SECRET_NAME })),
-        buildRateWindowLimiter('PI'),
-        'pi',
-      ),
-      'PI',
+    pi: wrapWithRateWindow(
+      new K8sJobRunner(piSpec, buildJobRunnerOptions(batchApi, { authSecretName: process.env.PI_AUTH_SECRET_NAME })),
+      buildRateWindowLimiter('PI'),
       'pi',
     ),
     // Same CLI/model/credential/rate-window limiter as claude (they share one
@@ -359,6 +330,51 @@ export async function buildFiledFindingStore(): Promise<FiledFindingStore> {
   return store;
 }
 
+// Global tier table (SP3-A). Loaded from Postgres at startup and re-read on a
+// 60s interval so a Mission Control tier edit applies to new runAgent calls
+// within a minute -- no pod rollout needed. The returned object is mutated
+// in place on each refresh; the activity reads deps.globalTiers per call, so
+// it sees the latest map without re-wiring. Returns a plain (mutable) object
+// + a cleanup fn for the refresh timer. When no DB is configured, returns
+// undefined and resolveTier falls back to DEFAULT_TIERS (the hardcoded seed).
+const TIER_REFRESH_INTERVAL_MS = 60_000;
+
+export async function buildGlobalTiers(
+  pool: Pool | undefined,
+): Promise<{ tiers: Record<string, import('@agentops/contracts').ModelRef[]> | undefined; stop: () => void }> {
+  if (!pool) {
+    return { tiers: undefined, stop: () => {} };
+  }
+  const store = new PostgresTierStore(pool);
+  await store.ensureSchema();
+  const seeded = await store.seedIfEmpty();
+  if (seeded) {
+    console.log('agentops worker: tiers table seeded from DEFAULT_TIERS (first boot)');
+  }
+  // Pre-seed with DEFAULT_TIERS so the first refresh failing (DB transiently
+  // unreachable at boot) leaves the hardcoded defaults in place rather than
+  // an empty object that would make every resolveTier throw. The catch in
+  // refresh() then genuinely "keeps the previous map" from call one.
+  const tiers: Record<string, import('@agentops/contracts').ModelRef[]> = { ...DEFAULT_TIERS };
+  const refresh = async () => {
+    try {
+      const map = await store.loadAll();
+      // Mutate in place so the activity's deps.globalTiers reference sees the
+      // new entries without re-wiring. Clear + repopulate.
+      for (const key of Object.keys(tiers)) delete tiers[key];
+      for (const [k, v] of map.entries()) tiers[k] = v;
+    } catch (err) {
+      console.warn('agentops worker: tier refresh failed (keeping previous map)', err);
+    }
+  };
+  await refresh();
+  const timer = setInterval(refresh, TIER_REFRESH_INTERVAL_MS);
+  // Don't keep the event loop alive solely for the refresh timer -- the
+  // worker's own run loop is the liveness signal.
+  if (typeof timer.unref === 'function') timer.unref();
+  return { tiers, stop: () => clearInterval(timer) };
+}
+
 async function main(): Promise<void> {
   const connection = await NativeConnection.connect({
     address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233',
@@ -414,6 +430,13 @@ async function main(): Promise<void> {
       : 'agentops worker: filed_findings in-memory only (ENGINE_DB_HOST not set)',
   );
 
+  const { tiers: globalTiers, stop: stopTierRefresh } = await buildGlobalTiers(enginePool);
+  console.log(
+    globalTiers
+      ? `agentops worker: global tiers loaded from Postgres (${Object.keys(globalTiers).length} tiers, 60s refresh)`
+      : 'agentops worker: global tiers from DEFAULT_TIERS (no DB -- hardcoded seed)',
+  );
+
   // Build a Temporal client for Schedule management (ConfigSync activities).
   // Uses the same address/namespace as the worker connection when available.
   let scheduleClient: import('@agentops/activities').ScheduleClientLike | undefined;
@@ -455,6 +478,7 @@ async function main(): Promise<void> {
     workspaces,
     prompts: new PromptPack(),
     registry,
+    globalTiers,
     filedFindings,
     scheduleClient,
     taskQueue: ENGINE_QUEUE,
@@ -474,6 +498,7 @@ async function main(): Promise<void> {
   try {
     await Promise.all([worker.run(), legacyWorker.run()]);
   } finally {
+    stopTierRefresh();
     await tracing?.shutdown();
   }
 }

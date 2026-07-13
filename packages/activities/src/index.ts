@@ -16,3 +16,4 @@ export * from './schedule-ops';
 export * from './resolve-managed-projects';
 export * from './resolve-project-config';
 export * from './project-context';
+export * from './postgres-tier-store';
