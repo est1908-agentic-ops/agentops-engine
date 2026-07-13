@@ -837,6 +837,36 @@ describe('createActivities — resolveRepoConfig', () => {
     expect(arg.searchAttributes).toMatchObject({ project: ['acme'], agentName: ['nb'], workflowType: ['whiteboxBugHunt'] });
   });
 
+  it('applyScheduleChanges updates an existing schedule via an updater function, matching the real ScheduleHandle.update contract', async () => {
+    // Regression test: the real @temporalio/client ScheduleHandle.update() takes
+    // an updater function (previous) => newSchedule, not a plain options object.
+    // A prior version of this code called h.update?.(plainObject), which
+    // type-checked against our own mock-friendly ScheduleClientLike but threw at
+    // runtime against the real client -- silently swallowed by .catch(() => {}),
+    // so an already-existing schedule's stale taskQueue (e.g. an unslugified
+    // project name) could never actually be corrected by reconcile.
+    const update = vi.fn(async (updateFn: (previous: unknown) => unknown) => {
+      update.lastResult = await updateFn({ schedule: { action: { taskQueue: 'proj-Artem private agents' } } });
+    }) as any;
+    const getHandle = vi.fn(() => ({ update }));
+    const deps = {
+      ...buildDeps(),
+      scheduleClient: { getHandle } as any,
+      registry: [{ project: 'Artem private agents', repo: 'est1908/agents', trackerType: 'github' as const, token: 't' }],
+    } as any;
+    const activities = createActivities(deps);
+    const plan = {
+      toCreate: [],
+      toUpdate: [{ name: 'gdebenz-watch', workflow: 'productOwnerReview', schedule: '0 */2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' }],
+      toDelete: [], toPause: [], toResume: [],
+    } as any;
+    await activities.applyScheduleChanges('Artem private agents', 'est1908/agents', plan);
+    expect(getHandle).toHaveBeenCalledWith('agent:Artem private agents:gdebenz-watch');
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(typeof update.mock.calls[0][0]).toBe('function');
+    expect(update.lastResult.schedule.action.taskQueue).toBe('proj-artem-private-agents');
+  });
+
   it('startContinuousAgent starts a singleton by deterministic id with identity + taskQueue, tolerating AlreadyStarted', async () => {
     const start = vi.fn().mockResolvedValue({});
     const deps = {

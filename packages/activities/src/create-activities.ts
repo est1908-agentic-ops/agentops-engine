@@ -459,11 +459,18 @@ export function createActivities(deps: ActivityDependencies) {
           });
         } else {
           const h = client.getHandle(id);
-          await h.update?.({
+          // The real ScheduleHandle.update() (unlike .create()) takes an updater
+          // function -- (previous) => newSchedule -- not a plain options object.
+          // deps.scheduleClient is `tc.schedule as unknown as ScheduleClientLike`
+          // (see worker/src/main.ts), so passing an object here type-checks but
+          // throws at runtime ("updateFn is not a function"), silently eaten by
+          // the .catch below -- every reconcile "succeeds" while the schedule's
+          // taskQueue/spec never actually changes on the server.
+          await h.update?.(() => ({
             schedule: { spec: cronScheduleSpec(spec.schedule, spec.timezone), action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: actionQueue, memo, searchAttributes } },
             memo,
             searchAttributes,
-          })?.catch(() => {});
+          }))?.catch(() => {});
         }
       }
       for (const id of plan.toPause) {

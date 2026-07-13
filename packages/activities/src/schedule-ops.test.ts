@@ -37,4 +37,17 @@ describe('applyScheduleChanges (mocked ScheduleClient)', () => {
     await applyScheduleChanges('p', 'p/r', plan, { scheduleClient: client });
     expect(client.getHandle).toHaveBeenCalledWith('agent:p:x');
   });
+
+  it('updates via an updater function, matching the real ScheduleHandle.update contract', async () => {
+    const client = makeMockClient();
+    const plan: ReconcilePlan = {
+      toCreate: [], toDelete: [], toPause: [], toResume: [],
+      toUpdate: [{ name: 'nightly', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' } as any],
+    };
+    await applyScheduleChanges('acme', 'acme/web', plan, { scheduleClient: client, taskQueue: 'q' });
+    const handle = client.getHandle.mock.results[0].value;
+    expect(typeof handle.update.mock.calls[0][0]).toBe('function');
+    const result = await handle.update.mock.calls[0][0]({});
+    expect(result.schedule.action.taskQueue).toBe('q');
+  });
 });
