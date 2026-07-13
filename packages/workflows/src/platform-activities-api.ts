@@ -1,4 +1,10 @@
-import type { AgentRunRequest, AgentRunResult, RunStats } from '@agentops/contracts';
+import type {
+  AgentRunRequest,
+  AgentRunResult,
+  ExecutePlatformActionRequest,
+  ExecutePlatformActionResult,
+  RunStats,
+} from '@agentops/contracts';
 import type { RepoConfigResolution } from './activities-api';
 
 export interface PlatformActivities {
@@ -7,4 +13,5 @@ export interface PlatformActivities {
   resolveRepoConfig(repo: string): Promise<RepoConfigResolution>;
   prepareScratchWorkspace(taskId: string): Promise<{ workspaceRef: string }>;
   cleanupScratchWorkspace(workspaceRef: string): Promise<void>;
+  executePlatformAction(req: ExecutePlatformActionRequest): Promise<ExecutePlatformActionResult>;
 }

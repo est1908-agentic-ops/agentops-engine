@@ -19,6 +19,8 @@ import {
 import type {
   AgentRunRequest,
   AgentRunResult,
+  ExecutePlatformActionRequest,
+  ExecutePlatformActionResult,
   ModelRef,
   PrFeedback,
   ProjectConfig,
@@ -64,7 +66,10 @@ export interface ActivityDependencies {
 export interface WorkflowClientLike {
   start?: (workflowType: string, opts: any) => Promise<any>; // eslint-disable-line @typescript-eslint/no-explicit-any
   list?: (query?: string) => AsyncIterable<any>; // eslint-disable-line @typescript-eslint/no-explicit-any
-  getHandle?: (id: string) => { terminate?: (reason?: string) => Promise<void> };
+  getHandle?: (id: string) => {
+    terminate?: (reason?: string) => Promise<void>;
+    signal?: (signalName: string, ...args: unknown[]) => Promise<void>;
+  };
 }
 
 function rethrowWorkspaceError(err: unknown): never {
@@ -226,6 +231,33 @@ export function createActivities(deps: ActivityDependencies) {
           });
         }
         throw err;
+      }
+    },
+    async executePlatformAction(
+      req: ExecutePlatformActionRequest,
+    ): Promise<ExecutePlatformActionResult> {
+      const handle = deps.workflowClient?.getHandle?.(req.workflowId);
+      if (!handle) {
+        return { ok: false, detail: 'no workflow client configured' };
+      }
+      try {
+        if (req.type === 'terminate') {
+          if (!handle.terminate) {
+            return { ok: false, detail: 'terminate not supported by workflow client' };
+          }
+          await handle.terminate(req.reason);
+          return { ok: true, detail: `terminated ${req.workflowId}` };
+        }
+        if (!req.signalName) {
+          return { ok: false, detail: 'signalName is required for a signal action' };
+        }
+        if (!handle.signal) {
+          return { ok: false, detail: 'signal not supported by workflow client' };
+        }
+        await handle.signal(req.signalName);
+        return { ok: true, detail: `signalled ${req.workflowId} with "${req.signalName}"` };
+      } catch (err) {
+        return { ok: false, detail: err instanceof Error ? err.message : 'action failed' };
       }
     },
     async getIssue(ref: string): Promise<Issue> {
