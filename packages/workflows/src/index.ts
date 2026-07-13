@@ -12,3 +12,4 @@ export * from './platform-activities-api';
 export * from './whitebox-bughunt';
 export * from './config-sync';
 export * from './reconcile-all-projects';
+export { selfHeal, SELF_HEAL_PROMPT } from './self-heal';
