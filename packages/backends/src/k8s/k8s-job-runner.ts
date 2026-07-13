@@ -94,7 +94,7 @@ const SHELL_REDIRECT = [
 ].join('\n');
 
 // A call's on-disk artifacts and its K8s Job are keyed by
-// (taskId, stage, attempt, callIndex) AND the model. A RateLimitFallbackBackend
+// (taskId, stage, attempt, callIndex) AND the model. A TierFallbackBackend
 // retry reruns the exact same call with a different model, so without the model
 // in the key the fallback would 409-reuse the primary model's already-finished
 // Job and re-read its (rate-limited) output instead of actually running the

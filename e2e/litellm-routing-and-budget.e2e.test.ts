@@ -4,12 +4,16 @@ import { LiteLlmBackend } from '@agentops/backends';
 import { devCycle, resumeSignal } from '@agentops/workflows';
 import { buildTestEnv, teardownTestEnv, waitForStatus, type TestEnv } from './helpers';
 
-function baseConfig(routingOverrides: TaskInput['config']['routing']): TaskInput['config'] {
+function baseConfig(
+  routingOverrides: TaskInput['config']['routing'],
+  tiers?: TaskInput['config']['tiers'],
+): TaskInput['config'] {
   return {
     fastVerifyCommands: [],
     fullVerifyCommands: [],
     stages: {},
     routing: routingOverrides,
+    tiers,
     brakes: { maxImplementAttempts: 3, maxIterations: 10, maxTokens: 1_000_000, maxBabysitRounds: 5 },
   };
 }
@@ -61,14 +65,14 @@ describe('DevCycle e2e: LiteLLM routing and budget enforcement (M5 gate)', () =>
       project: 'project-a',
       repo: 'org/project-a',
       goal: 'Route through the CLI-style backend',
-      config: baseConfig({ context: { backend: 'stub', model: 'stub' } }),
+      config: baseConfig({ context: { tier: 'stub' } }),
     };
     const litellmInput: TaskInput = {
       taskId: 'litellm-task',
       project: 'project-b',
       repo: 'org/project-b',
       goal: 'Route through the LiteLLM-fronted backend',
-      config: baseConfig({ context: { backend: 'litellm', model: 'zai-glm-4.6' } }),
+      config: baseConfig({ context: { tier: 'litellm' } }, { litellm: [{ backend: 'litellm', model: 'zai-glm-4.6' }] }),
     };
 
     const [claudeFinal, litellmFinal] = await worker.runUntil(async () => {
@@ -115,7 +119,7 @@ describe('DevCycle e2e: LiteLLM routing and budget enforcement (M5 gate)', () =>
       project: 'demo',
       repo: 'demo/repo',
       goal: 'Trip a deliberately low LiteLLM virtual-key budget',
-      config: baseConfig({ context: { backend: 'litellm', model: 'zai-glm-4.6' } }),
+      config: baseConfig({ context: { tier: 'litellm' } }, { litellm: [{ backend: 'litellm', model: 'zai-glm-4.6' }] }),
     };
 
     const finalState = await worker.runUntil(async () => {

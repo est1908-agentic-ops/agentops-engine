@@ -13,7 +13,7 @@ describe('seedDemoAgentopsConfig', () => {
     expect(config.fastVerifyCommands).toEqual(['pnpm lint']);
     expect(config.fullVerifyCommands).toEqual(['pnpm test']);
     for (const stage of ['context', 'assess', 'design', 'plan', 'implement', 'full_verify', 'review'] as const) {
-      expect(config.routing[stage]).toEqual({ backend: 'stub', model: 'stub-v1' });
+      expect(config.routing[stage]).toEqual({ tier: 'stub' });
     }
   });
 });
@@ -38,7 +38,7 @@ describe('buildStartScmPort', () => {
 
     expect(scm).toBeInstanceOf(MemoryScmPort);
     const config = await loadProjectConfig(scm, 'demo/repo');
-    expect(config.routing.implement).toEqual({ backend: 'stub', model: 'stub-v1' });
+    expect(config.routing.implement).toEqual({ tier: 'stub' });
   });
 
   it('returns a GithubScmPort for a repo registered under the given project', async () => {

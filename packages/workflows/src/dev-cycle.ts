@@ -9,7 +9,7 @@ import {
   setHandler,
   sleep,
 } from '@temporalio/workflow';
-import type { Brakes, DevCycleState, ModelRef, ProjectConfig, Routing, TaskInput, VerdictKind } from '@agentops/contracts';
+import type { Brakes, DevCycleState, ProjectConfig, Routing, TaskInput, VerdictKind } from '@agentops/contracts';
 import { feedbackHash } from '@agentops/contracts';
 import { babysitDecision, nextRepairAction, parseVerdict, preImplementStages, resolveStageLimits } from '@agentops/policies';
 import type { DevCycleActivities } from './activities-api';
@@ -170,13 +170,12 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     stage: RoutableStage,
     attempt: number,
     callIndex = 1,
-    modelOverride?: ModelRef,
+    tierOverride?: string,
     extraContext: Record<string, unknown> = {},
   ): Promise<string> => {
     const routed = config.routing[stage];
-    const model = modelOverride ?? routed;
-    const backend = model?.backend ?? 'stub';
-    const modelName = model?.model ?? 'stub';
+    const tier = tierOverride ?? routed?.tier ?? 'smart';
+    const effort = routed?.effort;
 
     let result;
     while (true) {
@@ -186,9 +185,9 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
           stage,
           attempt,
           callIndex,
-          backend,
-          model: modelName,
-          effort: model?.effort,
+          tier,
+          effort,
+          projectTiers: config.tiers,
           image: config.image,
           services: config.services,
           promptRef: `${stage}.md`,
@@ -217,8 +216,8 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     await activities.recordRunStats({
       taskId: input.taskId,
       stage,
-      backend,
-      model: modelName,
+      backend: result.resolvedBackend ?? 'unknown',
+      model: result.resolvedModel ?? 'unknown',
       tokensIn: result.tokensIn,
       tokensOut: result.tokensOut,
       wallMs: result.wallMs,
@@ -290,8 +289,8 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
 
     while (true) {
       state.stage = 'implement';
-      const implementModel = useEscalation ? config.escalation : undefined;
-      const implementOutput = await runStageAgent('implement', implementAttempt, 1, implementModel, {
+      const escalationTier = useEscalation ? config.escalation?.tier : undefined;
+      const implementOutput = await runStageAgent('implement', implementAttempt, 1, escalationTier, {
         fullVerifyFindings: lastFullVerifyOutput,
         reviewFindings: lastReviewOutput,
       });

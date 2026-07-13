@@ -60,7 +60,7 @@ describe('k8sJobName', () => {
     expect(k8sJobName(baseRequest)).toBe(k8sJobName(baseRequest));
   });
 
-  // A RateLimitFallbackBackend retry reruns the same call with a different
+  // A TierFallbackBackend retry reruns the same call with a different
   // model. If the Job name and artifact paths ignored the model, that retry
   // would 409-reuse the primary model's already-finished Job and re-read its
   // (rate-limited) output instead of actually running the fallback.

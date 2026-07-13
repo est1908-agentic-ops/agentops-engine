@@ -7,3 +7,4 @@ export * from './parse-platform-result';
 export * from './resolve-stage-limits';
 export * from './reconcile-agents';
 export * from './parse-findings';
+export * from './resolve-tier';

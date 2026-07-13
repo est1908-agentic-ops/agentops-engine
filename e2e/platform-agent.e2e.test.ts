@@ -50,7 +50,7 @@ describe('platform e2e', () => {
     });
     const { env, worker, stub, scm, taskQueue } = testEnv;
 
-    const stubRoute = { backend: 'stub', model: 'stub-v1' };
+    const stubRoute = { tier: 'stub' };
     scm.seedFile(
       'demo/repo',
       'agentops.json',

@@ -8,7 +8,9 @@ import type { BackendRunRequest, ResolvedProjectEntry } from '@agentops/contract
 import {
   LiteLlmBudgetExceededError,
   ProcessCliAuthError,
+  RateLimitError,
   RateWindowExceededError,
+  SessionLimitError,
   StubBackend,
 } from '@agentops/backends';
 import { MemoryTrackerPort, MemoryScmPort } from '@agentops/ports';
@@ -548,6 +550,112 @@ describe('createActivities — backend error translation', () => {
     expect((err as ApplicationFailure).type).toBe('RateWindowExceededError');
     expect((err as ApplicationFailure).nonRetryable).toBe(false);
     expect((err as ApplicationFailure).nextRetryDelay).toBe(4200);
+  });
+});
+
+describe('createActivities — tier resolution + fallback', () => {
+  it('resolves a tier ref and dispatches to its primary entry', async () => {
+    const captured: BackendRunRequest[] = [];
+    const claude: AgentBackend = {
+      run: async (req) => {
+        captured.push(req);
+        return { output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 10 };
+      },
+    };
+    const deps = { ...buildDeps(), backends: { claude } };
+    const activities = createActivities(deps);
+
+    const result = await activities.runAgent({
+      taskId: 't1',
+      stage: 'design',
+      attempt: 1,
+      callIndex: 1,
+      tier: 'smart',
+      promptRef: 'design.md',
+      promptContext: { taskId: 't1', goal: 'g' },
+      workspaceRef: 'demo/repo',
+      limits: { maxTokens: 1000, timeoutMs: 60_000 },
+    });
+
+    expect(result.output).toBe('ok');
+    // 'smart' tier's primary is claude/opus -- the activity resolved it.
+    expect(captured[0].backend).toBe('claude');
+    expect(captured[0].model).toBe('opus');
+    expect(result.resolvedBackend).toBe('claude');
+    expect(result.resolvedModel).toBe('opus');
+  });
+
+  it('falls back cross-backend on SessionLimitError and attributes to the fallback', async () => {
+    const claude: AgentBackend = {
+      run: async () => { throw new SessionLimitError('session limit'); },
+    };
+    const pi: AgentBackend = {
+      run: async () => ({ output: 'fallback', tokensIn: 1, tokensOut: 1, wallMs: 1 }),
+    };
+    const deps = { ...buildDeps(), backends: { claude, pi } };
+    const activities = createActivities(deps);
+
+    const result = await activities.runAgent({
+      taskId: 't1',
+      stage: 'design',
+      attempt: 1,
+      callIndex: 1,
+      tier: 'smart',
+      promptRef: 'design.md',
+      promptContext: { taskId: 't1', goal: 'g' },
+      workspaceRef: 'demo/repo',
+      limits: { maxTokens: 1000, timeoutMs: 60_000 },
+    });
+
+    expect(result.output).toBe('fallback');
+    // Attribution: the fallback (pi/zai/glm-5.2) served the call, not claude.
+    expect(result.resolvedBackend).toBe('pi');
+    expect(result.resolvedModel).toBe('zai/glm-5.2');
+  });
+
+  it('maps SessionLimitExhaustedError to a non-retryable ApplicationFailure', async () => {
+    // Both tier entries throw SessionLimitError -> chain exhausted.
+    const sessionLimited: AgentBackend = {
+      run: async () => { throw new SessionLimitError('session limit'); },
+    };
+    const deps = {
+      ...buildDeps(),
+      backends: { claude: sessionLimited, pi: sessionLimited },
+    };
+    const activities = createActivities(deps);
+
+    const err: unknown = await activities
+      .runAgent({
+        taskId: 't1', stage: 'design', attempt: 1, callIndex: 1, tier: 'smart',
+        promptRef: 'design.md', promptContext: { taskId: 't1', goal: 'g' },
+        workspaceRef: 'demo/repo', limits: { maxTokens: 1000, timeoutMs: 60_000 },
+      })
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(ApplicationFailure);
+    expect((err as ApplicationFailure).type).toBe('SessionLimitExhaustedError');
+    expect((err as ApplicationFailure).nonRetryable).toBe(true);
+  });
+
+  it('maps RateLimitError to a retryable ApplicationFailure with a nextRetryDelay', async () => {
+    const claude: AgentBackend = {
+      run: async () => { throw new RateLimitError('429 rate limit'); },
+    };
+    const deps = { ...buildDeps(), backends: { claude } };
+    const activities = createActivities(deps);
+
+    const err: unknown = await activities
+      .runAgent({
+        taskId: 't1', stage: 'design', attempt: 1, callIndex: 1, tier: 'smart',
+        promptRef: 'design.md', promptContext: { taskId: 't1', goal: 'g' },
+        workspaceRef: 'demo/repo', limits: { maxTokens: 1000, timeoutMs: 60_000 },
+      })
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(ApplicationFailure);
+    expect((err as ApplicationFailure).type).toBe('RateLimitError');
+    expect((err as ApplicationFailure).nonRetryable).toBe(false);
+    expect((err as ApplicationFailure).nextRetryDelay).toBeGreaterThan(0);
   });
 });
 

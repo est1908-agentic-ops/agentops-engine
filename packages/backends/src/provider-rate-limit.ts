@@ -21,6 +21,17 @@ export class SessionLimitError extends Error {
   }
 }
 
+// Thrown by TierFallbackBackend when every entry in the resolved tier chain
+// has been exhausted (all hit SessionLimitError). The activity maps this to a
+// non-retryable ApplicationFailure -- no point burning Temporal's 5x retry
+// budget on an account-wide cap that lasts hours.
+export class SessionLimitExhaustedError extends Error {
+  constructor(message?: string) {
+    super(message);
+    this.name = 'SessionLimitExhaustedError';
+  }
+}
+
 // Deliberately narrower than "contains 429" alone -- a bare 429 without one
 // of these phrases stays a generic backend error, since not every 429 a CLI
 // surfaces is this specific throttle-and-recover class of failure. See

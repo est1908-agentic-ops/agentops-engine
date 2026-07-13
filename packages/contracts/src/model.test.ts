@@ -38,10 +38,15 @@ describe('BrakesSchema', () => {
 });
 
 describe('RoutingSchema', () => {
-  it('allows a partial routing table', () => {
-    const routing = RoutingSchema.parse({ implement: { backend: 'stub', model: 'stub-v1' } });
-    expect(routing.implement).toEqual({ backend: 'stub', model: 'stub-v1' });
+  it('allows a partial routing table with tier refs', () => {
+    const routing = RoutingSchema.parse({ implement: { tier: 'implementation' } });
+    expect(routing.implement).toEqual({ tier: 'implementation' });
     expect(routing.review).toBeUndefined();
+  });
+
+  it('accepts a tier ref with an effort override', () => {
+    const routing = RoutingSchema.parse({ design: { tier: 'smart', effort: 'high' } });
+    expect(routing.design).toEqual({ tier: 'smart', effort: 'high' });
   });
 });
 
