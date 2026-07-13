@@ -1,4 +1,5 @@
 import type { RunStatus } from '@agentops/contracts';
+import { Badge } from '@/components/ui/badge';
 
 const STATUS_COLORS: Record<RunStatus, string> = {
   RUNNING: '#2563eb',
@@ -12,8 +13,8 @@ const STATUS_COLORS: Record<RunStatus, string> = {
 
 export function StatusBadge({ status }: { status: RunStatus }) {
   return (
-    <span className="status-badge" style={{ backgroundColor: STATUS_COLORS[status] }}>
+    <Badge className="border-transparent text-white" style={{ backgroundColor: STATUS_COLORS[status] }}>
       {status}
-    </span>
+    </Badge>
   );
 }
