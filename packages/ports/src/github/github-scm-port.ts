@@ -112,6 +112,14 @@ export class GithubScmPort implements ScmPort {
         title: req.title,
         body: req.body,
       });
+      if (req.labels?.length) {
+        await this.client.rest.issues.addLabels({
+          owner,
+          repo,
+          issue_number: prData.number,
+          labels: req.labels,
+        });
+      }
       return { prRef: `${owner}/${repo}#${prData.number}`, url: prData.html_url };
     } catch (err) {
       // req.branch is deterministic per task, so a Temporal retry of this same activity call
