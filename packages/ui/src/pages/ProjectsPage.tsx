@@ -199,7 +199,7 @@ export function ProjectsPage() {
           </CardContent>
         </Card>
         <p className="mt-4">
-          <Link to="/" className="text-sm text-muted-foreground">
+          <Link to="/dashboard" className="text-sm text-muted-foreground">
             ← Back to console
           </Link>
         </p>
@@ -302,7 +302,7 @@ export function ProjectsPage() {
               <TableCell>{project.config ? 'custom' : 'file'}</TableCell>
               <TableCell>{formatTimestamp(project.updatedAt)}</TableCell>
               <TableCell className="flex gap-3 whitespace-nowrap">
-                <Link className="text-sm text-primary" to={`/?target=${encodeURIComponent(project.repo)}`}>
+                <Link className="text-sm text-primary" to={`/dashboard?target=${encodeURIComponent(project.repo)}`}>
                   Run
                 </Link>
                 <Button
@@ -337,7 +337,7 @@ export function ProjectsPage() {
       </Table>
 
       <p className="mt-4">
-        <Link to="/" className="text-sm text-muted-foreground">
+        <Link to="/dashboard" className="text-sm text-muted-foreground">
           ← Back to console
         </Link>
       </p>
