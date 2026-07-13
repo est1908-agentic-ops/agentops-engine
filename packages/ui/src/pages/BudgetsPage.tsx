@@ -5,7 +5,14 @@ import { PageShell } from '../components/PageShell';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 
 export function BudgetsPage() {
   const [data, setData] = useState<BudgetsResponse | null>(null);
@@ -30,6 +37,7 @@ export function BudgetsPage() {
   }, [refresh]);
 
   const rw = data?.rateWindows;
+  const cu = data?.claude;
   const or = data?.openRouter;
 
   return (
@@ -41,13 +49,20 @@ export function BudgetsPage() {
           </p>
           <h1 className="text-2xl font-semibold">Budgets</h1>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => void refresh()}
+          disabled={loading}
+        >
           <RotateCw /> Reload
         </Button>
       </div>
       <p className="mb-4 text-sm text-muted-foreground">
-        Configured subscription rate windows and estimated spend for OpenRouter (derived from recorded run stats).
-        Live window utilization and direct provider account data are tracked separately.
+        Configured subscription rate windows, Claude usage, and estimated spend for OpenRouter
+        (derived from recorded run stats). Live window utilization and direct provider account data
+        are tracked separately.
       </p>
 
       {loading && <p>Loading…</p>}
@@ -83,7 +98,76 @@ export function BudgetsPage() {
               })}
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
-              These are the static configuration values. Current in-window usage count is not yet exposed.
+              These are the static configuration values. Current in-window usage count is not yet
+              exposed.
+            </p>
+          </div>
+
+          {/* Claude usage */}
+          <div>
+            <h2 className="mb-2 text-lg font-semibold">Claude usage (recorded)</h2>
+            <Card>
+              <CardContent className="pt-4">
+                <div className="mb-3 text-2xl font-semibold">
+                  {cu ? (
+                    <>
+                      {cu.totalCalls.toLocaleString()} calls ·{' '}
+                      {((cu.tokensIn + cu.tokensOut) / 1e6).toFixed(1)}M tokens
+                      <span className="ml-2 text-sm font-normal text-muted-foreground">
+                        ({cu.tokensIn.toLocaleString()} in / {cu.tokensOut.toLocaleString()} out)
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      0 calls · 0M tokens
+                      <span className="ml-2 text-sm font-normal text-muted-foreground">
+                        (0 in / 0 out)
+                      </span>
+                    </>
+                  )}
+                </div>
+                <div className="text-sm text-muted-foreground">{cu?.period}</div>
+
+                {cu && cu.modelBreakdown.length > 0 && (
+                  <div className="mt-4">
+                    <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
+                      By model
+                    </div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Model</TableHead>
+                          <TableHead className="text-right">Calls</TableHead>
+                          <TableHead className="text-right">Tokens</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {cu.modelBreakdown.map((row) => (
+                          <TableRow key={row.model}>
+                            <TableCell className="font-mono text-xs">{row.model}</TableCell>
+                            <TableCell className="text-right">
+                              {row.calls.toLocaleString()}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {row.tokens.toLocaleString()}
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+
+                {cu && cu.modelBreakdown.length === 0 && (
+                  <div className="mt-2 text-sm text-muted-foreground">
+                    No Claude runs recorded yet.
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Recorded usage across all runs. Current in-window utilization and plan-remaining are
+              tracked separately.
             </p>
           </div>
 
@@ -94,7 +178,9 @@ export function BudgetsPage() {
               <CardContent className="pt-4">
                 <div className="mb-3 text-2xl font-semibold">
                   ${or ? or.estimatedUsd.toFixed(4) : '0.0000'}
-                  <span className="ml-2 text-sm font-normal text-muted-foreground">USD (estimated)</span>
+                  <span className="ml-2 text-sm font-normal text-muted-foreground">
+                    USD (estimated)
+                  </span>
                 </div>
                 <div className="text-sm text-muted-foreground">
                   {or?.period} — {or?.totalTokens ?? 0} tokens across OpenRouter models
@@ -102,7 +188,9 @@ export function BudgetsPage() {
 
                 {or && or.modelBreakdown.length > 0 && (
                   <div className="mt-4">
-                    <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">By model</div>
+                    <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">
+                      By model
+                    </div>
                     <Table>
                       <TableHeader>
                         <TableRow>
@@ -116,7 +204,9 @@ export function BudgetsPage() {
                           <TableRow key={row.model}>
                             <TableCell className="font-mono text-xs">{row.model}</TableCell>
                             <TableCell className="text-right">{row.tokens}</TableCell>
-                            <TableCell className="text-right">${row.estimatedUsd.toFixed(4)}</TableCell>
+                            <TableCell className="text-right">
+                              ${row.estimatedUsd.toFixed(4)}
+                            </TableCell>
                           </TableRow>
                         ))}
                       </TableBody>
@@ -125,12 +215,15 @@ export function BudgetsPage() {
                 )}
 
                 {or && or.modelBreakdown.length === 0 && (
-                  <div className="mt-2 text-sm text-muted-foreground">No OpenRouter runs recorded yet.</div>
+                  <div className="mt-2 text-sm text-muted-foreground">
+                    No OpenRouter runs recorded yet.
+                  </div>
                 )}
               </CardContent>
             </Card>
             <p className="mt-2 text-xs text-muted-foreground">
-              Estimates use a static price table. Real account balance/credits and live spend are follow-up work.
+              Estimates use a static price table. Real account balance/credits and live spend are
+              follow-up work.
             </p>
           </div>
         </div>

@@ -79,11 +79,27 @@ export const OpenRouterSpendSchema = z.object({
 });
 export type OpenRouterSpend = z.infer<typeof OpenRouterSpendSchema>;
 
+export const ClaudeUsageSchema = z.object({
+  totalCalls: z.number().int().nonnegative(),
+  tokensIn: z.number().int().nonnegative(),
+  tokensOut: z.number().int().nonnegative(),
+  period: z.string(),
+  modelBreakdown: z.array(
+    z.object({
+      model: z.string(),
+      calls: z.number().int().nonnegative(),
+      tokens: z.number().int().nonnegative(),
+    }),
+  ),
+});
+export type ClaudeUsage = z.infer<typeof ClaudeUsageSchema>;
+
 export const BudgetsResponseSchema = z.object({
   rateWindows: z.object({
     claude: RateWindowViewSchema,
     pi: RateWindowViewSchema,
   }),
+  claude: ClaudeUsageSchema,
   openRouter: OpenRouterSpendSchema,
 });
 export type BudgetsResponse = z.infer<typeof BudgetsResponseSchema>;
