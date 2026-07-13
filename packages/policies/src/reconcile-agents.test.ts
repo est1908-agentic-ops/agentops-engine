@@ -81,6 +81,16 @@ describe('resolveAgentQueue', () => {
     expect(resolveAgentQueue({ workflow: 'rollbarMonitor', taskQueue: undefined }, 'acme')).toBe('proj-acme');
     expect(projectQueue('broccoli')).toBe('proj-broccoli');
   });
+  it('slugifies an operator-chosen project name so the queue is k8s/Temporal-safe', () => {
+    // "Artem private agents" produced queue "proj-Artem private agents" pre-fix --
+    // the Helm chart uses this same value as a k8s Deployment name (RFC 1123:
+    // lowercase, no spaces), so the worker never deployed and the schedule fired
+    // onto a queue nothing polled forever.
+    expect(projectQueue('Artem private agents')).toBe('proj-artem-private-agents');
+    expect(resolveAgentQueue({ workflow: 'rollbarMonitor', taskQueue: undefined }, 'Artem private agents')).toBe(
+      'proj-artem-private-agents',
+    );
+  });
 });
 
 describe('workerWarnings', () => {

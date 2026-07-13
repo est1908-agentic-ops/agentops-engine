@@ -1,5 +1,6 @@
 import type { AgentSpec, AgentsManifest } from '@agentops/contracts';
 import { ENGINE_QUEUE, isBuiltinWorkflow } from '@agentops/contracts';
+import { slugifyProject } from './slug';
 
 export interface ExistingSchedule { id: string; scheduleSpec: string; workflow: string; paused: boolean; taskQueue?: string }
 export interface ReconcilePlan { toCreate: AgentSpec[]; toUpdate: AgentSpec[]; toDelete: string[]; toPause: string[]; toResume: string[] }
@@ -27,9 +28,15 @@ export function orphanScheduleIds(agentScheduleIds: string[], liveProjects: stri
 
 // A Tier-2 project worker polls this queue (proj-worker chart default). Both the
 // worker Deployment and the agent's schedule derive their queue from the project
-// slug so they can't drift (spec 2026-07-12-project-worker-onboarding §7).
+// slug so they can't drift (spec 2026-07-12-project-worker-onboarding §7). Must
+// slugify: an operator-chosen project name like "Artem private agents" contains
+// spaces/uppercase, which Temporal accepts in a queue name but the Helm chart
+// can't -- it uses this same value as a k8s Deployment/ServiceAccount name
+// (RFC 1123: lowercase, alphanumeric + '-' only), so an unslugified project would
+// mean no worker ever gets deployed and the schedule fires onto a queue nobody
+// polls forever.
 export function projectQueue(project: string): string {
-  return `proj-${project}`;
+  return `proj-${slugifyProject(project)}`;
 }
 
 // The task queue the reconciler starts an agent on:

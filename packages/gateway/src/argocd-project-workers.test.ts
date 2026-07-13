@@ -46,6 +46,21 @@ describe('createProjectWorkerParamsProvider', () => {
     ]);
   });
 
+  it('slugifies an operator-chosen project name so params are k8s/Temporal-safe', async () => {
+    // Pre-fix this emitted { project: 'Artem private agents', taskQueue: 'proj-Artem private agents' }
+    // -- the Helm chart uses `project` verbatim as a k8s Deployment/ServiceAccount
+    // name, so ArgoCD could never sync a worker for it and its schedules fired
+    // onto a queue nothing polled.
+    const { publicKey, privateKey } = generateManagedProjectKeyPair();
+    const deps = fakeRegistryDeps(privateKey, [
+      { project: 'Artem private agents', repo: 'artem/agents', encryptedToken: encryptForManagedProject(publicKey, 't') },
+    ]);
+    const provider = createProjectWorkerParamsProvider({ managedProjectDeps: deps, buildScm: scmFactory(() => workerManifest('reg/agents-worker:abc')) });
+    expect(await provider.getParams()).toEqual([
+      { project: 'artem-private-agents', image: 'reg/agents-worker:abc', taskQueue: 'proj-artem-private-agents', replicas: '1' },
+    ]);
+  });
+
   it('excludes a project whose manifest has no worker block', async () => {
     const { publicKey, privateKey } = generateManagedProjectKeyPair();
     const deps = fakeRegistryDeps(privateKey, [{ project: 'cfg-only', repo: 'acme/web', encryptedToken: encryptForManagedProject(publicKey, 't') }]);
