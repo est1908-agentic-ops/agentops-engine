@@ -1,4 +1,4 @@
-import { BrowserRouter, NavLink, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import { Toaster } from '@/components/ui/sonner';
 import { DevCycleRunDetailPage } from './pages/DevCycleRunDetailPage';
 import { HomePage } from './pages/HomePage';
@@ -11,6 +11,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { BudgetsPage } from './pages/BudgetsPage';
 
 const NAV_LINKS = [
+  { to: '/dashboard', label: 'Dashboard' },
   { to: '/projects', label: 'Projects' },
   { to: '/chat', label: 'Chat' },
   { to: '/tiers', label: 'Tiers' },
@@ -43,7 +44,8 @@ export function App() {
         </nav>
       </header>
       <Routes>
-        <Route path="/" element={<HomePage />} />
+        <Route path="/" element={<Navigate to="/chat" replace />} />
+        <Route path="/dashboard" element={<HomePage />} />
         <Route path="/runs/:workflowId" element={<RunDetailPage />} />
         <Route path="/dev-runs/:workflowId" element={<DevCycleRunDetailPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
