@@ -33,6 +33,11 @@ export class MemoryWorkspaceManager implements Workspaces {
     return this.cleanedUp.has(workspaceRef);
   }
 
+  // No real filesystem in the in-memory manager -- nothing to prune.
+  async pruneOrphans(_liveRepos: string[]): Promise<{ removed: string[] }> {
+    return { removed: [] };
+  }
+
   async prepareScratch(taskId: string): Promise<{ workspaceRef: string }> {
     const workspaceRef = `memory://scratch/${taskId}`;
     this.scratchPrepared.add(workspaceRef);

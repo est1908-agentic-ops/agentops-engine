@@ -64,6 +64,9 @@ export interface ConfigSyncActivities {
   // Delete `agent:*` schedules whose project is no longer in `liveProjects`
   // (a removed project's leftovers). Returns the ids deleted.
   pruneOrphanAgentSchedules(liveProjects: string[]): Promise<{ deleted: string[] }>;
+  // Remove base clones + worktrees on the shared PVCs for repos no longer in
+  // `liveRepos` (a removed project's leftover source). Returns the paths removed.
+  pruneOrphanWorkspaces(liveRepos: string[]): Promise<{ removed: string[] }>;
   listContinuousAgents(project: string): Promise<string[]>;
   startContinuousAgent(project: string, repo: string, spec: AgentSpec): Promise<void>;
   terminateContinuousAgent(id: string): Promise<void>;

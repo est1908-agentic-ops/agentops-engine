@@ -1,16 +1,17 @@
 import { describe, it, expect, vi } from 'vitest';
 
-const { executeChild, listManagedProjects, pruneOrphanAgentSchedules } = vi.hoisted(() => ({
+const { executeChild, listManagedProjects, pruneOrphanAgentSchedules, pruneOrphanWorkspaces } = vi.hoisted(() => ({
   executeChild: vi.fn().mockResolvedValue({}),
   listManagedProjects: vi.fn().mockResolvedValue([
     { project: 'a', repo: 'o/a' },
     { project: 'b', repo: 'o/b' },
   ]),
   pruneOrphanAgentSchedules: vi.fn().mockResolvedValue({ deleted: [] }),
+  pruneOrphanWorkspaces: vi.fn().mockResolvedValue({ removed: [] }),
 }));
 
 vi.mock('@temporalio/workflow', () => ({
-  proxyActivities: () => ({ listManagedProjects, pruneOrphanAgentSchedules }),
+  proxyActivities: () => ({ listManagedProjects, pruneOrphanAgentSchedules, pruneOrphanWorkspaces }),
   executeChild,
 }));
 
@@ -24,11 +25,12 @@ describe('reconcileAllProjects', () => {
     expect(executeChild).toHaveBeenCalledWith('configSync', expect.objectContaining({ args: [{ project: 'a', repo: 'o/a' }] }));
   });
 
-  it('sweeps orphaned agent schedules for projects no longer managed', async () => {
+  it('sweeps orphaned agent schedules (by project) and orphaned workspaces (by repo) for removed projects', async () => {
     pruneOrphanAgentSchedules.mockResolvedValueOnce({ deleted: ['agent:gone:x'] });
+    pruneOrphanWorkspaces.mockResolvedValueOnce({ removed: ['cache/gone-repo', 'tasks/gone-1'] });
     const result = await reconcileAllProjects();
-    // sweep is scoped to the still-managed projects
-    expect(pruneOrphanAgentSchedules).toHaveBeenCalledWith(['a', 'b']);
-    expect(result).toEqual({ reconciled: 2, orphansDeleted: 1 });
+    expect(pruneOrphanAgentSchedules).toHaveBeenCalledWith(['a', 'b']); // schedules keyed by project
+    expect(pruneOrphanWorkspaces).toHaveBeenCalledWith(['o/a', 'o/b']); // clones keyed by repo
+    expect(result).toEqual({ reconciled: 2, orphansDeleted: 1, orphanWorkspacesRemoved: 2 });
   });
 });
