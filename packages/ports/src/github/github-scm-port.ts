@@ -26,11 +26,43 @@ const REVIEW_THREADS_QUERY = `
   }
 `;
 
-function mapCiStatus(checkRuns: Array<{ status: string; conclusion: string | null }>): 'pending' | 'green' | 'failed' {
-  if (checkRuns.length === 0 || checkRuns.some((run) => run.status !== 'completed')) {
-    return 'pending';
-  }
+// A PR's CI state is split across two independent GitHub APIs with different
+// auth models: the Checks API (check runs -- what GitHub Actions and other Apps
+// post) and the legacy Statuses API (commit statuses). A personal access token
+// frequently CAN'T read the Checks API at all ("Resource not accessible by
+// personal access token", 403) because it's App-oriented, and a repo may report
+// via one API or the other. So getPrFeedback reads BOTH, tolerates a 403/404 on
+// either (treating that source as `unknown` rather than throwing), and merges.
+// This keeps a run that already opened a PR alive even when CI can't be read --
+// `unknown` never becomes merge-ready, so the babysit loop just waits/brakes.
+// See est1908/agents getPrFeedback 403 (2026-07-13).
+type CiSignal = 'green' | 'failed' | 'pending' | 'unknown';
+
+function isNotAccessible(err: unknown): boolean {
+  const status = (err as { status?: number }).status;
+  return status === 403 || status === 404;
+}
+
+function mapCheckRuns(checkRuns: Array<{ status: string; conclusion: string | null }>): CiSignal {
+  if (checkRuns.length === 0) return 'unknown'; // no check runs -> let the Statuses API decide
+  if (checkRuns.some((run) => run.status !== 'completed')) return 'pending';
   return checkRuns.every((run) => run.conclusion === 'success') ? 'green' : 'failed';
+}
+
+function mapCombinedStatus(state: string, total: number): CiSignal {
+  if (total === 0) return 'unknown'; // no legacy statuses on this ref
+  if (state === 'success') return 'green';
+  if (state === 'failure' || state === 'error') return 'failed';
+  return 'pending';
+}
+
+// Failure dominates; then pending; then green; if neither source is readable or
+// present, `pending` (unknown CI must never read as green / merge-ready).
+export function mergeCiSignals(a: CiSignal, b: CiSignal): 'green' | 'failed' | 'pending' {
+  if (a === 'failed' || b === 'failed') return 'failed';
+  if (a === 'pending' || b === 'pending') return 'pending';
+  if (a === 'green' || b === 'green') return 'green';
+  return 'pending';
 }
 
 export class GithubScmPort implements ScmPort {
@@ -77,8 +109,7 @@ export class GithubScmPort implements ScmPort {
   async getPrFeedback(prRef: string): Promise<PrFeedback> {
     const { owner, repo, number } = parseRef(prRef);
     const { data: pr } = await this.client.rest.pulls.get({ owner, repo, pull_number: number });
-    const { data: checksData } = await this.client.rest.checks.listForRef({ owner, repo, ref: pr.head.sha });
-    const ciStatus = mapCiStatus(checksData.check_runs);
+    const ciStatus = await this.readCiStatus(owner, repo, pr.head.sha);
 
     const graphqlResult = await this.client.graphql<GraphqlReviewThreadsResult>(REVIEW_THREADS_QUERY, {
       owner,
@@ -94,6 +125,39 @@ export class GithubScmPort implements ScmPort {
     }));
 
     return { ciStatus, unresolvedThreads, comments };
+  }
+
+  // Read CI from the Checks API and the Statuses API in parallel and merge. A
+  // 403/404 on either (e.g. a PAT that can't read check runs) degrades that
+  // source to `unknown` instead of failing the whole activity; other errors
+  // (5xx/network) still propagate so Temporal's retry can absorb them.
+  private async readCiStatus(owner: string, repo: string, ref: string): Promise<'green' | 'failed' | 'pending'> {
+    const [checks, status] = await Promise.all([
+      this.readCheckRuns(owner, repo, ref),
+      this.readCombinedStatus(owner, repo, ref),
+    ]);
+    return mergeCiSignals(checks, status);
+  }
+
+  private async readCheckRuns(owner: string, repo: string, ref: string): Promise<CiSignal> {
+    try {
+      const { data } = await this.client.rest.checks.listForRef({ owner, repo, ref });
+      const total = data.total_count ?? data.check_runs.length;
+      return total === 0 ? 'unknown' : mapCheckRuns(data.check_runs);
+    } catch (err) {
+      if (isNotAccessible(err)) return 'unknown';
+      throw err;
+    }
+  }
+
+  private async readCombinedStatus(owner: string, repo: string, ref: string): Promise<CiSignal> {
+    try {
+      const { data } = await this.client.rest.repos.getCombinedStatusForRef({ owner, repo, ref });
+      return mapCombinedStatus(data.state, data.total_count);
+    } catch (err) {
+      if (isNotAccessible(err)) return 'unknown';
+      throw err;
+    }
   }
 
   async push(_repo: string, workspaceRef: string, branch: string, _contentHash: string): Promise<void> {
