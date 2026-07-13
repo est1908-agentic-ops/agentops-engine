@@ -1,21 +1,15 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { TestWorkflowEnvironment } from '@temporalio/testing';
 import { Worker } from '@temporalio/worker';
+import type { ExecutePlatformActionRequest } from '@agentops/contracts';
 import type { PlatformActivities } from './platform-activities-api';
 import { conversationQuery, decisionSignal, platformChat, userTurnSignal } from './platform-chat';
 
-let env: TestWorkflowEnvironment;
-beforeAll(async () => {
-  env = await TestWorkflowEnvironment.createTimeSkipping();
-});
-afterAll(async () => {
-  await env?.teardown();
-});
+let taskQueueCounter = 0;
 
 // A scripted runAgent that returns one canned CHAT_TURN per call, in order.
 function scriptedActivities(outputs: string[]): PlatformActivities {
   let i = 0;
-  const child: string[] = [];
   const executed: unknown[] = [];
   return {
     async prepareScratchWorkspace() {
@@ -31,27 +25,37 @@ function scriptedActivities(outputs: string[]): PlatformActivities {
     async resolveRepoConfig() {
       return { registered: false } as never;
     },
-    async executePlatformAction(req) {
+    async executePlatformAction(req: ExecutePlatformActionRequest) {
       executed.push(req);
       return { ok: true, detail: `did ${req.type}` };
     },
   } as unknown as PlatformActivities;
 }
 
-async function withWorker<T>(activities: PlatformActivities, fn: (taskQueue: string) => Promise<T>): Promise<T> {
+async function withTestEnv<T>(
+  activities: PlatformActivities,
+  fn: (ctx: { env: TestWorkflowEnvironment; taskQueue: string }) => Promise<T>,
+): Promise<T> {
+  taskQueueCounter += 1;
+  const taskQueue = `test-chat-${taskQueueCounter}`;
+  const env = await TestWorkflowEnvironment.createTimeSkipping();
   const worker = await Worker.create({
     connection: env.nativeConnection,
-    taskQueue: 'test-chat',
-    workflowsPath: require.resolve('./index'),
+    taskQueue,
+    workflowsPath: require.resolve('@agentops/workflows'),
     activities,
   });
-  return worker.runUntil(fn('test-chat'));
+  try {
+    return await worker.runUntil(fn({ env, taskQueue }));
+  } finally {
+    await env.teardown();
+  }
 }
 
 describe('platformChat', () => {
   it('records the seeded prompt, replies, and waits for the operator', async () => {
     const activities = scriptedActivities(['CHAT_TURN: {"message":"Hello, how can I help?"}']);
-    await withWorker(activities, async (taskQueue) => {
+    await withTestEnv(activities, async ({ env, taskQueue }) => {
       const handle = await env.client.workflow.start(platformChat, {
         taskQueue,
         workflowId: 'chat-1',
@@ -73,14 +77,14 @@ describe('platformChat', () => {
       'CHAT_TURN: {"message":"Terminate the stuck run?","pending":{"kind":"proposal","proposal":{"type":"terminate","workflowId":"wf-9","reason":"stuck"}}}',
       'CHAT_TURN: {"message":"Done.","done":true}',
     ]);
-    await withWorker(activities, async (taskQueue) => {
+    await withTestEnv(activities, async ({ env, taskQueue }) => {
       const handle = await env.client.workflow.start(platformChat, {
         taskQueue,
         workflowId: 'chat-2',
         args: [{ prompt: 'the run wf-9 is stuck' }],
       });
       await env.sleep('2 seconds');
-      let state = await handle.query(conversationQuery);
+      const state = await handle.query(conversationQuery);
       expect(state.phase).toBe('awaiting-approval');
       expect(state.pendingProposal?.type).toBe('terminate');
       await handle.signal(decisionSignal, { proposalId: state.pendingProposal!.id, approve: true });
@@ -90,17 +94,23 @@ describe('platformChat', () => {
     });
   });
 
-  it('auto-closes after the idle timeout with no input', async () => {
-    const activities = scriptedActivities(['CHAT_TURN: {"message":"unused"}']);
-    await withWorker(activities, async (taskQueue) => {
-      const handle = await env.client.workflow.start(platformChat, {
-        taskQueue,
-        workflowId: 'chat-3',
-        args: [{}], // no seeded prompt -> waits, then times out
+  it(
+    'auto-closes after the idle timeout with no input',
+    async () => {
+      const activities = scriptedActivities(['CHAT_TURN: {"message":"unused"}']);
+      await withTestEnv(activities, async ({ env, taskQueue }) => {
+        const handle = await env.client.workflow.start(platformChat, {
+          taskQueue,
+          workflowId: 'chat-3',
+          args: [{}], // no seeded prompt -> waits, then times out
+        });
+        // Let prepareScratchWorkspace finish before skipping the idle timer.
+        await env.sleep('1 second');
+        await env.sleep('31 minutes'); // time-skipping fast-forwards the idle timer
+        const result = await handle.result();
+        expect(result.turns).toBe(0);
       });
-      await env.sleep('31 minutes'); // time-skipping fast-forwards the idle timer
-      const result = await handle.result();
-      expect(result.turns).toBe(0);
-    });
-  });
+    },
+    30_000,
+  );
 });

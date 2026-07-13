@@ -1,3 +1,4 @@
+import type { IncomingMessage } from 'node:http';
 import { describe, expect, it, vi } from 'vitest';
 import type { Client } from '@temporalio/client';
 import type { ControlDeps } from './create-control-server';
@@ -8,19 +9,16 @@ import {
   handleStartChat,
 } from './chat-routes';
 
-function jsonReq(body: unknown): any {
+function jsonReq(body: unknown): IncomingMessage {
   const chunks = [Buffer.from(JSON.stringify(body))];
   return {
     headers: { 'content-type': 'application/json' },
-    [Symbol.asyncIterator]: async function* () {
-      yield* chunks;
-    },
     on(event: string, cb: (arg?: unknown) => void) {
       if (event === 'data') chunks.forEach((c) => cb(c));
       if (event === 'end') cb();
       return this;
     },
-  };
+  } as IncomingMessage;
 }
 
 function depsWith(client: Partial<Client['workflow']>): ControlDeps {
