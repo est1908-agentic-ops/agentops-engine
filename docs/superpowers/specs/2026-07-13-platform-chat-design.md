@@ -151,13 +151,13 @@ Loop:
 
 ## 5. Credentials & mutation-gate enforcement
 
-The gate is enforced **by capability, not by trusting the prompt**:
+The gate is enforced at the **workflow boundary**: the agent's turn *proposes* a mutation, and only an approved proposal is executed — by the workflow, never by the agent Job.
 
-- **Chat-mode `runAgent` Jobs get a read-only credential profile** — a `platformChat` role (or an env-flagged read-only variant of the `platform` role) that injects the *read* subset only: Temporal describe/history/list, Grafana (Loki + Prometheus), the read-only kubeconfig, and read-only forge tokens for registry repos. **No terminate/signal write access, no push git creds.** So even a misbehaving or prompt-injected agent physically cannot mutate — it can only emit a proposal.
-- **Approved terminate/signal are executed workflow-side** via a new activity `executePlatformAction({ type, workflowId, signalName?, reason })` that holds the two write actions' creds. Called only after an `approve` decision. This activity is the one place chat can terminate/signal, and it is unreachable by the agent Job.
-- **Approved fixes never touch this workflow's creds** — they run as a child `devCycle`, which uses that repo's own already-provisioned registry token to push and open a PR.
+- **Approved terminate/signal are executed workflow-side** via a new activity `executePlatformAction({ type, workflowId, signalName?, reason })`, using the worker's already-wired Temporal `workflowClient` (`ActivityDependencies.workflowClient`, `packages/activities/src/create-activities.ts:60`) whose `getHandle` already exposes `terminate` (this design adds `signal`). Called only after an `approve` decision.
+- **Approved fixes never touch this workflow's creds** — they run as a child `devCycle`, which uses that repo's own already-provisioned registry token to push and open a PR. The chat workflow never pushes.
+- **The chat prompt instructs the agent to emit proposals, not execute** mutations, and the `CHAT_TURN:` output format has no "execute" verb — the only mutation path the agent has is a proposal the human must approve.
 
-The read-only role's cred/RBAC wiring is an `agentops-platform`-side change (§12 precondition), consistent with how the platform-agent spec handled its own cred provisioning.
+**v1 reuses the existing `platform` backend** (`tier: 'platform'`) for chat turns, so no new routing/RBAC is required to ship. The residual gap — a misbehaving or prompt-injected agent Job could still self-execute terminate/signal using the `platform` role's inherited Temporal write creds — is closed by the **read-only chat credential profile** hardening (a dedicated `platformChat` backend whose Job gets only the read subset), which is `agentops-platform`-side work tracked in §12. Once that lands, chat turns switch to `tier: 'platformChat'` (a one-line change) and the gate becomes capability-enforced as well as boundary-enforced.
 
 ## 6. Control BFF (`packages/control`)
 
@@ -222,9 +222,10 @@ Per AGENTS.md's definition of done (`pnpm lint && pnpm typecheck && pnpm test`; 
 
 ## 12. Preconditions (tracked, not built here)
 
-- **Read-only chat credential profile** (`agentops-platform`): the `platformChat` role's read-only Temporal token, Grafana creds, read-only kubeconfig, and read-only forge tokens must be provisioned before chat can execute real investigation in-cluster (local dev uses the `stub` backend, zero creds). Same shape as the platform-agent spec's cred preconditions.
-- **Write-action creds for `executePlatformAction`** (`agentops-platform`): the terminate/signal token mounted into the worker/activity (not the agent Job).
+- **Read-only chat credential profile** (`agentops-platform`, hardening — see §5): a dedicated `platformChat` backend whose Job gets only the read subset (Temporal describe/history/list, Grafana, read-only kubeconfig, read-only forge tokens) and *no* terminate/signal write creds. Not required to ship v1 (which reuses the `platform` backend and enforces the gate at the workflow boundary); it upgrades the gate to capability-enforced. When it lands, chat turns switch to `tier: 'platformChat'`.
 - **Temporal + Control auth** (`agentops-platform`): the existing Traefik-level auth in front of the Control UI/Temporal host — `platformChat` is at least as powerful as `platform`, so the same precondition applies.
+
+*(No new write-action creds precondition: `executePlatformAction` uses the worker's already-wired Temporal `workflowClient`, which the worker constructs today for Schedule/reconcile ops — `packages/worker/src/main.ts:422-427, 461`.)*
 
 ## 13. Non-goals (v1)
 
