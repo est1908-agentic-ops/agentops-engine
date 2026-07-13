@@ -308,4 +308,35 @@ describe('WorkspaceManager — scratch workspaces', () => {
 
     expect(existsSync(workspaceRef)).toBe(false);
   });
+
+  it('prepareScratch sanitizes a taskId containing path-traversal sequences to stay inside workspacesDir/scratch', async () => {
+    const { manager } = buildManager();
+
+    const { workspaceRef } = await manager.prepareScratch('../../../etc/evil');
+
+    expect(workspaceRef.startsWith(join(workspacesDir, 'scratch'))).toBe(true);
+    expect(existsSync(workspaceRef)).toBe(true);
+  });
+
+  it('cleanupScratch refuses to remove a path outside the scratch root', async () => {
+    const { manager } = buildManager();
+    const outside = join(root, 'not-scratch');
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, 'keep.txt'), 'do not delete me');
+
+    await expect(manager.cleanupScratch(outside)).rejects.toMatchObject({ nonRetryable: true });
+
+    expect(existsSync(join(outside, 'keep.txt'))).toBe(true);
+  });
+
+  it('cleanupScratch refuses to remove the scratch root itself', async () => {
+    const { manager } = buildManager();
+    await manager.prepareScratch('task-a');
+    await manager.prepareScratch('task-b');
+    const scratchRoot = join(workspacesDir, 'scratch');
+
+    await expect(manager.cleanupScratch(scratchRoot)).rejects.toMatchObject({ nonRetryable: true });
+
+    expect(existsSync(scratchRoot)).toBe(true);
+  });
 });

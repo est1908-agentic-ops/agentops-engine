@@ -659,6 +659,63 @@ describe('createActivities — tier resolution + fallback', () => {
   });
 });
 
+describe('createActivities — runAgent project authorization', () => {
+  it('rejects a project-scoped caller requesting the platform backend directly', async () => {
+    const { projectContext } = await import('./project-context');
+    const platform: AgentBackend = { run: async () => ({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }) };
+    const deps = { ...buildDeps(), backends: { platform } };
+    const activities = createActivities(deps);
+
+    const err: unknown = await projectContext
+      .run({ project: 'acme' }, () =>
+        activities.runAgent({
+          taskId: 't1', stage: 'agent', attempt: 1, callIndex: 1, backend: 'platform', model: 'claude-sonnet-5',
+          promptRef: 'agent.md', promptContext: { taskId: 't1', instructions: 'x' },
+          workspaceRef: 'memory://scratch/t1', limits: { maxTokens: 1000, timeoutMs: 60_000 },
+        }),
+      )
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(ApplicationFailure);
+    expect((err as ApplicationFailure).type).toBe('ProjectAuthorizationError');
+  });
+
+  it('rejects a project-scoped caller whose own projectTiers resolves to the platform backend', async () => {
+    const { projectContext } = await import('./project-context');
+    const platform: AgentBackend = { run: async () => ({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }) };
+    const deps = { ...buildDeps(), backends: { platform } };
+    const activities = createActivities(deps);
+
+    const err: unknown = await projectContext
+      .run({ project: 'acme' }, () =>
+        activities.runAgent({
+          taskId: 't1', stage: 'agent', attempt: 1, callIndex: 1,
+          tier: 'sneaky', projectTiers: { sneaky: [{ backend: 'platform', model: 'claude-sonnet-5' }] },
+          promptRef: 'agent.md', promptContext: { taskId: 't1', instructions: 'x' },
+          workspaceRef: 'memory://scratch/t1', limits: { maxTokens: 1000, timeoutMs: 60_000 },
+        }),
+      )
+      .catch((e) => e);
+
+    expect(err).toBeInstanceOf(ApplicationFailure);
+    expect((err as ApplicationFailure).type).toBe('ProjectAuthorizationError');
+  });
+
+  it('allows an engine-internal caller (no project in context) to use the platform backend', async () => {
+    const platform: AgentBackend = { run: async () => ({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }) };
+    const deps = { ...buildDeps(), backends: { platform } };
+    const activities = createActivities(deps);
+
+    const result = await activities.runAgent({
+      taskId: 't1', stage: 'platform', attempt: 1, callIndex: 1, backend: 'platform', model: 'claude-sonnet-5',
+      promptRef: 'platform.md', promptContext: { taskId: 't1', prompt: 'p', hintRepos: '' },
+      workspaceRef: 'memory://scratch/t1', limits: { maxTokens: 1000, timeoutMs: 60_000 },
+    });
+
+    expect(result.output).toBe('ok');
+  });
+});
+
 describe('createActivities — resolveRepoConfig', () => {
   it("resolves project from the registry and loads that repo's ProjectConfig", async () => {
     const deps = buildDeps();

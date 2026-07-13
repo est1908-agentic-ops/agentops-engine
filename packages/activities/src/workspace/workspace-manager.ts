@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { mkdir, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import type { GitCommandRunner } from '@agentops/ports';
 import { SpawnCommandRunner, type CommandRunner } from './spawn-command-runner';
 
@@ -38,6 +38,14 @@ export class WorkspaceError extends Error {
 
 function sanitizeRepoSlug(repo: string): string {
   return repo.replace(/[^a-zA-Z0-9-]/g, '-');
+}
+
+// taskId is caller-supplied (a Tier-2 project workflow's own Temporal
+// workflow ID) -- unlike sanitizeRepoSlug's input, it was never confined to
+// filesystem-safe characters, so a crafted taskId (e.g. containing `../`)
+// could otherwise resolve outside the intended scratch/ subtree.
+function sanitizeTaskId(taskId: string): string {
+  return taskId.replace(/[^a-zA-Z0-9:_-]/g, '-');
 }
 
 export class WorkspaceManager implements Workspaces {
@@ -89,13 +97,25 @@ export class WorkspaceManager implements Workspaces {
   }
 
   async prepareScratch(taskId: string): Promise<{ workspaceRef: string }> {
-    const workspaceRef = join(this.workspacesDir, 'scratch', taskId);
+    const workspaceRef = join(this.workspacesDir, 'scratch', sanitizeTaskId(taskId));
     await mkdir(workspaceRef, { recursive: true });
     return { workspaceRef };
   }
 
+  // workspaceRef is a directly Tier-2-callable activity argument (not
+  // necessarily one this process itself returned from prepareScratch), so
+  // this confines the delete to inside workspacesDir/scratch/ rather than
+  // trusting the caller -- otherwise it's an unauthenticated, unconfined
+  // recursive-delete primitive reachable by any project workflow.
   async cleanupScratch(workspaceRef: string): Promise<void> {
-    await rm(workspaceRef, { recursive: true, force: true });
+    const scratchRoot = resolve(this.workspacesDir, 'scratch') + sep;
+    const target = resolve(workspaceRef) + sep;
+    // Must be a genuine subdirectory of scratchRoot, not scratchRoot itself
+    // (which would wipe every project's scratch workspaces in one call).
+    if (!target.startsWith(scratchRoot) || target === scratchRoot) {
+      throw new WorkspaceError(`cleanupScratch: refusing to remove path outside scratch root: ${workspaceRef}`, true);
+    }
+    await rm(resolve(workspaceRef), { recursive: true, force: true });
   }
 
   async cleanup(workspaceRef: string, repo: string): Promise<void> {
