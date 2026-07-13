@@ -5,7 +5,6 @@ import {
 } from '@agentops/contracts';
 import {
   ensureSelfHealSchedule,
-  selfHealDefaultsFromEnv,
   type SelfHealScheduleClient,
   type PostgresEngineSettingsStore,
 } from '@agentops/activities';
@@ -35,15 +34,15 @@ async function isSelfHealScheduleActive(client: Client): Promise<boolean> {
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
 async function loadSelfHealSettings(deps: SettingsRouteDeps) {
-  if (deps.engineSettingsStore) {
-    await deps.engineSettingsStore.ensureSchema();
-    await deps.engineSettingsStore.seedIfEmpty(selfHealDefaultsFromEnv());
-    return deps.engineSettingsStore.getSelfHeal();
-  }
-  return selfHealDefaultsFromEnv();
+  await deps.engineSettingsStore!.ensureSchema();
+  await deps.engineSettingsStore!.seedIfEmpty();
+  return deps.engineSettingsStore!.getSelfHeal();
 }
 
 export async function handleGetSelfHealSettings(deps: SettingsRouteDeps): Promise<HandlerResponse> {
+  if (!deps.engineSettingsStore) {
+    return { status: 503, body: { error: 'settings store unavailable (requires ENGINE_DB_HOST)' } };
+  }
   const settings = await loadSelfHealSettings(deps);
   const scheduleActive = await isSelfHealScheduleActive(deps.client);
   return {
@@ -70,7 +69,7 @@ export async function handleUpdateSelfHealSettings(
     return { status: 400, body: { error: parsed.error.issues.map((issue) => issue.message).join('; ') } };
   }
   await deps.engineSettingsStore.ensureSchema();
-  await deps.engineSettingsStore.seedIfEmpty(selfHealDefaultsFromEnv());
+  await deps.engineSettingsStore.seedIfEmpty();
   const settings = await deps.engineSettingsStore.setSelfHeal({ enabled: parsed.data.enabled });
   try {
     await ensureSelfHealSchedule(

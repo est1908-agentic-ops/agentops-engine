@@ -16,13 +16,6 @@ replicas: 1
 
 temporalAddress: "localhost:7233"
 
-# Self-heal (M6): a scheduled sweep (~30 min) that drives the platform agent to
-# find recent workflow failures and open fix PRs. Enabled by default; PRs only
-# (a human still merges). Widen the cron or disable per environment.
-selfHeal:
-  enabled: true
-  cron: "*/30 * * * *"
-
 # Empty by default -- same "chart ships no cluster assumption" pattern as
 # otelExporterOtlpEndpoint below. agentops-platform's values override sets
 # the real Temporal Web UI host once one exists for the cluster.

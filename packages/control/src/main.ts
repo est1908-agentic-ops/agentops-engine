@@ -80,7 +80,7 @@ async function main(): Promise<void> {
     await engineSettingsStore.ensureSchema();
     console.log('agentops control: /api/settings/self-heal ENABLED (ENGINE_DB_HOST set)');
   } else {
-    console.log('agentops control: /api/settings/self-heal read-only (no ENGINE_DB_HOST for writes)');
+    console.log('agentops control: /api/settings/self-heal disabled (requires ENGINE_DB_HOST)');
   }
   const projectCrudAuthToken = process.env.CONTROL_CRUD_TOKEN;
   if (managedProjectStore) {

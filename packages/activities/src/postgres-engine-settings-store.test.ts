@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { PostgresEngineSettingsStore, selfHealDefaultsFromEnv } from './postgres-engine-settings-store';
+import {
+  DEFAULT_SELF_HEAL_SETTINGS,
+  PostgresEngineSettingsStore,
+} from './postgres-engine-settings-store';
 import type { Queryable } from './postgres-stats-store';
 
 function fakeDb(scriptedRows: unknown[] = []): Queryable & { calls: { sql: string; params?: unknown[] }[] } {
@@ -34,13 +37,15 @@ describe('PostgresEngineSettingsStore', () => {
     expect(db.calls[0].sql).toMatch(/CREATE TABLE IF NOT EXISTS engine_settings/);
   });
 
-  it('seedIfEmpty inserts defaults only when the row is absent', async () => {
+  it('seedIfEmpty inserts DEFAULT_SELF_HEAL_SETTINGS only when the row is absent', async () => {
     const db = fakeDb([]);
     const store = new PostgresEngineSettingsStore(db);
-    const seeded = await store.seedIfEmpty({ enabled: false, cron: '0 * * * *' });
+    const seeded = await store.seedIfEmpty();
     expect(seeded).toBe(true);
     expect(db.calls.some((c) => c.sql.includes('INSERT INTO engine_settings'))).toBe(true);
-    const seededAgain = await store.seedIfEmpty({ enabled: true, cron: '*/30 * * * *' });
+    const insert = db.calls.find((c) => c.sql.includes('INSERT INTO engine_settings'));
+    expect(insert?.params).toEqual([DEFAULT_SELF_HEAL_SETTINGS.enabled, DEFAULT_SELF_HEAL_SETTINGS.cron]);
+    const seededAgain = await store.seedIfEmpty();
     expect(seededAgain).toBe(false);
   });
 
@@ -52,14 +57,8 @@ describe('PostgresEngineSettingsStore', () => {
   });
 });
 
-describe('selfHealDefaultsFromEnv', () => {
-  it('defaults enabled to true unless SELF_HEAL_ENABLED is false', () => {
-    const prev = process.env.SELF_HEAL_ENABLED;
-    delete process.env.SELF_HEAL_ENABLED;
-    expect(selfHealDefaultsFromEnv().enabled).toBe(true);
-    process.env.SELF_HEAL_ENABLED = 'false';
-    expect(selfHealDefaultsFromEnv().enabled).toBe(false);
-    if (prev === undefined) delete process.env.SELF_HEAL_ENABLED;
-    else process.env.SELF_HEAL_ENABLED = prev;
+describe('DEFAULT_SELF_HEAL_SETTINGS', () => {
+  it('seeds enabled by default on a 30-minute cron', () => {
+    expect(DEFAULT_SELF_HEAL_SETTINGS).toEqual({ enabled: true, cron: '*/30 * * * *' });
   });
 });

@@ -20,9 +20,15 @@ function rowToSettings(row: SettingsRow): SelfHealSettings {
   return { enabled: row.self_heal_enabled, cron: row.self_heal_cron };
 }
 
+/** First-boot seed when engine_settings is empty (DB is the only source of truth). */
+export const DEFAULT_SELF_HEAL_SETTINGS: SelfHealSettings = {
+  enabled: true,
+  cron: '*/30 * * * *',
+};
+
 // Postgres-backed engine operator settings (M6 self-heal toggle). A single-row
 // table edited from Mission Control; the worker reads it on boot so UI changes
-// survive restarts. When empty, seedIfEmpty() seeds from Helm/env defaults.
+// survive restarts.
 export class PostgresEngineSettingsStore {
   constructor(private readonly db: Queryable) {}
 
@@ -55,23 +61,16 @@ export class PostgresEngineSettingsStore {
     return next;
   }
 
-  /** Seed the singleton row from env/Helm defaults when the table is empty. */
-  async seedIfEmpty(defaults: SelfHealSettings): Promise<boolean> {
+  /** Seed the singleton row when the table is empty. */
+  async seedIfEmpty(): Promise<boolean> {
     const { rows } = await this.db.query('SELECT id FROM engine_settings WHERE id = 1');
     if (rows.length > 0) {
       return false;
     }
     await this.db.query(
       'INSERT INTO engine_settings (id, self_heal_enabled, self_heal_cron) VALUES (1, $1, $2)',
-      [defaults.enabled, defaults.cron],
+      [DEFAULT_SELF_HEAL_SETTINGS.enabled, DEFAULT_SELF_HEAL_SETTINGS.cron],
     );
     return true;
   }
-}
-
-export function selfHealDefaultsFromEnv(): SelfHealSettings {
-  return {
-    enabled: process.env.SELF_HEAL_ENABLED !== 'false',
-    cron: process.env.SELF_HEAL_CRON ?? '*/30 * * * *',
-  };
 }
