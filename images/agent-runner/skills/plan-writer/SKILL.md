@@ -26,3 +26,6 @@ the plan before implementation starts. Keep the structure, drop the review gate.
 - **Steps** — ordered; each with the file(s) touched, what changes, and how it's verified.
 - **Sequencing notes** — anything you deliberately ordered a particular way, and why.
 - **Assumptions** — anything you decided yourself in lieu of asking.
+
+The plan is persisted to `docs/superpowers/plans/<taskId>-plan.md` (and the design to
+`docs/superpowers/specs/<taskId>-design.md`) so they are committed with the PR.

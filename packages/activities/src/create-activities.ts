@@ -348,6 +348,9 @@ export function createActivities(deps: ActivityDependencies) {
         rethrowWorkspaceError(err);
       }
     },
+    async readWorkspaceFile(workspaceRef: string, relativePath: string): Promise<string | null> {
+      return deps.workspaces.readFile(workspaceRef, relativePath);
+    },
     async resolveRepoConfig(
       repo: string,
     ): Promise<{ registered: boolean; project: string; config: ProjectConfig }> {

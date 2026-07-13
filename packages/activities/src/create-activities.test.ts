@@ -349,6 +349,7 @@ describe('createActivities — workspace lifecycle', () => {
         prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
         cleanupScratch: async () => {},
         pruneOrphans: async () => ({ removed: [] }),
+        readFile: async () => null,
       } as Workspaces,
     };
     const activities = createActivities(deps);
@@ -427,6 +428,7 @@ describe('createActivities — workspace error translation', () => {
       prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
       cleanupScratch: async () => {},
       pruneOrphans: async () => ({ removed: [] }),
+      readFile: async () => null,
     };
     const activities = createActivities(deps);
 
@@ -452,6 +454,7 @@ describe('createActivities — workspace error translation', () => {
       prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
       cleanupScratch: async () => {},
       pruneOrphans: async () => ({ removed: [] }),
+      readFile: async () => null,
     };
     const activities = createActivities(deps);
 
@@ -474,6 +477,7 @@ describe('createActivities — workspace error translation', () => {
       prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
       cleanupScratch: async () => {},
       pruneOrphans: async () => ({ removed: [] }),
+      readFile: async () => null,
     };
     const activities = createActivities(deps);
 

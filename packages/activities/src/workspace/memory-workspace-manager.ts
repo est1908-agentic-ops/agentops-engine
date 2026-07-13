@@ -6,6 +6,12 @@ export class MemoryWorkspaceManager implements Workspaces {
   private readonly initCommands = new Map<string, string[] | undefined>();
   private readonly scratchPrepared = new Set<string>();
   private readonly scratchCleanedUp = new Set<string>();
+  private readonly files = new Map<string, Map<string, string>>(); // workspaceRef -> relPath -> content
+
+  seedFile(workspaceRef: string, relativePath: string, content: string) {
+    if (!this.files.has(workspaceRef)) this.files.set(workspaceRef, new Map());
+    this.files.get(workspaceRef)!.set(relativePath, content);
+  }
 
   async prepare(taskId: string, repo: string, initCommands?: string[]): Promise<PreparedWorkspace> {
     const workspaceRef = `memory://${repo}/${taskId}`;
@@ -59,5 +65,9 @@ export class MemoryWorkspaceManager implements Workspaces {
 
   isScratchCleanedUp(workspaceRef: string): boolean {
     return this.scratchCleanedUp.has(workspaceRef);
+  }
+
+  async readFile(workspaceRef: string, relativePath: string): Promise<string | null> {
+    return this.files.get(workspaceRef)?.get(relativePath) ?? null;
   }
 }

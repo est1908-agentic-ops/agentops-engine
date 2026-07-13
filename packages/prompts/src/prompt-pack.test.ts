@@ -23,9 +23,10 @@ describe('PromptPack', () => {
     expect(() => pack.render('assess.md', { taskId: 't1', goal: 'g' })).not.toThrow();
     expect(() => pack.render('design.md', { taskId: 't1', goal: 'g' })).not.toThrow();
     expect(() => pack.render('plan.md', { taskId: 't1', goal: 'g' })).not.toThrow();
-    expect(() =>
-      pack.render('implement.md', { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' }),
-    ).not.toThrow();
+    const impl = pack.render('implement.md', { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' });
+    expect(impl).toContain('Task t1');
+    expect(impl).toContain('docs/superpowers/specs/t1-design.md');
+    expect(impl).toContain('docs/superpowers/plans/t1-plan.md');
     expect(() => pack.render('full_verify.md', { taskId: 't1', goal: 'g', verifyCommands: '' })).not.toThrow();
     expect(() => pack.render('review.md', { taskId: 't1', goal: 'g' })).not.toThrow();
   });
@@ -35,6 +36,8 @@ describe('PromptPack', () => {
     const rendered = pack.render('design.md', { taskId: 't1', goal: 'g' });
     expect(rendered).toContain('There is no human here. Do not ask anything');
     expect(rendered).toContain('design-brainstorm');
+    expect(rendered).toContain('docs/superpowers/specs/t1-design.md');
+    expect(rendered).toContain('## Brainstorm Summary');
   });
 
   it('renders plan.md with the unattended-mode instruction and skill pointer', () => {
@@ -42,6 +45,8 @@ describe('PromptPack', () => {
     const rendered = pack.render('plan.md', { taskId: 't1', goal: 'g' });
     expect(rendered).toContain('There is no human here. Do not ask anything');
     expect(rendered).toContain('plan-writer');
+    expect(rendered).toContain('docs/superpowers/specs/t1-design.md');
+    expect(rendered).toContain('docs/superpowers/plans/t1-plan.md');
   });
 
   it('renders the platform-chat template with a transcript', () => {

@@ -31,3 +31,6 @@ questions of or get section-by-section approval from. Keep the rigor, drop the b
 - **Assumptions** — anything you decided yourself in lieu of asking.
 - **Design** — components/files affected, data flow, error handling; scale detail to the
   complexity of the change.
+- **Brainstorm Summary** (short, for PR description) — see the stage prompt for the exact
+  required format. The full design (including this summary) is written to
+  `docs/superpowers/specs/<taskId>-design.md` and committed.
