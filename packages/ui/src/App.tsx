@@ -4,6 +4,8 @@ import { DevCycleRunDetailPage } from './pages/DevCycleRunDetailPage';
 import { HomePage } from './pages/HomePage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { RunDetailPage } from './pages/RunDetailPage';
+import { ChatPage } from './pages/ChatPage';
+import { ChatStartPage } from './pages/ChatStartPage';
 
 export function App() {
   return (
@@ -12,6 +14,7 @@ export function App() {
         <Link to="/">Console</Link>
         <Link to="/projects">Projects</Link>
         <Link to="/agents">Agents</Link>
+        <Link to="/chat">Chat</Link>
       </nav>
       <Routes>
         <Route path="/" element={<HomePage />} />
@@ -19,6 +22,8 @@ export function App() {
         <Route path="/dev-runs/:workflowId" element={<DevCycleRunDetailPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/agents" element={<AgentsPage />} />
+        <Route path="/chat" element={<ChatStartPage />} />
+        <Route path="/chats/:chatId" element={<ChatPage />} />
       </Routes>
     </BrowserRouter>
   );

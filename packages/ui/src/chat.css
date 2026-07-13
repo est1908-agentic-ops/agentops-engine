@@ -1,0 +1,10 @@
+.chat-log { display: flex; flex-direction: column; gap: 0.75rem; margin: 1rem 0; }
+.chat-msg { max-width: 80%; padding: 0.5rem 0.75rem; border-radius: 0.5rem; white-space: pre-wrap; }
+.chat-msg.user { align-self: flex-end; background: #dbeafe; }
+.chat-msg.agent { align-self: flex-start; background: #f3f4f6; }
+.chat-msg.system { align-self: center; background: transparent; color: #6b7280; font-size: 0.85rem; font-style: italic; }
+.chat-composer { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.chat-composer textarea { flex: 1; min-height: 3rem; }
+.chat-proposal { align-self: flex-start; border: 1px solid #f59e0b; border-radius: 0.5rem; padding: 0.75rem; background: #fffbeb; }
+.chat-proposal .actions { display: flex; gap: 0.5rem; margin-top: 0.5rem; }
+.chat-thinking { color: #6b7280; font-style: italic; }

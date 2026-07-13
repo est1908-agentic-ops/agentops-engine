@@ -20,6 +20,11 @@ import {
   type StartDevCycleResponse,
   type StartRunRequest,
   type StartRunResponse,
+  ConversationStateSchema,
+  StartChatResponseSchema,
+  type ConversationState,
+  type StartChatRequest,
+  type StartChatResponse,
 } from '@agentops/contracts';
 
 // The managed-project CRUD routes are bearer-token-gated (CONTROL_CRUD_TOKEN).
@@ -266,6 +271,53 @@ export async function listAgents(): Promise<{ agents: AgentScheduleSummary[] }> 
 
 export async function runAgent(scheduleId: string): Promise<void> {
   const res = await fetch(`/api/agents/${encodeURIComponent(scheduleId)}/run`, {
+    method: 'POST',
+    headers: crudHeaders(false),
+  });
+  await parseEmptyResponse(res);
+}
+
+// --- platform chat ---
+
+export async function startChat(input: StartChatRequest): Promise<StartChatResponse> {
+  const res = await fetch('/api/platform/chats', {
+    method: 'POST',
+    headers: crudHeaders(true),
+    body: JSON.stringify(input),
+  });
+  return parseJsonResponse(res, StartChatResponseSchema);
+}
+
+export async function getChat(chatId: string): Promise<ConversationState> {
+  const res = await fetch(`/api/platform/chats/${encodeURIComponent(chatId)}`, {
+    headers: crudHeaders(false),
+  });
+  return parseJsonResponse(res, ConversationStateSchema);
+}
+
+export async function sendChatTurn(chatId: string, text: string): Promise<void> {
+  const res = await fetch(`/api/platform/chats/${encodeURIComponent(chatId)}/turns`, {
+    method: 'POST',
+    headers: crudHeaders(true),
+    body: JSON.stringify({ text }),
+  });
+  await parseEmptyResponse(res);
+}
+
+export async function sendChatDecision(
+  chatId: string,
+  decision: { proposalId: string; approve: boolean; note?: string },
+): Promise<void> {
+  const res = await fetch(`/api/platform/chats/${encodeURIComponent(chatId)}/decisions`, {
+    method: 'POST',
+    headers: crudHeaders(true),
+    body: JSON.stringify(decision),
+  });
+  await parseEmptyResponse(res);
+}
+
+export async function closeChat(chatId: string): Promise<void> {
+  const res = await fetch(`/api/platform/chats/${encodeURIComponent(chatId)}/close`, {
     method: 'POST',
     headers: crudHeaders(false),
   });
