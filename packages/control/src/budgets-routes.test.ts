@@ -12,27 +12,27 @@ const mockStats: RunStats[] = [
     tokensIn: 1000,
     tokensOut: 500,
     wallMs: 100,
-    outcome: 'success',
+    outcome: 'pass',
   },
   {
     taskId: 'task-2',
-    stage: 'fix',
+    stage: 'implement',
     backend: 'claude',
     model: 'claude-sonnet-5',
     tokensIn: 2000,
     tokensOut: 1000,
     wallMs: 150,
-    outcome: 'success',
+    outcome: 'pass',
   },
   {
     taskId: 'task-3',
-    stage: 'explore',
+    stage: 'full_verify',
     backend: 'claude',
     model: 'claude-opus-4-8',
     tokensIn: 5000,
     tokensOut: 3000,
     wallMs: 200,
-    outcome: 'success',
+    outcome: 'pass',
   },
   // OpenRouter run (should not be counted as Claude usage)
   {
@@ -43,18 +43,18 @@ const mockStats: RunStats[] = [
     tokensIn: 3000,
     tokensOut: 2000,
     wallMs: 120,
-    outcome: 'success',
+    outcome: 'pass',
   },
   // Stub backend run (should not affect anything)
   {
     taskId: 'task-5',
-    stage: 'fix',
+    stage: 'implement',
     backend: 'stub',
     model: 'stub-model',
     tokensIn: 100,
     tokensOut: 50,
     wallMs: 10,
-    outcome: 'success',
+    outcome: 'pass',
   },
 ];
 
@@ -106,7 +106,7 @@ describe('budgets-routes', () => {
           tokensIn: 1000,
           tokensOut: 500,
           wallMs: 100,
-          outcome: 'success',
+          outcome: 'pass',
         },
       ]),
     };
