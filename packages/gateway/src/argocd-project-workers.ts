@@ -1,10 +1,15 @@
 import { loadManagedProjectRegistry, type ManagedProjectRegistryDeps } from '@agentops/activities';
 import { parseAgentsManifest, BUILTIN_WORKFLOW_INPUTS, type ResolvedProjectEntry } from '@agentops/contracts';
 import type { ScmPort } from '@agentops/ports';
+import { projectQueue, slugifyProject } from '@agentops/policies';
 
 // One ArgoCD ApplicationSet plugin-generator parameter set = one project worker.
 // Fields map 1:1 to the project-worker Helm chart values (project-worker-onboarding
 // spec §4). All strings — ArgoCD plugin-generator parameters are string-valued.
+// `project` is documented there as "project slug (identity)" -- the chart uses it
+// verbatim as a k8s Deployment/ServiceAccount name, so it must already be
+// slugified by the time it lands here (an operator-chosen name like "Artem
+// private agents" is not a valid k8s resource name).
 export interface ProjectWorkerParam {
   project: string;
   image: string;
@@ -60,10 +65,13 @@ export function createProjectWorkerParamsProvider(deps: ProjectWorkerParamsDeps)
             lastGood.delete(entry.project);
             continue;
           }
+          // Cache is still keyed by the raw registry identity (entry.project) so
+          // the deregistration sweep below (which compares against `entries`)
+          // keeps working; only the emitted values need to be k8s/queue-safe.
           lastGood.set(entry.project, {
-            project: entry.project,
+            project: slugifyProject(entry.project),
             image: manifest.worker.image,
-            taskQueue: manifest.worker.taskQueue ?? `proj-${entry.project}`,
+            taskQueue: manifest.worker.taskQueue ?? projectQueue(entry.project),
             replicas: String(manifest.worker.replicas),
           });
         } catch (err) {
