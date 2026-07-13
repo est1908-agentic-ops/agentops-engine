@@ -51,6 +51,7 @@ import {
   type TrackerPort,
 } from '@agentops/ports';
 import { PromptPack } from '@agentops/prompts';
+import { DEFAULT_TIERS } from '@agentops/policies';
 import type { DevCycleActivities, PlatformActivities } from '@agentops/workflows';
 import { createWorker } from './create-worker';
 import { ensureReconcileSchedule, type ScheduleClientLike } from './ensure-reconcile-schedule';
@@ -350,7 +351,11 @@ export async function buildGlobalTiers(
   if (seeded) {
     console.log('agentops worker: tiers table seeded from DEFAULT_TIERS (first boot)');
   }
-  const tiers: Record<string, import('@agentops/contracts').ModelRef[]> = {};
+  // Pre-seed with DEFAULT_TIERS so the first refresh failing (DB transiently
+  // unreachable at boot) leaves the hardcoded defaults in place rather than
+  // an empty object that would make every resolveTier throw. The catch in
+  // refresh() then genuinely "keeps the previous map" from call one.
+  const tiers: Record<string, import('@agentops/contracts').ModelRef[]> = { ...DEFAULT_TIERS };
   const refresh = async () => {
     try {
       const map = await store.loadAll();

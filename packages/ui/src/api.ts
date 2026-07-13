@@ -275,7 +275,7 @@ export async function runAgent(scheduleId: string): Promise<void> {
 
 // --- tiers (SP3-C: model tier matrix editor) ---
 
-export const TiersTableSchema = z.record(z.string(), z.array(ModelRefSchema));
+export const TiersTableSchema = z.record(z.string().min(1), z.array(ModelRefSchema));
 export type TiersTable = z.infer<typeof TiersTableSchema>;
 
 export async function listTiers(): Promise<TiersTable> {

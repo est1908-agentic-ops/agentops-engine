@@ -284,7 +284,15 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
     if (req.method === 'GET') {
       return handleListTiers(deps);
     }
+    // PUT rewrites the whole fleet's model routing -- gate it behind the same
+    // bearer token as /api/projects (GET stays open). Reuses projectCrudAuthToken
+    // rather than introducing a second token: one operator secret governs all
+    // fleet-mutating writes. Issue #4 (Traefik basic-auth) is still required
+    // before the control ingress goes public.
     if (req.method === 'PUT') {
+      if (!deps.tierStore || !authorizeProjectCrud(deps, req)) {
+        return { status: 401, body: { error: 'unauthorized' } };
+      }
       return handleReplaceTiers(deps, req);
     }
   }

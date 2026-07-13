@@ -15,15 +15,40 @@ function fakeDb(scriptedRows: unknown[] = []): Queryable & { calls: { sql: strin
   };
 }
 
+// Fake pool with connect() -> a fake client that records BEGIN/COMMIT/INSERT,
+// so the transactional path is observable.
+function fakePool(): Queryable & {
+  connect(): Promise<Queryable & { calls: { sql: string; params?: unknown[] }[] }>;
+  calls: { sql: string; params?: unknown[] }[];
+} {
+  const calls: { sql: string; params?: unknown[] }[] = [];
+  const client: Queryable & { calls: { sql: string; params?: unknown[] }[] } = {
+    calls,
+    async query(sql: string, params?: unknown[]) {
+      calls.push({ sql, params });
+      return { rows: [] };
+    },
+  };
+  return {
+    calls,
+    async connect() {
+      return client;
+    },
+    async query(sql: string, params?: unknown[]) {
+      calls.push({ sql, params });
+      return { rows: [] };
+    },
+  };
+}
+
 describe('PostgresTierStore', () => {
-  it('ensureSchema issues an idempotent CREATE TABLE + unique-position index', async () => {
+  it('ensureSchema issues a single idempotent CREATE TABLE', async () => {
     const db = fakeDb();
     const store = new PostgresTierStore(db);
     await store.ensureSchema();
+    expect(db.calls).toHaveLength(1);
     expect(db.calls[0].sql).toMatch(/CREATE TABLE IF NOT EXISTS tiers/);
-    expect(db.calls[1].sql).toMatch(/CREATE UNIQUE INDEX IF NOT EXISTS tiers_name_position/);
-    // All statements are idempotent (IF NOT EXISTS) so re-running on startup is safe.
-    expect(db.calls.every((c) => /IF NOT EXISTS/.test(c.sql))).toBe(true);
+    // UNIQUE(tier_name, position) is a table constraint, not a separate index call.
   });
 
   it('loadAll returns tiers grouped by name, ordered by position', async () => {
@@ -50,8 +75,8 @@ describe('PostgresTierStore', () => {
     expect(tiers.size).toBe(0);
   });
 
-  it('replaceAll deletes all rows then inserts the new set, ordered by position', async () => {
-    const db = fakeDb([]);
+  it('replaceAll awaits every insert in position order (no fire-and-forget)', async () => {
+    const db = fakeDb();
     const store = new PostgresTierStore(db);
     await store.replaceAll({
       smart: [
@@ -59,7 +84,7 @@ describe('PostgresTierStore', () => {
         { backend: 'pi', model: 'zai/glm-5.2' },
       ],
     });
-    // First a DELETE, then one INSERT per entry in position order.
+    // Without connect(): DELETE then one INSERT per entry in position order.
     expect(db.calls[0].sql).toMatch(/^DELETE FROM tiers/);
     const inserts = db.calls.slice(1);
     expect(inserts).toHaveLength(2);
@@ -67,15 +92,48 @@ describe('PostgresTierStore', () => {
     expect(inserts[1].params).toEqual(['smart', 1, 'pi', 'zai/glm-5.2', undefined]);
   });
 
+  it('replaceAll wraps DELETE+INSERTs in BEGIN/COMMIT when the db exposes connect()', async () => {
+    const pool = fakePool();
+    const store = new PostgresTierStore(pool);
+    await store.replaceAll({ smart: [{ backend: 'claude', model: 'opus', effort: 'high' }] });
+    const sqls = pool.calls.map((c) => c.sql);
+    expect(sqls[0]).toBe('BEGIN');
+    expect(sqls[1]).toMatch(/^DELETE FROM tiers/);
+    expect(sqls[2]).toMatch(/INSERT INTO tiers/);
+    expect(sqls[sqls.length - 1]).toBe('COMMIT');
+    expect(sqls).not.toContain('ROLLBACK');
+  });
+
+  it('replaceAll issues ROLLBACK and rethrows when an INSERT fails mid-transaction', async () => {
+    const calls: { sql: string; params?: unknown[] }[] = [];
+    let beginCount = 0;
+    const client: Queryable = {
+      async query(sql: string, params?: unknown[]) {
+        calls.push({ sql, params });
+        if (sql === 'BEGIN') beginCount += 1;
+        if (sql.startsWith('INSERT')) throw new Error('constraint violation');
+        return { rows: [] };
+      },
+    };
+    const pool: Queryable & { connect(): Promise<Queryable> } = {
+      connect: async () => client,
+      query: async () => ({ rows: [] }),
+    };
+    const store = new PostgresTierStore(pool);
+    await expect(store.replaceAll({ smart: [{ backend: 'claude', model: 'opus' }] })).rejects.toThrow(
+      'constraint violation',
+    );
+    expect(calls.map((c) => c.sql)).toContain('ROLLBACK');
+    expect(beginCount).toBe(1); // no retry
+  });
+
   it('seedIfEmpty inserts DEFAULT_TIERS only when the table is empty', async () => {
-    // Empty table -> seeds.
     const emptyDb = fakeDb([]);
     const emptyStore = new PostgresTierStore(emptyDb);
     const seeded = await emptyStore.seedIfEmpty();
     expect(seeded).toBe(true);
     expect(emptyDb.calls.filter((c) => /INSERT INTO tiers/.test(c.sql)).length).toBeGreaterThan(0);
 
-    // Non-empty table -> no-op.
     const fullDb = fakeDb([{ tier_name: 'smart', position: 0, backend: 'claude', model: 'opus', effort: null }]);
     const fullStore = new PostgresTierStore(fullDb);
     const seededAgain = await fullStore.seedIfEmpty();

@@ -94,10 +94,6 @@ const SHELL_REDIRECT = [
 ].join('\n');
 
 // A call's on-disk artifacts and its K8s Job are keyed by
-// (taskId, stage, attempt, callIndex) AND the model. A TierFallbackBackend
-// retry reruns the exact same call with a different model, so without the model
-// in the key the fallback would 409-reuse the primary model's already-finished
-// A call's on-disk artifacts and its K8s Job are keyed by
 // (taskId, stage, attempt, callIndex) AND the (backend, model). A
 // TierFallbackBackend retry can rerun the exact same call on a DIFFERENT
 // backend (cross-backend session-limit fallback), so the key must include
