@@ -4,6 +4,7 @@ import { DevCycleRunDetailPage } from './pages/DevCycleRunDetailPage';
 import { HomePage } from './pages/HomePage';
 import { ProjectsPage } from './pages/ProjectsPage';
 import { RunDetailPage } from './pages/RunDetailPage';
+import { TiersPage } from './pages/TiersPage';
 
 export function App() {
   return (
@@ -12,6 +13,7 @@ export function App() {
         <Link to="/">Console</Link>
         <Link to="/projects">Projects</Link>
         <Link to="/agents">Agents</Link>
+        <Link to="/tiers">Tiers</Link>
       </nav>
       <Routes>
         <Route path="/" element={<HomePage />} />
@@ -19,6 +21,7 @@ export function App() {
         <Route path="/dev-runs/:workflowId" element={<DevCycleRunDetailPage />} />
         <Route path="/projects" element={<ProjectsPage />} />
         <Route path="/agents" element={<AgentsPage />} />
+        <Route path="/tiers" element={<TiersPage />} />
       </Routes>
     </BrowserRouter>
   );
