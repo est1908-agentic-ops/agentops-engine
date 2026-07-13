@@ -13,6 +13,7 @@ import {
   PostgresFiledFindingStore,
   PostgresManagedProjectStore,
   PostgresStatsStore,
+  PostgresTierStore,
   SpawnGitCommandRunner,
   WorkspaceManager,
   type FiledFindingStore,
@@ -359,6 +360,47 @@ export async function buildFiledFindingStore(): Promise<FiledFindingStore> {
   return store;
 }
 
+// Global tier table (SP3-A). Loaded from Postgres at startup and re-read on a
+// 60s interval so a Mission Control tier edit applies to new runAgent calls
+// within a minute -- no pod rollout needed. The returned object is mutated
+// in place on each refresh; the activity reads deps.globalTiers per call, so
+// it sees the latest map without re-wiring. Returns a plain (mutable) object
+// + a cleanup fn for the refresh timer. When no DB is configured, returns
+// undefined and resolveTier falls back to DEFAULT_TIERS (the hardcoded seed).
+const TIER_REFRESH_INTERVAL_MS = 60_000;
+
+export async function buildGlobalTiers(
+  pool: Pool | undefined,
+): Promise<{ tiers: Record<string, import('@agentops/contracts').ModelRef[]> | undefined; stop: () => void }> {
+  if (!pool) {
+    return { tiers: undefined, stop: () => {} };
+  }
+  const store = new PostgresTierStore(pool);
+  await store.ensureSchema();
+  const seeded = await store.seedIfEmpty();
+  if (seeded) {
+    console.log('agentops worker: tiers table seeded from DEFAULT_TIERS (first boot)');
+  }
+  const tiers: Record<string, import('@agentops/contracts').ModelRef[]> = {};
+  const refresh = async () => {
+    try {
+      const map = await store.loadAll();
+      // Mutate in place so the activity's deps.globalTiers reference sees the
+      // new entries without re-wiring. Clear + repopulate.
+      for (const key of Object.keys(tiers)) delete tiers[key];
+      for (const [k, v] of map.entries()) tiers[k] = v;
+    } catch (err) {
+      console.warn('agentops worker: tier refresh failed (keeping previous map)', err);
+    }
+  };
+  await refresh();
+  const timer = setInterval(refresh, TIER_REFRESH_INTERVAL_MS);
+  // Don't keep the event loop alive solely for the refresh timer -- the
+  // worker's own run loop is the liveness signal.
+  if (typeof timer.unref === 'function') timer.unref();
+  return { tiers, stop: () => clearInterval(timer) };
+}
+
 async function main(): Promise<void> {
   const connection = await NativeConnection.connect({
     address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233',
@@ -414,6 +456,13 @@ async function main(): Promise<void> {
       : 'agentops worker: filed_findings in-memory only (ENGINE_DB_HOST not set)',
   );
 
+  const { tiers: globalTiers, stop: stopTierRefresh } = await buildGlobalTiers(enginePool);
+  console.log(
+    globalTiers
+      ? `agentops worker: global tiers loaded from Postgres (${Object.keys(globalTiers).length} tiers, 60s refresh)`
+      : 'agentops worker: global tiers from DEFAULT_TIERS (no DB -- hardcoded seed)',
+  );
+
   // Build a Temporal client for Schedule management (ConfigSync activities).
   // Uses the same address/namespace as the worker connection when available.
   let scheduleClient: import('@agentops/activities').ScheduleClientLike | undefined;
@@ -455,6 +504,7 @@ async function main(): Promise<void> {
     workspaces,
     prompts: new PromptPack(),
     registry,
+    globalTiers,
     filedFindings,
     scheduleClient,
     taskQueue: ENGINE_QUEUE,
@@ -474,6 +524,7 @@ async function main(): Promise<void> {
   try {
     await Promise.all([worker.run(), legacyWorker.run()]);
   } finally {
+    stopTierRefresh();
     await tracing?.shutdown();
   }
 }
