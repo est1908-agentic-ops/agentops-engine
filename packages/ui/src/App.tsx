@@ -7,6 +7,7 @@ import { RunDetailPage } from './pages/RunDetailPage';
 import { ChatPage } from './pages/ChatPage';
 import { ChatStartPage } from './pages/ChatStartPage';
 import { TiersPage } from './pages/TiersPage';
+import { SettingsPage } from './pages/SettingsPage';
 
 export function App() {
   return (
@@ -17,6 +18,7 @@ export function App() {
         <Link to="/agents">Agents</Link>
         <Link to="/chat">Chat</Link>
         <Link to="/tiers">Tiers</Link>
+        <Link to="/settings">Settings</Link>
       </nav>
       <Routes>
         <Route path="/" element={<HomePage />} />
@@ -27,6 +29,7 @@ export function App() {
         <Route path="/chat" element={<ChatStartPage />} />
         <Route path="/chats/:chatId" element={<ChatPage />} />
         <Route path="/tiers" element={<TiersPage />} />
+        <Route path="/settings" element={<SettingsPage />} />
       </Routes>
     </BrowserRouter>
   );

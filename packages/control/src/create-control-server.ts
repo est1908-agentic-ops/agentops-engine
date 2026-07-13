@@ -11,7 +11,7 @@ import {
   CreateManagedProjectRequestSchema,
   UpdateManagedProjectRequestSchema,
 } from '@agentops/contracts';
-import type { PostgresManagedProjectStore, PostgresTierStore } from '@agentops/activities';
+import type { PostgresEngineSettingsStore, PostgresManagedProjectStore, PostgresTierStore } from '@agentops/activities';
 import { platform } from '@agentops/workflows';
 import { listRunsByType, memoPrompt, readJsonBody, type HandlerResponse } from './handler-util';
 import {
@@ -30,6 +30,7 @@ import {
   handleStartChat,
 } from './chat-routes';
 import { handleListTiers, handleReplaceTiers } from './tiers-routes';
+import { handleGetSelfHealSettings, handleUpdateSelfHealSettings } from './settings-routes';
 import { matchPath } from './route';
 import { resolveStaticFile } from './serve-static';
 
@@ -49,6 +50,7 @@ export interface ControlDeps {
   // Tier table CRUD (SP3-B). Only needs ENGINE_DB_HOST; not credential-gated
   // like managed projects (tier edits are operational, not secret-bearing).
   tierStore?: PostgresTierStore;
+  engineSettingsStore?: PostgresEngineSettingsStore;
   projectCredentialPublicKey?: string;
   projectCrudAuthToken?: string;
 }
@@ -317,6 +319,17 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
     const chatMatch = matchPath('/api/platform/chats/:chatId', pathname);
     if (req.method === 'GET' && chatMatch) {
       return handleGetChat(deps, chatMatch.params.chatId);
+    }
+  }
+  if (pathname === '/api/settings/self-heal') {
+    if (req.method === 'GET') {
+      return handleGetSelfHealSettings(deps);
+    }
+    if (req.method === 'PUT') {
+      if (!authorizeProjectCrud(deps, req)) {
+        return { status: 401, body: { error: 'unauthorized' } };
+      }
+      return handleUpdateSelfHealSettings(deps, req);
     }
   }
   if (pathname === '/api/tiers') {

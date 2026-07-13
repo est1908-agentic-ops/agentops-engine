@@ -26,6 +26,10 @@ import {
   type ConversationState,
   type StartChatRequest,
   type StartChatResponse,
+  SelfHealSettingsResponseSchema,
+  UpdateSelfHealSettingsRequestSchema,
+  type SelfHealSettingsResponse,
+  type UpdateSelfHealSettingsRequest,
 } from '@agentops/contracts';
 
 // The managed-project CRUD routes are bearer-token-gated (CONTROL_CRUD_TOKEN).
@@ -342,4 +346,25 @@ export async function replaceTiers(tiers: TiersTable): Promise<TiersTable> {
     body: JSON.stringify(tiers),
   });
   return parseJsonResponse(res, TiersTableSchema);
+}
+
+// --- engine settings ---
+
+export type { SelfHealSettingsResponse, UpdateSelfHealSettingsRequest };
+
+export async function getSelfHealSettings(): Promise<SelfHealSettingsResponse> {
+  const res = await fetch('/api/settings/self-heal');
+  return parseJsonResponse(res, SelfHealSettingsResponseSchema);
+}
+
+export async function updateSelfHealSettings(
+  input: UpdateSelfHealSettingsRequest,
+): Promise<SelfHealSettingsResponse> {
+  const body = UpdateSelfHealSettingsRequestSchema.parse(input);
+  const res = await fetch('/api/settings/self-heal', {
+    method: 'PUT',
+    headers: { ...crudHeaders(false), 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  return parseJsonResponse(res, SelfHealSettingsResponseSchema);
 }

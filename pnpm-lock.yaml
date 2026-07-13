@@ -101,6 +101,9 @@ importers:
       '@temporalio/activity':
         specifier: ^1.11.0
         version: 1.19.0
+      '@temporalio/client':
+        specifier: ^1.11.0
+        version: 1.19.0
       '@temporalio/common':
         specifier: ^1.11.0
         version: 1.19.0

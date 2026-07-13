@@ -1,4 +1,4 @@
-import { cronScheduleSpec } from '@agentops/activities';
+import { cronScheduleSpec } from './schedule-ops';
 import { ScheduleOverlapPolicy } from '@temporalio/client';
 
 export interface SelfHealScheduleClient {

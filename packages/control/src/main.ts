@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client, Connection } from '@temporalio/client';
-import { loadEnv, PostgresManagedProjectStore, PostgresTierStore } from '@agentops/activities';
+import { loadEnv, PostgresEngineSettingsStore, PostgresManagedProjectStore, PostgresTierStore } from '@agentops/activities';
 import { Pool } from 'pg';
 import { createControlServer } from './create-control-server';
 
@@ -41,6 +41,22 @@ function buildTierStore(): PostgresTierStore | undefined {
   );
 }
 
+function buildEngineSettingsStore(): PostgresEngineSettingsStore | undefined {
+  const host = process.env.ENGINE_DB_HOST;
+  if (!host) {
+    return undefined;
+  }
+  return new PostgresEngineSettingsStore(
+    new Pool({
+      host,
+      port: process.env.ENGINE_DB_PORT ? Number(process.env.ENGINE_DB_PORT) : 5432,
+      database: process.env.ENGINE_DB_NAME ?? 'agentops_engine',
+      user: process.env.ENGINE_DB_USER ?? 'temporal',
+      password: process.env.ENGINE_DB_PASSWORD,
+    }),
+  );
+}
+
 async function main(): Promise<void> {
   const temporalUiBaseUrl = process.env.TEMPORAL_UI_BASE_URL;
   if (!temporalUiBaseUrl) {
@@ -53,11 +69,18 @@ async function main(): Promise<void> {
 
   const managedProjectStore = buildManagedProjectStore();
   const tierStore = buildTierStore();
+  const engineSettingsStore = buildEngineSettingsStore();
   if (tierStore) {
     await tierStore.ensureSchema();
     console.log('agentops control: /api/tiers ENABLED (ENGINE_DB_HOST set)');
   } else {
     console.log('agentops control: /api/tiers disabled (no ENGINE_DB_HOST)');
+  }
+  if (engineSettingsStore) {
+    await engineSettingsStore.ensureSchema();
+    console.log('agentops control: /api/settings/self-heal ENABLED (ENGINE_DB_HOST set)');
+  } else {
+    console.log('agentops control: /api/settings/self-heal read-only (no ENGINE_DB_HOST for writes)');
   }
   const projectCrudAuthToken = process.env.CONTROL_CRUD_TOKEN;
   if (managedProjectStore) {
@@ -93,6 +116,7 @@ async function main(): Promise<void> {
     uiDistPath: existsSync(uiDistPath) ? uiDistPath : undefined,
     managedProjectStore,
     tierStore,
+    engineSettingsStore,
     projectCredentialPublicKey: process.env.PROJECT_CREDENTIAL_PUBLIC_KEY,
     projectCrudAuthToken,
   });

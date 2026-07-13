@@ -17,3 +17,5 @@ export * from './resolve-managed-projects';
 export * from './resolve-project-config';
 export * from './project-context';
 export * from './postgres-tier-store';
+export * from './postgres-engine-settings-store';
+export * from './ensure-self-heal-schedule';

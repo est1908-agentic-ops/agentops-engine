@@ -14,6 +14,10 @@ import {
   PostgresManagedProjectStore,
   PostgresStatsStore,
   PostgresTierStore,
+  PostgresEngineSettingsStore,
+  ensureSelfHealSchedule,
+  selfHealDefaultsFromEnv,
+  type SelfHealScheduleClient,
   SpawnGitCommandRunner,
   WorkspaceManager,
   type FiledFindingStore,
@@ -55,7 +59,7 @@ import { DEFAULT_TIERS } from '@agentops/policies';
 import type { DevCycleActivities, PlatformActivities } from '@agentops/workflows';
 import { createWorker } from './create-worker';
 import { ensureReconcileSchedule, type ScheduleClientLike } from './ensure-reconcile-schedule';
-import { ensureSelfHealSchedule, type SelfHealScheduleClient } from './ensure-self-heal-schedule';
+
 import { ensureSearchAttributes, type OperatorConnectionLike } from './ensure-search-attributes';
 import { setupTracing } from './tracing';
 
@@ -467,11 +471,19 @@ async function main(): Promise<void> {
       console.warn('agentops worker: failed to ensure reconcile:all schedule', err);
     }
     try {
-      await ensureSelfHealSchedule(tc.schedule as unknown as SelfHealScheduleClient, ENGINE_QUEUE, {
-        enabled: process.env.SELF_HEAL_ENABLED !== 'false',
-        cron: process.env.SELF_HEAL_CRON ?? '*/30 * * * *',
-      });
-      console.log('agentops worker: self-heal schedule ensured');
+      const engineSettingsStore = enginePool ? new PostgresEngineSettingsStore(enginePool) : undefined;
+      if (engineSettingsStore) {
+        await engineSettingsStore.ensureSchema();
+        const seeded = await engineSettingsStore.seedIfEmpty(selfHealDefaultsFromEnv());
+        if (seeded) {
+          console.log('agentops worker: engine_settings seeded from env defaults (first boot)');
+        }
+      }
+      const selfHealOpts = engineSettingsStore
+        ? await engineSettingsStore.getSelfHeal()
+        : selfHealDefaultsFromEnv();
+      await ensureSelfHealSchedule(tc.schedule as unknown as SelfHealScheduleClient, ENGINE_QUEUE, selfHealOpts);
+      console.log(`agentops worker: self-heal schedule ensured (enabled=${selfHealOpts.enabled})`);
     } catch (err) {
       console.warn('agentops worker: failed to ensure self-heal schedule', err);
     }
