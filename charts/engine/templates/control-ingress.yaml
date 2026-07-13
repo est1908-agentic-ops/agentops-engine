@@ -6,12 +6,11 @@ metadata:
   namespace: {{ .Values.namespace }}
   annotations:
     cert-manager.io/cluster-issuer: {{ .Values.control.ingress.clusterIssuer }}
-    {{- if .Values.control.ingress.basicAuthSecretName }}
-    # Traefik middleware attachment (namespace-name@kubernetescrd). The
-    # Middleware CRD + its htpasswd Secret are platform-side (agentops-platform
-    # engine-secrets), not in this chart -- guards the public control ingress
-    # (GitHub issue #4). Empty => no auth middleware (ingress stays open).
-    traefik.ingress.kubernetes.io/router.middlewares: {{ .Values.namespace }}-{{ .Values.control.ingress.basicAuthSecretName }}@kubernetescrd
+    {{- if .Values.control.ingress.basicAuth.htpasswdSecretName }}
+    # Chart-managed Traefik basicAuth Middleware (control-middleware.yaml)
+    # validates Authorization: Basic against an external htpasswd Secret.
+    # Empty secret name => no middleware attached (ingress stays open).
+    traefik.ingress.kubernetes.io/router.middlewares: {{ .Values.namespace }}-{{ .Release.Name }}-control-basic-auth@kubernetescrd
     {{- end }}
 spec:
   ingressClassName: traefik

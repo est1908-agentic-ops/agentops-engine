@@ -34,9 +34,9 @@ import {
 
 // The managed-project CRUD routes are bearer-token-gated (CONTROL_CRUD_TOKEN).
 // The browser holds the operator's copy of that token in localStorage and
-// sends it as an Authorization header; it never leaves the operator's
-// browser into the served app bundle. Issue #4 (Traefik basic-auth on the
-// control ingress) is still required before the ingress goes public.
+// sends it as an X-Control-Crud-Token header (not Authorization) to avoid
+// collision with Traefik basic-auth. The control ingress is protected by
+// chart-managed Traefik basicAuth (issue #4).
 const CRUD_TOKEN_STORAGE_KEY = 'agentops.controlCrudToken';
 
 export function getCrudToken(): string {
@@ -55,8 +55,8 @@ function crudHeaders(hasBody: boolean): Record<string, string> {
   const headers: Record<string, string> = {};
   const token = getCrudToken();
   if (token) {
-    // X-Control-Crud-Token (not Authorization) to avoid colliding with Traefik
-    // basic-auth on the control ingress (design §7 / issue #4).
+    // X-Control-Crud-Token (not Authorization) — the Authorization header is
+    // consumed by chart-managed Traefik basicAuth (issue #4).
     headers['x-control-crud-token'] = token;
   }
   if (hasBody) {

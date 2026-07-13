@@ -63,9 +63,8 @@ projectCredentialPublicKey: ""
 # Shared bearer token gating control's /api/projects CRUD routes
 # (CONTROL_CRUD_TOKEN). A SECRET -- sourced from a K8s Secret with a
 # controlCrudToken key. Unset => routes disabled (503). This is app-layer
-# defense-in-depth + the local CLI's auth; GitHub issue #4 (Traefik
-# basic-auth on the control ingress) is STILL REQUIRED before enabling the
-# control ingress publicly (control.ingress.enabled stays false by default).
+# defense-in-depth + the local CLI's auth; the control ingress is protected
+# by chart-managed Traefik basicAuth (control.ingress.basicAuth, issue #4).
 projectCrudTokenSecretName: ""
 
 taskQueue: agentops-devcycle
@@ -190,10 +189,12 @@ control:
     enabled: false
     host: ""
     clusterIssuer: letsencrypt
-    # Name of a Traefik basicAuth Middleware (CRD) deployed platform-side to
-    # guard the public control ingress. Empty => no middleware attached.
-    # agentops-platform sets this to control-basic-auth (issue #4).
-    basicAuthSecretName: ""
+    basicAuth:
+      # Name of an EXTERNAL K8s Secret (htpasswd format, key `users`) holding the
+      # console credentials. When set (and ingress enabled), the chart renders a
+      # Traefik basicAuth Middleware referencing it and attaches it to the control
+      # ingress. The Secret itself is NOT created by this chart (hard rule 5).
+      htpasswdSecretName: ""
   resources:
     requests:
       cpu: 100m

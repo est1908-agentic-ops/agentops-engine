@@ -148,8 +148,8 @@ export function controlCrudHeaders(hasBody: boolean): Record<string, string> {
   const headers: Record<string, string> = {};
   const token = process.env.CONTROL_CRUD_TOKEN;
   if (token) {
-    // X-Control-Crud-Token (not Authorization) to avoid colliding with Traefik
-    // basic-auth on the control ingress (design §7 / issue #4).
+    // X-Control-Crud-Token (not Authorization) — the Authorization header is
+    // consumed by chart-managed Traefik basicAuth (issue #4).
     headers['x-control-crud-token'] = token;
   }
   if (hasBody) {

@@ -1,0 +1,10 @@
+{{- if and .Values.control.ingress.enabled .Values.control.ingress.basicAuth.htpasswdSecretName }}
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: {{ .Release.Name }}-control-basic-auth
+  namespace: {{ .Values.namespace }}
+spec:
+  basicAuth:
+    secret: {{ .Values.control.ingress.basicAuth.htpasswdSecretName }}
+{{- end }}
