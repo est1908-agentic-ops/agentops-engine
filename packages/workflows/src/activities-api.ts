@@ -54,6 +54,7 @@ export interface DevCycleActivities {
   recordRunStats(stats: RunStats): Promise<void>;
   prepareWorkspace(req: { taskId: string; repo: string; initCommands?: string[] }): Promise<PreparedWorkspace>;
   cleanupWorkspace(workspaceRef: string, repo: string): Promise<void>;
+  readWorkspaceFile(workspaceRef: string, relativePath: string): Promise<string | null>;
   createIssue(req: { repo: string; project: string; title: string; body: string; labels: string[]; dedupeFingerprint?: string }): Promise<{ ref: string; url: string; deduped: boolean }>;
 }
 

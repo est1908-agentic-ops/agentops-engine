@@ -18,3 +18,29 @@ Propose a design for this change:
 - Do not write implementation code yet.
 
 If a `design-brainstorm` skill is available, use it for the full methodology.
+
+## Persist the artifact
+
+When you are done with the design, create the directory if needed and write the full design (including the Brainstorm Summary below) to `docs/superpowers/specs/{{taskId}}-design.md` in this workspace and commit it:
+
+```bash
+mkdir -p docs/superpowers/specs
+cat > docs/superpowers/specs/{{taskId}}-design.md << 'EOF'
+(the full design you just produced, including the section below)
+EOF
+git add docs/superpowers/specs/{{taskId}}-design.md
+git commit -m "docs: design for task {{taskId}} (includes Brainstorm Summary)"
+```
+
+## Brainstorm Summary
+
+After the full design, emit this exact short section (keep it under ~150 words / 3-6 bullets). It will be extracted verbatim and placed in the automated PR description.
+
+```markdown
+## Brainstorm Summary
+**Approaches considered:** 1-2 sentence summary of the main alternatives.
+**Chosen approach:** Which one we picked.
+**Why (decisive reasons):** The key reasons this won (trade-offs, assumptions, constraints from the goal/issue).
+**Key risks/assumptions:** The most important ones a reviewer should know.
+```
+

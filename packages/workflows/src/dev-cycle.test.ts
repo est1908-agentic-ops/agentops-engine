@@ -56,6 +56,7 @@ vi.mock('@temporalio/workflow', () => ({
       cleanupWorkspace,
       recordStageResult,
       recordRunStats,
+      readWorkspaceFile: vi.fn().mockResolvedValue(null),
       commentOnIssue: vi.fn().mockResolvedValue(undefined),
     };
   },

@@ -6,6 +6,8 @@ There is no human here. Do not ask anything — decide yourself and record the a
 This run is unattended: nobody will review this plan before implementation starts, so resolve
 every open question yourself instead of raising it.
 
+Before planning, read the design specification in `docs/superpowers/specs/{{taskId}}-design.md` (if present) to understand the chosen approach.
+
 Turn the design into a concrete, ordered implementation plan:
 
 - List the files that change, in the order you'll change them.
@@ -18,3 +20,17 @@ Turn the design into a concrete, ordered implementation plan:
 - Do not write implementation code yet.
 
 If a `plan-writer` skill is available, use it for the full methodology.
+
+## Persist the artifact
+
+When you are done with the plan, create the directory if needed and write it to `docs/superpowers/plans/{{taskId}}-plan.md` in this workspace and commit it with `git add` / `git commit`:
+
+```bash
+mkdir -p docs/superpowers/plans
+cat > docs/superpowers/plans/{{taskId}}-plan.md << 'EOF'
+(the full plan you just produced)
+EOF
+git add docs/superpowers/plans/{{taskId}}-plan.md
+git commit -m "docs: plan for task {{taskId}}"
+```
+

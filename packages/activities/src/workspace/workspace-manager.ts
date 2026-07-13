@@ -26,6 +26,7 @@ export interface Workspaces {
   prepareScratch(taskId: string): Promise<{ workspaceRef: string }>;
   cleanupScratch(workspaceRef: string): Promise<void>;
   pruneOrphans(liveRepos: string[]): Promise<{ removed: string[] }>;
+  readFile(workspaceRef: string, relativePath: string): Promise<string | null>;
 }
 
 export class WorkspaceError extends Error {
@@ -102,6 +103,20 @@ export class WorkspaceManager implements Workspaces {
     }
 
     return { workspaceRef: workspacePath, branch, baseBranch };
+  }
+
+  async readFile(workspaceRef: string, relativePath: string): Promise<string | null> {
+    const full = resolve(workspaceRef, relativePath);
+    const root = resolve(workspaceRef) + sep;
+    if (!full.startsWith(root)) {
+      return null; // attempted path escape
+    }
+    try {
+      return await readFile(full, 'utf8');
+    } catch (e: unknown) {
+      if ((e as { code?: string }).code === 'ENOENT') return null;
+      throw e;
+    }
   }
 
   async prepareScratch(taskId: string): Promise<{ workspaceRef: string }> {
