@@ -388,6 +388,7 @@ describe('createActivities — prompt rendering', () => {
         goal: 'add a widget',
         fullVerifyFindings: '',
         reviewFindings: '',
+        prReviewFeedback: '',
       },
       workspaceRef: 'demo/repo',
       limits: { maxTokens: 1000, timeoutMs: 60_000 },
