@@ -103,7 +103,7 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
           promptRef: `${stage}.md`,
           promptContext: { taskId: input.taskId, goal: 'Address PR review comments', prReviewFeedback: input.prReviewFeedback ?? '', ...extraContext },
           workspaceRef: state.workspaceRef,
-          limits: { maxTokens: (effectiveBrakes as Brakes).maxTokens ?? 100000 },
+          limits: { maxTokens: effectiveBrakes.maxTokens ?? 100000 },
         });
         break;
       } catch (err) {
@@ -187,8 +187,8 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
           maxIterations: 20,
           maxTokens: 100000,
           maxBabysitRounds: 10,
-          ...(effectiveBrakes as Brakes),
-        },
+          ...effectiveBrakes,
+        } as Brakes,
         hasEscalationModel: false,
       });
 
@@ -207,7 +207,7 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
     while (true) {
       await sleep(DEFAULT_BABYSIT_POLL_MS);
       const feedback: PrFeedback = await activities.getPrFeedback(input.prRef);
-      const decision = babysitDecision(feedback, seen, state.babysitRounds, (effectiveBrakes as Brakes).maxBabysitRounds ?? 10, waiting, MAX_BABYSIT_WAITS);
+      const decision = babysitDecision(feedback, seen, state.babysitRounds, effectiveBrakes.maxBabysitRounds ?? 10, waiting, MAX_BABYSIT_WAITS);
 
       if (decision === 'merge_ready') break;
 
