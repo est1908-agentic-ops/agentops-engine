@@ -9,7 +9,7 @@ import {
   sleep,
 } from '@temporalio/workflow';
 import type { Brakes, DevCyclePrRepairInput, DevCycleState, PrFeedback, ProjectConfig, VerdictKind } from '@agentops/contracts';
-import { babysitDecision, nextRepairAction, parseVerdict } from '@agentops/policies';
+import { babysitDecision, nextRepairAction, parseVerdict, resolveStageLimits } from '@agentops/policies';
 import { feedbackHash } from '@agentops/contracts';
 import type { DevCycleActivities } from './activities-api';
 
@@ -103,7 +103,7 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
           promptRef: `${stage}.md`,
           promptContext: { taskId: input.taskId, goal: 'Address PR review comments', prReviewFeedback: input.prReviewFeedback ?? '', ...extraContext },
           workspaceRef: state.workspaceRef,
-          limits: { maxTokens: effectiveBrakes.maxTokens ?? 100000 },
+          limits: { maxTokens: effectiveBrakes.maxTokens ?? 100000, timeoutMs: 1_800_000 },
         });
         break;
       } catch (err) {
