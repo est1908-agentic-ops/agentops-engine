@@ -9,7 +9,7 @@
 FROM node:22-slim
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates curl \
+    && apt-get install -y --no-install-recommends ca-certificates curl git openssl \
     && rm -rf /var/lib/apt/lists/*
 
 # kubectl for the platform role's read-only cluster-state investigation (see
@@ -28,8 +28,16 @@ RUN npm install --global @anthropic-ai/claude-code@2.1.200
 # scripts, and skipping them is the recommended posture for Docker/CI installs.
 RUN npm install --global --ignore-scripts @earendil-works/pi-coding-agent@0.80.2
 
-COPY step-ca-root.crt /usr/local/share/ca-certificates/step-ca-root.crt
-RUN update-ca-certificates
+COPY step-ca-root.crt /tmp/step-ca-root.crt
+RUN set -e; \
+    if openssl x509 -in /tmp/step-ca-root.crt -noout 2>/dev/null; then \
+      mv /tmp/step-ca-root.crt /usr/local/share/ca-certificates/step-ca-root.crt; \
+      update-ca-certificates; \
+      openssl crl2pkcs7 -nocrl -certfile /etc/ssl/certs/ca-certificates.crt -out /dev/null; \
+    else \
+      echo "skipping non-PEM placeholder step-ca-root.crt; system CA bundle unchanged"; \
+    fi; \
+    rm -f /tmp/step-ca-root.crt
 
 # Claude Code reads ~/.claude/skills/; pi reads ~/.agents/skills/ (and
 # ~/.pi/agent/skills/, .agents/skills/, .pi/skills/) — the two CLIs share no
