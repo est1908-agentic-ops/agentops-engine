@@ -1,5 +1,5 @@
 import { DEFAULT_TIERS } from '@agentops/policies';
-import type { ModelRef } from '@agentops/contracts';
+import { ModelRefSchema, type ModelRef } from '@agentops/contracts';
 import type { Queryable } from './postgres-stats-store';
 
 // Queryable + an optional checked-out client for transactions. The worker and
@@ -34,11 +34,11 @@ interface TierRow {
 }
 
 function rowToEntry(row: TierRow): ModelRef {
-  return {
+  return ModelRefSchema.parse({
     backend: row.backend as ModelRef['backend'],
     model: row.model,
     ...(row.effort ? { effort: row.effort as ModelRef['effort'] } : {}),
-  };
+  });
 }
 
 function insertEntrySql(): string {
@@ -56,6 +56,9 @@ export class PostgresTierStore {
   /** Idempotent -- safe to call on every startup, same convention as the other stores. */
   async ensureSchema(): Promise<void> {
     await this.db.query(CREATE_TABLE_SQL);
+    await this.db.query(
+      "DELETE FROM tiers WHERE backend NOT IN ('claude', 'cursor', 'pi', 'codex', 'stub', 'platform')",
+    );
   }
 
   /** Load every tier into an in-memory Map. The worker calls this at startup + on refresh. */
@@ -84,7 +87,10 @@ export class PostgresTierStore {
     const inserts: { sql: string; params: unknown[] }[] = [];
     for (const [tierName, entries] of Object.entries(tiers)) {
       entries.forEach((entry, position) => {
-        inserts.push({ sql: insertEntrySql(), params: [tierName, position, entry.backend, entry.model, entry.effort] });
+        inserts.push({
+          sql: insertEntrySql(),
+          params: [tierName, position, entry.backend, entry.model, entry.effort],
+        });
       });
     }
     if (!this.db.connect) {

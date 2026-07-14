@@ -31,6 +31,26 @@ const ALTER_TABLE_STATEMENTS = [
   `CREATE UNIQUE INDEX IF NOT EXISTS managed_projects_linear_team_key_key ON managed_projects (linear_team_key) WHERE linear_team_key IS NOT NULL`,
 ];
 
+const REMOVE_UNSUPPORTED_TIER_ENTRIES_SQL = `
+  UPDATE managed_projects
+  SET config = jsonb_set(
+    config,
+    '{tiers}',
+    COALESCE((
+      SELECT jsonb_object_agg(tier_name, entries)
+      FROM (
+        SELECT tier.key AS tier_name, jsonb_agg(entry.value) AS entries
+        FROM jsonb_each(config->'tiers') AS tier(key, value)
+        CROSS JOIN LATERAL jsonb_array_elements(tier.value) AS entry(value)
+        WHERE entry.value->>'backend' IN ('claude', 'cursor', 'pi', 'codex', 'stub', 'platform')
+        GROUP BY tier.key
+      ) AS valid_tiers
+    ), '{}'::jsonb),
+    true
+  )
+  WHERE config ? 'tiers'
+`;
+
 interface ManagedProjectRow {
   id: string;
   project: string;
@@ -76,6 +96,7 @@ export class PostgresManagedProjectStore {
     for (const statement of ALTER_TABLE_STATEMENTS) {
       await this.db.query(statement);
     }
+    await this.db.query(REMOVE_UNSUPPORTED_TIER_ENTRIES_SQL);
   }
 
   // Match on the canonical `owner/repo` form (normalizeRepo) rather than raw
