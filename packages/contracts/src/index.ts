@@ -2,6 +2,7 @@ export * from './stage';
 export * from './model';
 export * from './project-config';
 export * from './task-input';
+export * from './dev-cycle-pr-repair';
 export * from './dev-cycle-state';
 export * from './stage-result';
 export * from './verdict';

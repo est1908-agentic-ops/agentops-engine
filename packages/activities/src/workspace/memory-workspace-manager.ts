@@ -13,11 +13,12 @@ export class MemoryWorkspaceManager implements Workspaces {
     this.files.get(workspaceRef)!.set(relativePath, content);
   }
 
-  async prepare(taskId: string, repo: string, initCommands?: string[]): Promise<PreparedWorkspace> {
+  async prepare(taskId: string, repo: string, initCommands?: string[], headBranch?: string): Promise<PreparedWorkspace> {
     const workspaceRef = `memory://${repo}/${taskId}`;
     this.prepared.add(workspaceRef);
     this.initCommands.set(workspaceRef, initCommands);
-    return { workspaceRef, branch: `agentops/${taskId}`, baseBranch: 'main' };
+    const branch = headBranch || `agentops/${taskId}`;
+    return { workspaceRef, branch, baseBranch: 'main' };
   }
 
   initCommandsFor(workspaceRef: string): string[] | undefined {

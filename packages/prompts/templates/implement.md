@@ -10,6 +10,10 @@ Prior review findings (empty if this is the first attempt):
 
 {{reviewFindings}}
 
+Unresolved PR review comments to address (empty for normal runs):
+
+{{prReviewFeedback}}
+
 Before making changes, read the design (if present) from `docs/superpowers/specs/{{taskId}}-design.md` and the plan from `docs/superpowers/plans/{{taskId}}-plan.md`.
 
 Make the necessary code changes in this workspace to satisfy the goal above, addressing any

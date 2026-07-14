@@ -85,7 +85,7 @@ describe('createActivities', () => {
       backend: 'stub',
       model: 'stub-v1',
       promptRef: 'implement.md',
-      promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' },
+      promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
       workspaceRef: 'demo/repo',
       limits: { maxTokens: 1000, timeoutMs: 60_000 },
     });
@@ -106,7 +106,7 @@ describe('createActivities', () => {
       backend: 'stub',
       model: 'stub-v1',
       promptRef: 'implement.md',
-      promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' },
+      promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
       workspaceRef: 'demo/repo',
       limits: { maxTokens: 1000, timeoutMs: 60_000 },
     });
@@ -209,7 +209,7 @@ describe('createActivities', () => {
       backend: 'stub',
       model: 'stub-v1',
       promptRef: 'implement.md',
-      promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' },
+      promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
       workspaceRef: 'demo/repo',
       limits: { maxTokens: 1000, timeoutMs: 60_000 },
     } as never);
@@ -223,7 +223,7 @@ describe('createActivities', () => {
     const activities = createActivities(deps);
     const res = await activities.runAgent({
       taskId: 't1', stage: 'bughunt', repo: 'acme/web', project: 'acme', attempt: 1, callIndex: 1, backend: 'stub', model: 'm',
-      promptRef: 'implement.md', promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' }, workspaceRef: 'ws',
+      promptRef: 'implement.md', promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' }, workspaceRef: 'ws',
       limits: { maxTokens: 1000, maxIterations: 1, maxImplementAttempts: 1, maxBabysitRounds: 1 },
       promptSource: { repo: 'acme/web', commit: 'abc123', path: 'agentops/prompts/x.md' },
     } as any);
@@ -235,7 +235,7 @@ describe('createActivities', () => {
     const activities = createActivities(deps);
     const res = await activities.runAgent({
       taskId: 't1', stage: 'bughunt', repo: 'o/r', project: 'p', attempt: 1, callIndex: 1, backend: 'stub', model: 'm',
-      promptRef: 'implement.md', promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' }, workspaceRef: 'ws',
+      promptRef: 'implement.md', promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' }, workspaceRef: 'ws',
       limits: { maxTokens: 1000, maxIterations: 1, maxImplementAttempts: 1, maxBabysitRounds: 1 },
     } as any);
     expect(res.promptSource).toBe('builtin:implement.md');
@@ -274,7 +274,7 @@ describe('createActivities — tracing', () => {
         backend: 'stub',
         model: 'stub-v1',
         promptRef: 'implement.md',
-        promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' },
+        promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
         workspaceRef: 'demo/repo',
         limits: { maxTokens: 1000, timeoutMs: 60_000 },
       }),
@@ -310,7 +310,7 @@ describe('createActivities — tracing', () => {
         backend: 'stub',
         model: 'stub-v1',
         promptRef: 'implement.md',
-        promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' },
+        promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
         workspaceRef: 'demo/repo',
         limits: { maxTokens: 1000, timeoutMs: 60_000 },
       }),
@@ -497,7 +497,7 @@ function runAgentReq(backend: string) {
     backend,
     model: 'm',
     promptRef: 'implement.md',
-    promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' },
+    promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
     workspaceRef: 'demo/repo',
     limits: { maxTokens: 1000, timeoutMs: 60_000 },
   };

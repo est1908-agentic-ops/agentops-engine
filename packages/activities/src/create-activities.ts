@@ -333,10 +333,11 @@ export function createActivities(deps: ActivityDependencies) {
       taskId: string;
       repo: string;
       initCommands?: string[];
+      headBranch?: string;  // for PR repair to work on existing PR head
     }): Promise<PreparedWorkspace> {
       assertProjectOwnsRepo(req.repo, deps.registry);
       try {
-        return await deps.workspaces.prepare(req.taskId, req.repo, req.initCommands);
+        return await deps.workspaces.prepare(req.taskId, req.repo, req.initCommands, req.headBranch);
       } catch (err) {
         rethrowWorkspaceError(err);
       }
