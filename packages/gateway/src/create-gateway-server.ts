@@ -17,6 +17,7 @@ import { startDevCycleForLinearIssue } from './start-dev-cycle-for-linear-issue'
 import { startDevCycleForIssue } from './start-dev-cycle';
 import { isFreshLinearWebhook, verifyLinearSignature } from './verify-linear-signature';
 import { verifyGithubSignature } from './verify-signature';
+import { verifyBearerToken } from './verify-bearer-token';
 
 export interface GatewayDeps {
   client: Client;
@@ -106,7 +107,7 @@ async function handleArgoCdGetParams(deps: GatewayDeps, req: IncomingMessage, re
   // we take no input parameters). Do this before auth so the socket is consumed.
   await readRawBody(req);
   const auth = req.headers['authorization'];
-  if (auth !== `Bearer ${deps.argocdPluginToken}`) {
+  if (!verifyBearerToken(auth, deps.argocdPluginToken)) {
     res.writeHead(401).end('unauthorized');
     return;
   }
