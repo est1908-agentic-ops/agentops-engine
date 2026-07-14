@@ -155,7 +155,7 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<un
         fullVerify: 'pass', // simplified
         review: 'pass',
         diffEmpty: false,
-        brakes: effectiveBrakes as any, // brakes shape from config
+        brakes: effectiveBrakes as unknown as { maxBabysitRounds?: number; maxIterations?: number }, // brakes shape from config
         hasEscalationModel: false,
       });
 

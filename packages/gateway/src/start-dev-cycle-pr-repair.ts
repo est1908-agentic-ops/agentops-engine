@@ -20,7 +20,7 @@ export async function startDevCyclePrRepair(
     prRef: reviewEvent.prRef,
     prReviewFeedback: reviewEvent.reviewBody,
     headBranch: reviewEvent.headBranch,
-    config: config as any, // config is ProjectConfig | undefined
+    config: config as unknown as Record<string, unknown> | undefined, // config is ProjectConfig | undefined
   };
 
   try {
