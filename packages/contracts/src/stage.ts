@@ -28,10 +28,6 @@ export const BlockReasonSchema = z.enum([
   'babysit-brake',
   'max-attempts',
   'hook-required-failed',
-  // A LiteLLM virtual key's hard spend cap, not a token-count brake -- kept
-  // distinct from 'token-brake' since the two are independent enforcement
-  // layers (ARCHITECTURE.md §7) that can trip for unrelated reasons.
-  'budget-exceeded',
   // A prompt-started devCycle (no pre-resolved config) whose repo isn't in
   // the worker's merged static+managed registry -- set together with
   // status 'failed' as a fail-fast, not a resumable block (prompt-devcycle

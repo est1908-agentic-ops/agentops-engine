@@ -20,6 +20,12 @@ describe('validateTiersTable', () => {
     expect(validateTiersTable({ smart: [{ backend: 'grok', model: 'x' }] })).toMatch(/invalid backend "grok"/);
   });
 
+  it('rejects an unknown backend', () => {
+    expect(validateTiersTable({ smart: [{ backend: 'retired-gateway', model: 'model' }] })).toMatch(
+      /invalid backend "retired-gateway"/,
+    );
+  });
+
   it('rejects an invalid effort', () => {
     expect(validateTiersTable({ smart: [{ backend: 'claude', model: 'opus', effort: 'turbo' }] })).toMatch(
       /invalid effort "turbo"/,

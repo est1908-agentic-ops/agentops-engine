@@ -1,7 +1,5 @@
 import { trace } from '@opentelemetry/api';
 import {
-  ActivityFailure,
-  ApplicationFailure,
   condition,
   defineQuery,
   defineSignal,
@@ -59,14 +57,6 @@ const MAX_BABYSIT_WAITS = Math.ceil(MAX_BABYSIT_WAIT_MS / DEFAULT_BABYSIT_POLL_M
 // after their own call sites) because they don't retry-in-place the way a
 // budget block does.
 class DevCycleCancelledError extends Error {}
-
-function isBudgetExceededFailure(err: unknown): boolean {
-  return (
-    err instanceof ActivityFailure &&
-    err.cause instanceof ApplicationFailure &&
-    err.cause.type === 'LiteLlmBudgetExceededError'
-  );
-}
 
 export async function devCycle(input: TaskInput): Promise<DevCycleState> {
   // Only reads/mutates the span object the workflow-side OTel interceptor
@@ -188,41 +178,21 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     const tier = tierOverride ?? routed?.tier ?? 'smart';
     const effort = routed?.effort;
 
-    let result;
-    while (true) {
-      try {
-        result = await agentActivities.runAgent({
-          taskId: input.taskId,
-          stage,
-          attempt,
-          callIndex,
-          tier,
-          effort,
-          projectTiers: config.tiers,
-          image: config.image,
-          services: config.services,
-          promptRef: `${stage}.md`,
-          promptContext: { taskId: input.taskId, goal: input.goal, ...extraContext },
-          workspaceRef: state.workspaceRef,
-          limits: { maxTokens: config.brakes.maxTokens, ...resolveStageLimits(config, stage) },
-        });
-        break;
-      } catch (err) {
-        if (!isBudgetExceededFailure(err)) {
-          throw err;
-        }
-        // Not a token-count brake -- a LiteLLM virtual key's hard spend cap.
-        // Same resume escape hatch as the other blockReasons (an operator
-        // bumps the budget/rotates the key, then signals resume), but this
-        // one retries the same call in place rather than relaxing a brake
-        // counter and letting the outer loop re-evaluate.
-        state.status = 'blocked';
-        state.blockReason = 'budget-exceeded';
-        if (await waitForResumeOrCancel()) {
-          throw new DevCycleCancelledError();
-        }
-      }
-    }
+    const result = await agentActivities.runAgent({
+      taskId: input.taskId,
+      stage,
+      attempt,
+      callIndex,
+      tier,
+      effort,
+      projectTiers: config.tiers,
+      image: config.image,
+      services: config.services,
+      promptRef: `${stage}.md`,
+      promptContext: { taskId: input.taskId, goal: input.goal, ...extraContext },
+      workspaceRef: state.workspaceRef,
+      limits: { maxTokens: config.brakes.maxTokens, ...resolveStageLimits(config, stage) },
+    });
     state.cumulativeTokens += result.tokensIn + result.tokensOut;
     await activities.recordRunStats({
       taskId: input.taskId,
@@ -265,12 +235,6 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     return { kind: lastKind === 'unparseable' ? 'fail' : lastKind, output: lastOutput };
   };
 
-  // Wrapped so a cancel signal received while runStageAgent is blocked
-  // in-place on a budget-exceeded retry (which can happen at any stage, deep
-  // inside this function) unwinds to one place rather than needing every
-  // call site below to check for it — the pre-existing `cancelled` checks
-  // right after each call site are untouched; this only catches the new
-  // DevCycleCancelledError path.
   try {
     for (const stage of preImplementStages({ config, hasHumanDesign: false, hasHumanPlan: false })) {
       state.stage = stage;

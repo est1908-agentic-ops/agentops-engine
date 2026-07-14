@@ -1,6 +1,5 @@
 import { trace } from '@opentelemetry/api';
 import {
-  LiteLlmBudgetExceededError,
   ProcessCliAuthError,
   RateLimitError,
   RateWindowExceededError,
@@ -206,12 +205,6 @@ export function createActivities(deps: ActivityDependencies) {
           promptSource,
         };
       } catch (err) {
-        // A LiteLLM virtual-key budget cap is definitive, not transient --
-        // same "typed error at the boundary, non-retryable ApplicationFailure
-        // here" shape as rethrowWorkspaceError below.
-        if (err instanceof LiteLlmBudgetExceededError) {
-          throw ApplicationFailure.nonRetryable(err.message, 'LiteLlmBudgetExceededError');
-        }
         // A rejected credential (bad/expired/revoked token, placeholder key) is
         // definitive, not transient -- retrying just burns the activity's retry
         // budget and delays surfacing the real cause. Fail fast with a clearly
