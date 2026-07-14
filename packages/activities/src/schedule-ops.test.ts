@@ -48,6 +48,6 @@ describe('applyScheduleChanges (mocked ScheduleClient)', () => {
     const handle = client.getHandle.mock.results[0].value;
     expect(typeof handle.update.mock.calls[0][0]).toBe('function');
     const result = await handle.update.mock.calls[0][0]({});
-    expect(result.schedule.action.taskQueue).toBe('q');
+    expect(result.action.taskQueue).toBe('q');
   });
 });

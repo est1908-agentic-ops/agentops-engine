@@ -35,7 +35,8 @@ export interface ScheduleCreateOpts {
   searchAttributes?: Record<string, unknown[]>;
 }
 export interface ScheduleUpdateOpts {
-  schedule: { spec: CronScheduleSpec; action: ScheduleStartWorkflowAction };
+  action: ScheduleStartWorkflowAction;
+  spec: CronScheduleSpec;
   memo?: Record<string, unknown>;
   searchAttributes?: Record<string, unknown[]>;
 }
@@ -44,9 +45,13 @@ export interface ScheduleUpdateOpts {
 // This lets tests inject a vi.fn() mock without depending on the full SDK shape,
 // while the create/update opts are typed so a malformed spec can't compile.
 // update() takes an updater function -- (previous) => newSchedule -- matching
-// the real @temporalio/client ScheduleHandle.update signature. deps.scheduleClient
-// is a raw cast of the real client (see worker/src/main.ts), so a mismatched
-// shape here type-checks but throws at runtime.
+// the real @temporalio/client ScheduleHandle.update signature. The updater returns
+// a flat ScheduleUpdateOpts object (action, spec, memo, searchAttributes — no nested
+// schedule wrapper). deps.scheduleClient is a raw cast of the real client (see
+// worker/src/main.ts:453), so a mismatched shape here type-checks but throws at runtime.
+// A prior version of this code returned { schedule: { spec, action }, memo, searchAttributes },
+// which was silently ignored by the server, causing reconcile "successes" while schedules
+// never actually got their fields corrected. This has been fixed to the correct flat shape.
 export interface ScheduleHandleLike {
   update?: (updateFn: (previous: unknown) => ScheduleUpdateOpts) => Promise<void>;
   pause?: () => Promise<void>;
@@ -149,17 +154,15 @@ export async function applyScheduleChanges(
     const memo = { project, agentName: spec.name, workflowType: spec.workflow };
     const searchAttributes = { project: [project], agentName: [spec.name], workflowType: [spec.workflow] };
     await h.update?.(() => ({
-      schedule: {
-        spec: cronScheduleSpec(spec.schedule, spec.timezone),
-        action: {
-          type: 'startWorkflow',
-          workflowType: spec.workflow,
-          args,
-          taskQueue,
-          memo,
-          searchAttributes,
-        },
+      action: {
+        type: 'startWorkflow',
+        workflowType: spec.workflow,
+        args,
+        taskQueue,
+        memo,
+        searchAttributes,
       },
+      spec: cronScheduleSpec(spec.schedule, spec.timezone),
       memo,
       searchAttributes,
     }));
