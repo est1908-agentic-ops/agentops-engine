@@ -4,7 +4,7 @@ Status: draft · 2026-07-09 · Owner: Artem
 
 ## Context
 
-Investigating `issue-broccoli-113`'s `devCycle` workflow (`debug-devcycle-issue`) found the `context` stage's `runAgent` activity failing with `ProcessCliTimeoutError: pi timed out after 600000ms` on attempt 1, and attempt 2 heading for the identical failure. The underlying k8s Job/pod was healthy the entire time (`active:1, ready:1` right up to the kill) — `K8sJobRunner.run()` (`packages/backends/src/k8s/k8s-job-runner.ts:269-273`) enforces a hard wall-clock deadline and kills the Job once elapsed time exceeds `req.limits.timeoutMs`, regardless of whether the CLI is still making progress. That constant is `600_000` (10 min), hardcoded identically for every stage at `packages/workflows/src/dev-cycle.ts:175` — no per-stage or per-task allowance for naturally longer work (this task's issue body alone is several thousand words of root-cause analysis, on top of whatever repo exploration the `context` stage needed).
+Investigating `issue-acme-113`'s `devCycle` workflow (`debug-devcycle-issue`) found the `context` stage's `runAgent` activity failing with `ProcessCliTimeoutError: pi timed out after 600000ms` on attempt 1, and attempt 2 heading for the identical failure. The underlying k8s Job/pod was healthy the entire time (`active:1, ready:1` right up to the kill) — `K8sJobRunner.run()` (`packages/backends/src/k8s/k8s-job-runner.ts:269-273`) enforces a hard wall-clock deadline and kills the Job once elapsed time exceeds `req.limits.timeoutMs`, regardless of whether the CLI is still making progress. That constant is `600_000` (10 min), hardcoded identically for every stage at `packages/workflows/src/dev-cycle.ts:175` — no per-stage or per-task allowance for naturally longer work (this task's issue body alone is several thousand words of root-cause analysis, on top of whatever repo exploration the `context` stage needed).
 
 A second gap surfaced in the same investigation: there was no way to tell *why* it was slow. `K8sJobRunner`'s Job container redirects the CLI's entire stdout/stderr into files on the workspace PVC (`SHELL_REDIRECT`, `k8s-job-runner.ts:61-62`) rather than to the container's own log stream, so Loki captured nothing for the `agent` container — even though ARCHITECTURE.md §5.4 already documents that Job output should stream to Alloy → Loki. `pi --mode json` already emits newline-delimited JSON progress events to stdout as it works (`pi-backend.ts`'s `parseOutput` reads `message_end`/`agent_end` events from exactly this stream) — that liveness signal exists today, it's just invisible outside the finished artifact file.
 
@@ -58,7 +58,7 @@ A stage not present in `timeouts`, or a field omitted within it, falls back to t
 The poll loop in `run()` keeps its existing `pollIntervalMs` (3s default) cadence and heartbeat-first ordering (unchanged — cancellation must stay noticed just as fast as today). Per tick, before heartbeating:
 
 - `stat()` both `paths.outFile` and `paths.errFile` (missing file → size 0, not an error). If either file's size grew since the previous tick, set `lastProgressAt = this.now()`. Initialized to `start` (job-creation time), so a Job that produces nothing at all for `idleTimeoutMs` after creation is correctly treated as stuck.
-- Heartbeat payload gains `idleMs: this.now() - lastProgressAt`, `outputBytes`, `errorBytes` — this is the detail that was missing while debugging `issue-broccoli-113` (the pending-activity view showed `active:1, ready:1` with no way to tell if the CLI itself was doing anything).
+- Heartbeat payload gains `idleMs: this.now() - lastProgressAt`, `outputBytes`, `errorBytes` — this is the detail that was missing while debugging `issue-acme-113` (the pending-activity view showed `active:1, ready:1` with no way to tell if the CLI itself was doing anything).
 
 The single `elapsedMs > timeoutMs` check (`k8s-job-runner.ts:269`) is replaced by two checks, evaluated in this order:
 
@@ -102,7 +102,7 @@ Deliberately avoids `set -o pipefail` (unsupported by `dash`, not portable acros
 
 ## Testing strategy
 
-- `k8s-job-runner.test.ts`: idle-timeout kill fires when the output file never grows past the injected `now()`'s idle window, even while the fake Job status stays healthy/active; backstop kill fires when output keeps growing but total elapsed exceeds `timeoutMs`; heartbeat payload assertions extended to check `idleMs`/`outputBytes`/`errorBytes`; existing status-poll-hang test (`issue-broccoli-94` regression) unaffected since it exercises the `readNamespacedJobStatus` timeout path, not this one.
+- `k8s-job-runner.test.ts`: idle-timeout kill fires when the output file never grows past the injected `now()`'s idle window, even while the fake Job status stays healthy/active; backstop kill fires when output keeps growing but total elapsed exceeds `timeoutMs`; heartbeat payload assertions extended to check `idleMs`/`outputBytes`/`errorBytes`; existing status-poll-hang test (`issue-acme-94` regression) unaffected since it exercises the `readNamespacedJobStatus` timeout path, not this one.
 - `k8s-job-runner.test.ts` (`buildAgentJob`): container `command` assertion updated for the new FIFO/`tee` script; a new case runs the actual shell fragment against a fake binary via `FakeBatchApi`'s job simulation (or a direct `/bin/sh -c` exec in the test if that's simpler) asserting stdout/stderr both reach the artifact files *and* a captured "container output" sink, and that a non-zero CLI exit code survives through to the container's exit code.
 - `dev-cycle.test.ts`: a stage with no `timeouts` override resolves to the two new defaults; a stage with an explicit override in `ProjectConfig.timeouts` resolves to those values instead.
 - `contracts` package: schema tests for the new `limits.idleTimeoutMs` field and `ProjectConfig.timeouts`.
@@ -121,5 +121,5 @@ Deliberately avoids `set -o pipefail` (unsupported by `dash`, not portable acros
 
 ## Open questions carried forward
 
-- Whether `idleTimeoutMs`/`timeoutMs` defaults (5 min / 30 min) need retuning once this runs against a few more real tasks the size of `issue-broccoli-113` — left as operator-tunable via `ProjectConfig.timeouts` rather than guessed precisely up front.
+- Whether `idleTimeoutMs`/`timeoutMs` defaults (5 min / 30 min) need retuning once this runs against a few more real tasks the size of `issue-acme-113` — left as operator-tunable via `ProjectConfig.timeouts` rather than guessed precisely up front.
 - Whether stderr should also be teed live, given `isAuthError` only reads it after the fact today — included in this design for consistency/completeness, but could be dropped to reduce Job script complexity if it turns out not to matter in practice.

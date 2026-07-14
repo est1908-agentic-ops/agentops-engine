@@ -4,7 +4,7 @@
       "name": "rollbar-monitor",
       "workflow": "rollbarMonitor",
       "schedule": "continuous",
-      "input": { "repo": "acme/web", "project": "acme" },
+      "input": { "repo": "acme/web", "project": "acme", "autoFix": false },
       "enabled": true
     }
   ],

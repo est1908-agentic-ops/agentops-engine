@@ -18,7 +18,7 @@ describe('parsePlatformResult', () => {
 
   it('parses proposedFixes and actionsTaken when present', () => {
     const text =
-      'PLATFORM_RESULT: {"summary": "found a bug", "actionsTaken": [{"type": "terminate", "workflowId": "w1", "reason": "stuck"}], "proposedFixes": [{"repo": "flair-hr/agentops-engine", "goal": "bound retries"}]}';
+      'PLATFORM_RESULT: {"summary": "found a bug", "actionsTaken": [{"type": "terminate", "workflowId": "w1", "reason": "stuck"}], "proposedFixes": [{"repo": "est1908/agentops-engine", "goal": "bound retries"}]}';
 
     const result = parsePlatformResult(text);
 

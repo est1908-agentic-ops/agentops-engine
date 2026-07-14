@@ -21,10 +21,10 @@ describe('StartRunRequestSchema', () => {
   it('accepts hintRepos and a caller-supplied workflowId', () => {
     const parsed = StartRunRequestSchema.parse({
       prompt: 'check the last failures',
-      hintRepos: ['flair-hr/agentops-engine'],
+      hintRepos: ['est1908/agentops-engine'],
       workflowId: 'platform-my-run',
     });
-    expect(parsed.hintRepos).toEqual(['flair-hr/agentops-engine']);
+    expect(parsed.hintRepos).toEqual(['est1908/agentops-engine']);
     expect(parsed.workflowId).toBe('platform-my-run');
   });
 });

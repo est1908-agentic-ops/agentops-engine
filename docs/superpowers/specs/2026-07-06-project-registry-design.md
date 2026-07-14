@@ -71,10 +71,10 @@ Extends today's env-var wiring pattern rather than introducing a second mechanis
 ```yaml
 projects:
   product-a:
-    repo: flair-hr/product-a
+    repo: est1908/product-a
     githubTokenSecretName: github-token-product-a
   product-b:
-    repo: flair-hr/product-b
+    repo: est1908/product-b
     githubTokenSecretName: github-token-product-b
 ```
 
@@ -185,7 +185,7 @@ Ripple, all mechanical:
 
 - `packages/worker/src/main.ts`: `buildActivityDependencies(githubToken: string | undefined)` → `buildActivityDependencies(registry: ResolvedProjectEntry[])`. Empty registry → today's demo-mode branch (`MemoryScmPort`/`MemoryTrackerPort`/`MemoryWorkspaceManager`), unchanged. Non-empty: for each entry, build `const git = new SpawnGitCommandRunner({ authToken: () => entry.token })` (exactly today's single-token construction, just once per entry instead of once globally) and `const { scm, tracker } = createGithubPorts(entry.token, git)`, collect `{ repo: entry.repo, scm, tracker, git }` into `ProjectScopedPortsEntry[]`, and call `createProjectScopedPorts(entries)` for the dispatcher's `scm`/`tracker`/`resolveGit`; wire `new WorkspaceManager({ resolveGit, cloneUrl: githubCloneUrl })`.
 - `packages/cli/src/main.ts`: since a CLI invocation only ever targets one `--repo`, it doesn't need the dispatcher at all — `buildStartScmPort(registry, product, repo)` looks up the single matching entry (throwing on an unregistered repo or a repo/product mismatch — the concrete "registry validates onboarding" behavior) and returns `createGithubPorts(entry.token, git).scm` directly, same as today's single-token path just keyed by a looked-up entry instead of a global token.
-- Startup log line names which mode plus the registered products (e.g. `LIVE mode — 2 projects registered: product-a (flair-hr/product-a), product-b (flair-hr/product-b)`) instead of today's binary "GITHUB_TOKEN set/not set".
+- Startup log line names which mode plus the registered products (e.g. `LIVE mode — 2 projects registered: product-a (est1908/product-a), product-b (est1908/product-b)`) instead of today's binary "GITHUB_TOKEN set/not set".
 
 ## Onboarding runbook (adding a new product)
 

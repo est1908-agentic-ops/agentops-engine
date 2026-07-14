@@ -61,12 +61,12 @@ describe('parseAgentsManifest', () => {
     const m = parseAgentsManifest(
       {
         agents: [{ name: 'r', workflow: 'rollbarMonitor', schedule: 'continuous' }],
-        worker: { image: 'reg/broccoli/agentops-worker:abc123', externalSecrets: ['rollbar-token'] },
+        worker: { image: 'reg/acme/agentops-worker:abc123', externalSecrets: ['rollbar-token'] },
       },
       opts,
     );
     expect(m.worker).toEqual({
-      image: 'reg/broccoli/agentops-worker:abc123',
+      image: 'reg/acme/agentops-worker:abc123',
       replicas: 1,
       externalSecrets: ['rollbar-token'],
     });

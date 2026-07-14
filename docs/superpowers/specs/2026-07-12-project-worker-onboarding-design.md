@@ -11,7 +11,7 @@ Design authority: this doc governs *how a Tier-2 worker is deployed and onboarde
 
 ## 1. Why
 
-SP2 made Tier-2 real: a project authors a custom Temporal workflow, runs it in its own worker, and delegates privileged work back to the engine. But it shipped the **mechanism** (a per-project worker), not the **onboarding ergonomics**. Today, to ship one custom workflow a developer must touch multiple places, the worst of which is a **hand-authored ArgoCD `Application` + Deployment/values/kustomization in the platform repo (`agentops-platform`)** — a separate infra repo the app developer may not own, registered in the root kustomization, that is a *second, manual declaration of "this project has a worker."* The `examples/project-worker/` reference in this repo underlines the gap: it ships the workflow, `worker.ts`, and `agents.json` but **no deploy manifest** — because there was no clean way to author one.
+SP2 made Tier-2 real: a project authors a custom Temporal workflow, runs it in its own worker, and delegates privileged work back to the engine. But it shipped the **mechanism** (a per-project worker), not the **onboarding ergonomics**. Today, to ship one custom workflow a developer must touch multiple places, the worst of which is a **hand-authored ArgoCD `Application` + Deployment/values/kustomization in the platform repo (`agentops-platform`)** — a separate infra repo the app developer may not own, registered in the root kustomization, that is a *second, manual declaration of "this project has a worker."* The `docs/project-worker/` reference in this repo underlines the gap: it ships the workflow, `worker.ts`, and `agents.json` but **no deploy manifest** — because there was no clean way to author one.
 
 The custom-agent-workflows model already says config is **git-sourced, PR-reviewed, agent-improvable** (master spec §1) — `agents.json` and `worker.ts` already live in the project repo. So the worker's *deployment* spec belongs there too, not split into a second system. This design makes worker deployment **derive from a `worker` block in the project's `agents.json`**, read by the **gateway** (which already decrypts project tokens and reads repos) via the token the registry already holds, and rendered into the cluster by ArgoCD. The end state: onboarding a Tier-2 worker is **one PR in the project repo** — no DB step, no platform-repo step.
 
@@ -79,9 +79,9 @@ The generator reads a single `clusters/ops/project-workers/workers.yaml` in the 
 
 ```yaml
 # workers.yaml — throwaway bootstrap list, one entry per Tier-2 worker
-- project: broccoli
-  image: gitactions.est1908.top/broccoli/agentops-worker:<tag>
-  # taskQueue omitted -> defaults to proj-broccoli
+- project: acme
+  image: gitactions.est1908.top/acme/agentops-worker:<tag>
+  # taskQueue omitted -> defaults to proj-acme
 ```
 
 This ships the generic chart + ApplicationSet and proves the deploy path end-to-end **with no engine/control code**, before building the repo-read path. It is an explicit, short-lived bootstrap — its `workers.yaml` entries migrate into the repo `worker` block when Stage 2 lands (§15).
@@ -105,8 +105,8 @@ Swap the git-file generator for an ArgoCD **plugin generator** pointed at the **
     // taskQueue omitted -> defaults to proj-<project> for a project workflow (§7)
   ],
   "worker": {
-    "image": "gitactions.est1908.top/broccoli/agentops-worker:<sha>",  // required if `worker` present
-    "taskQueue": "proj-broccoli",        // optional; default proj-<project>
+    "image": "gitactions.est1908.top/acme/agentops-worker:<sha>",  // required if `worker` present
+    "taskQueue": "proj-acme",        // optional; default proj-<project>
     "replicas": 1,                        // optional; default 1
     "externalSecrets": ["rollbar-token"]  // optional; K8s Secret names, no values
   }
@@ -159,15 +159,15 @@ Under v2 **both live in the same `agents.json`**, so they align by construction.
 - **Reconciler default:** the effective queue is `spec.taskQueue ?? (isBuiltin(spec.workflow) ? ENGINE_QUEUE : projQueue(project))` — built-ins (`devCycle`/`whiteboxBugHunt`/`qaProbe`) keep defaulting to `ENGINE_QUEUE` (unchanged from `schedule-ops.ts:77`); a *project* workflow defaults to `proj-<project>`. This is the one behavioral change to queue resolution, and it is additive: absent `taskQueue` for a project workflow used to fall through to `ENGINE_QUEUE`, where no engine worker has the code — i.e. it never worked; now it resolves correctly.
 - **`worker.taskQueue` default:** likewise `proj-<project>`.
 
-So for the common case nobody types a queue name anywhere; both sides compute `proj-broccoli` from the slug. Explicit `taskQueue` is override-only.
+So for the common case nobody types a queue name anywhere; both sides compute `proj-acme` from the slug. Explicit `taskQueue` is override-only.
 
-**Safety surface (no silent misconfig):** ConfigSync, when it schedules a project (non-built-in) workflow, checks the same manifest for a `worker` block and **surfaces a warning** in reconcile status if there is none — "scheduled `rollbarMonitor` on `proj-broccoli` but the manifest declares no `worker` to run it." Non-blocking (the worker Application may sync moments later), but it turns the most likely onboarding mistake from a silent pending workflow into a visible signal. Because both live in one file, this check is a pure function of the parsed manifest — no cross-system lookup.
+**Safety surface (no silent misconfig):** ConfigSync, when it schedules a project (non-built-in) workflow, checks the same manifest for a `worker` block and **surfaces a warning** in reconcile status if there is none — "scheduled `rollbarMonitor` on `proj-acme` but the manifest declares no `worker` to run it." Non-blocking (the worker Application may sync moments later), but it turns the most likely onboarding mistake from a silent pending workflow into a visible signal. Because both live in one file, this check is a pure function of the parsed manifest — no cross-system lookup.
 
 ## 8. Project-owned external secrets (the one residual coupling)
 
 A worker that talks to an external source (the canonical Rollbar monitor) needs its *own* secret, mounted via `externalSecrets`. That Secret still has to exist in the cluster, and it is genuinely the project's secret — not engine credentials. For now it is provisioned the same way every other secret is: **SOPS-encrypted in `agentops-platform`**, decrypted into a K8s Secret at deploy time. The `worker` block only references it by name.
 
-Called out, not solved, because: (a) it is a *smaller* coupling than the workload one this design removes; (b) most Tier-2 workers (pure orchestration over `engineActivities()` + `childDevCycle()`) need none — including broccoli's case as understood today; (c) collapsing it into the repo/DB would mean storing a second class of project secret, reopening a threat surface the registry design deliberately closed. A future pass can extend the registry's X25519 scheme to project-owned externals if the manual SOPS step becomes painful.
+Called out, not solved, because: (a) it is a *smaller* coupling than the workload one this design removes; (b) most Tier-2 workers (pure orchestration over `engineActivities()` + `childDevCycle()`) need none — including acme's case as understood today; (c) collapsing it into the repo/DB would mean storing a second class of project secret, reopening a threat surface the registry design deliberately closed. A future pass can extend the registry's X25519 scheme to project-owned externals if the manual SOPS step becomes painful.
 
 ## 9. Topology decision (settled, recorded here)
 
@@ -204,7 +204,7 @@ Called out, not solved, because: (a) it is a *smaller* coupling than the workloa
 
 | # | Sub-project | Delivers |
 |---|---|---|
-| **SP-a** | **Chart + git-file ApplicationSet** | `charts/project-worker/` (+ render golden test); the ApplicationSet with the Stage-1 git-file generator + `workers.yaml`; `examples/project-worker/` gains its deploy note; docs. Proves the deploy path with **no engine/control code** — Stage-1 projects set an explicit `taskQueue` in `agents.json` (already supported since SP2), so the `proj-<project>` default isn't needed yet. |
+| **SP-a** | **Chart + git-file ApplicationSet** | `charts/project-worker/` (+ render golden test); the ApplicationSet with the Stage-1 git-file generator + `workers.yaml`; `docs/project-worker/` gains its deploy note; docs. Proves the deploy path with **no engine/control code** — Stage-1 projects set an explicit `taskQueue` in `agents.json` (already supported since SP2), so the `proj-<project>` default isn't needed yet. |
 | SP-b | Repo-sourced generator + queue convention | `ProjectWorkerSchema` + `AgentsManifestSchema.worker?` (§6.1); the **gateway** `POST /api/v1/getparams.execute` reading repos via `ScmPort` + the read fail-safe (§6.2, §6.4); the `proj-<project>` reconciler default + the deploy↔schedule safety warning (§7, which needs the `worker` block to check against); swap the ApplicationSet to the plugin generator + read-token Secret; Mission Control surface (folds into #30's SP4 line). **Onboarding = one project PR.** |
 
 Order SP-a → SP-b. SP-a de-risks the chart/deploy path independently (no engine/control changes); SP-b makes onboarding repo-sourced and adds the queue-default convenience on a proven surface. (SP-a's `workers.yaml` is an explicit throwaway; its entries migrate into repo `worker` blocks in SP-b — §15.)
@@ -223,12 +223,12 @@ Order SP-a → SP-b. SP-a de-risks the chart/deploy path independently (no engin
 **SP-a**
 - [ ] `charts/project-worker/` renders a worker Deployment + ServiceAccount from the §4 values; render golden test proves the `taskQueue` value is honored, the mounted externals, and the *absence* of engine secrets / namespace-job / SA registration.
 - [ ] Engine CI OCI-publishes `project-worker` and bumps its chart version alongside the engine chart.
-- [ ] `agentops-platform`: the `project-workers` ApplicationSet (Stage-1 git-file generator) + `workers.yaml` + root-kustomization registration; broccoli onboarded through it end-to-end (worker polls `proj-broccoli` via an explicit `taskQueue` in its `agents.json`, its scheduled workflow runs).
-- [ ] `examples/project-worker/` gains its onboarding note.
+- [ ] `agentops-platform`: the `project-workers` ApplicationSet (Stage-1 git-file generator) + `workers.yaml` + root-kustomization registration; acme onboarded through it end-to-end (worker polls `proj-acme` via an explicit `taskQueue` in its `agents.json`, its scheduled workflow runs).
+- [ ] `docs/project-worker/` gains its onboarding note.
 - [ ] `pnpm lint && typecheck && test` green; `pnpm e2e` green.
 
 **SP-b**
-- [ ] `ProjectWorkerSchema` + `AgentsManifestSchema.worker?` in `contracts` (+ tests); `examples/project-worker/` gains its `worker` block.
+- [ ] `ProjectWorkerSchema` + `AgentsManifestSchema.worker?` in `contracts` (+ tests); `docs/project-worker/` gains its `worker` block.
 - [ ] Reconciler defaults a project workflow's queue to `proj-<project>` and warns when scheduling a custom workflow whose manifest declares no `worker` — with tests.
 - [ ] Gateway `POST /api/v1/getparams.execute` reads `agents.json` via `ScmPort` (token from the registry), returns worker specs, no secrets, bearer-token-gated, with the read fail-safe — all tested. (`control` stays encrypt-only — Option A.)
 - [ ] ApplicationSet swapped to the plugin generator + read-token Secret; onboarding a worker via a **project PR only** (no platform PR) verified on dev-agents. *(agentops-platform follow-on PR — can only land after this deploys.)*
