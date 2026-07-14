@@ -23,4 +23,16 @@ describe('DevCyclePrRepairInputSchema', () => {
     };
     expect(() => DevCyclePrRepairInputSchema.parse(input)).not.toThrow();
   });
+
+  it('accepts optional headBranch for PR repair workspace', () => {
+    const input = {
+      taskId: 't2',
+      project: 'p',
+      repo: 'o/r',
+      prRef: 'o/r#99',
+      headBranch: 'feature/fix-review',
+    };
+    const parsed = DevCyclePrRepairInputSchema.parse(input);
+    expect(parsed.headBranch).toBe('feature/fix-review');
+  });
 });

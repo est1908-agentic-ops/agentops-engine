@@ -157,16 +157,16 @@ For PRs created before this feature, `devCyclePrRepair` can post a one-time comm
 
 ## 5. Contracts & ports changes (minimal)
 
-- New `DevCyclePrRepairInput` schema + type (contracts).
+- New `DevCyclePrRepairInput` schema + type (contracts). Includes optional `headBranch` (added during impl to support prepareWorkspace targeting the PR head ref without creating an agentops/ branch; prepare falls back to fetch+worktree add origin/<head> or create).
 - Possibly a small extension to `OpenPrRequest` or the activities surface if we want to pass labels explicitly (already partially done by #93).
 - `getPrFeedback` / `PrFeedback` is already sufficient.
-- New activity or enhancement for "prepare workspace for existing PR branch" if the current prepareWorkspace isn't flexible enough.
+- Enhanced prepareWorkspace (and memory impl + api surface) to accept optional headBranch for PR repair on existing branches.
 
 ## 6. Error handling, brakes, observability
 
 - Same brakes, resume signals (`resume`, `stop`, `cancel`), budget handling as `devCycle`.
-- Same stats and stage result recording (stage names can be `pr_repair_implement`, `pr_babysit`, etc. or we reuse the normal names with a "repair" context flag).
-- State can largely reuse `DevCycleState` (it already has `prRef`, `babysitRounds`, etc.).
+- Same stats and stage result recording (reuses standard stages: 'implement', 'full_verify', 'review', 'pr', 'pr_babysit', 'done' — no invented names).
+- State reuses `DevCycleState` (typed directly; prRef etc populated).
 
 ## 7. Testing
 
