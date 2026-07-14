@@ -183,10 +183,12 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
         review: reviewKindForAction,
         diffEmpty: implOut ? implOut.trim().length === 0 : false,
         brakes: {
-          maxImplementAttempts: 5,
-          maxIterations: 20,
-          maxTokens: 100000,
-          maxBabysitRounds: 10,
+          ...{
+            maxImplementAttempts: 5,
+            maxIterations: 20,
+            maxTokens: 100000,
+            maxBabysitRounds: 10,
+          },
           ...effectiveBrakes,
         } as Brakes,
         hasEscalationModel: false,
