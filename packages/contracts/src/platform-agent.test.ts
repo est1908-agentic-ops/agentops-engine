@@ -18,9 +18,9 @@ describe('PlatformAgentInputSchema', () => {
   it('accepts hintRepos as a list of repo slugs', () => {
     const parsed = PlatformAgentInputSchema.parse({
       prompt: 'check the last failures',
-      hintRepos: ['flair-hr/agentops-engine'],
+      hintRepos: ['est1908/agentops-engine'],
     });
-    expect(parsed.hintRepos).toEqual(['flair-hr/agentops-engine']);
+    expect(parsed.hintRepos).toEqual(['est1908/agentops-engine']);
   });
 });
 
@@ -37,7 +37,7 @@ describe('PlatformSentinelSchema', () => {
       actionsTaken: [
         { type: 'terminate', workflowId: 'issue-broccoli-94', reason: 'stuck retry loop' },
       ],
-      proposedFixes: [{ repo: 'flair-hr/agentops-engine', goal: 'bound retry attempts' }],
+      proposedFixes: [{ repo: 'est1908/agentops-engine', goal: 'bound retry attempts' }],
     });
     expect(parsed.actionsTaken).toHaveLength(1);
     expect(parsed.proposedFixes).toHaveLength(1);
@@ -65,7 +65,7 @@ describe('PlatformAgentResultSchema', () => {
     const parsed = PlatformAgentResultSchema.parse({
       summary: 'opened one fix',
       childWorkflows: [
-        { workflowId: 'platform-1-fix-1', repo: 'flair-hr/agentops-engine', goal: 'bound retries' },
+        { workflowId: 'platform-1-fix-1', repo: 'est1908/agentops-engine', goal: 'bound retries' },
       ],
     });
     expect(parsed.childWorkflows).toHaveLength(1);

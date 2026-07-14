@@ -21,7 +21,7 @@ export interface PreparedWorkspace {
 }
 
 export interface Workspaces {
-  prepare(taskId: string, repo: string, initCommands?: string[]): Promise<PreparedWorkspace>;
+  prepare(taskId: string, repo: string, initCommands?: string[], headBranch?: string): Promise<PreparedWorkspace>;
   cleanup(workspaceRef: string, repo: string): Promise<void>;
   prepareScratch(taskId: string): Promise<{ workspaceRef: string }>;
   cleanupScratch(workspaceRef: string): Promise<void>;
@@ -66,28 +66,42 @@ export class WorkspaceManager implements Workspaces {
     this.commandRunner = opts.commandRunner ?? new SpawnCommandRunner();
   }
 
-  async prepare(taskId: string, repo: string, initCommands?: string[]): Promise<PreparedWorkspace> {
+  async prepare(taskId: string, repo: string, initCommands?: string[], headBranch?: string): Promise<PreparedWorkspace> {
     const git = this.resolveGit(repo);
     await mkdir(this.cacheDir, { recursive: true });
     await mkdir(this.workspacesDir, { recursive: true });
     const cachePath = join(this.cacheDir, sanitizeRepoSlug(repo));
     await this.ensureBaseClone(git, cachePath, repo);
     const baseBranch = await this.detectDefaultBranch(git, cachePath);
-    // taskId may arrive from schedule-derived workflowIds containing `:` etc.
-    // Always derive a git-branch-safe suffix (and matching workspace dir) here
-    // so `prepareWorkspace` never emits an invalid `agentops/<taskId>` branch.
-    // Legitimate callers already pass slug-safe taskIds (see slugifyProject usages
-    // in gateway, whitebox-bughunt, platform child creation); this is belt-and-suspenders.
     const safeId = slugifyProject(taskId);
-    const branch = `agentops/${safeId}`;
+    const branch = headBranch ? headBranch : `agentops/${safeId}`;
     const workspacePath = join(this.workspacesDir, safeId);
 
     await this.reclaimStaleWorktree(git, cachePath, workspacePath, branch);
 
-    const addResult = await git.run(
-      ['worktree', 'add', workspacePath, '-b', branch, `origin/${baseBranch}`],
-      { cwd: cachePath },
-    );
+    // For repair on existing PR branch (headBranch provided), try to checkout existing branch from origin
+    // instead of always creating new.
+    let addResult;
+    if (headBranch) {
+      // fetch the branch if it exists on remote
+      await git.run(['fetch', 'origin', branch], { cwd: cachePath });
+      addResult = await git.run(
+        ['worktree', 'add', workspacePath, '-B', branch, `origin/${branch}`],
+        { cwd: cachePath },
+      );
+      if (addResult.exitCode !== 0) {
+        // fallback to create
+        addResult = await git.run(
+          ['worktree', 'add', workspacePath, '-b', branch, `origin/${baseBranch}`],
+          { cwd: cachePath },
+        );
+      }
+    } else {
+      addResult = await git.run(
+        ['worktree', 'add', workspacePath, '-b', branch, `origin/${baseBranch}`],
+        { cwd: cachePath },
+      );
+    }
     if (addResult.exitCode !== 0) {
       throw new WorkspaceError(`git worktree add failed for ${repo}: ${addResult.stderr}`, addResult.spawnFailed === true);
     }
@@ -247,7 +261,11 @@ export class WorkspaceManager implements Workspaces {
         await git.run(['worktree', 'prune'], { cwd: cachePath });
       }
     }
-    await git.run(['branch', '-D', branch], { cwd: cachePath });
+    // Only force-delete synthetic agentops/* branches (or when no headBranch i.e. normal devCycle flow).
+    // For PR repair (headBranch provided) we must not delete a user feature branch ref that happens to exist in the shared cache.
+    if (!branch || branch.startsWith('agentops/')) {
+      await git.run(['branch', '-D', branch], { cwd: cachePath });
+    }
   }
 
   private async ensureBaseClone(git: GitCommandRunner, cachePath: string, repo: string): Promise<void> {

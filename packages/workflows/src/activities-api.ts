@@ -52,7 +52,7 @@ export interface DevCycleActivities {
   pushBranch(repo: string, workspaceRef: string, branch: string, contentHash: string): Promise<void>;
   recordStageResult(result: StageResultRecord): Promise<void>;
   recordRunStats(stats: RunStats): Promise<void>;
-  prepareWorkspace(req: { taskId: string; repo: string; initCommands?: string[] }): Promise<PreparedWorkspace>;
+  prepareWorkspace(req: { taskId: string; repo: string; initCommands?: string[]; headBranch?: string }): Promise<PreparedWorkspace>;
   cleanupWorkspace(workspaceRef: string, repo: string): Promise<void>;
   readWorkspaceFile(workspaceRef: string, relativePath: string): Promise<string | null>;
   createIssue(req: { repo: string; project: string; title: string; body: string; labels: string[]; dedupeFingerprint?: string }): Promise<{ ref: string; url: string; deduped: boolean }>;

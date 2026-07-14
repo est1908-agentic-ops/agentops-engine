@@ -4,7 +4,7 @@ Status: draft · 2026-07-08 · Owner: Artem
 
 ## Context
 
-`issue-broccoli-94` (`devCycle` workflow, dev-agents namespace) failed outright after the `implement` stage's `runAgent` activity exhausted all 5 Temporal retry attempts against the same error: z.ai returning `429 Your account's current usage pattern does not comply with the Fair Usage Policy...` for the `pi`/`zai/glm-5.2` call. Root-caused via `debug-devcycle-issue`: the error is a raw, untyped `ProcessCliProcessError` thrown from `pi-backend.ts`'s `parseOutput` (it re-throws pi's own `errorMessage` verbatim when a turn's `stopReason` is `error`/`aborted`), so it isn't recognized as anything special — it just retries the identical call five times over ~11.5 minutes and dies.
+`issue-acme-94` (`devCycle` workflow, dev-agents namespace) failed outright after the `implement` stage's `runAgent` activity exhausted all 5 Temporal retry attempts against the same error: z.ai returning `429 Your account's current usage pattern does not comply with the Fair Usage Policy...` for the `pi`/`zai/glm-5.2` call. Root-caused via `debug-devcycle-issue`: the error is a raw, untyped `ProcessCliProcessError` thrown from `pi-backend.ts`'s `parseOutput` (it re-throws pi's own `errorMessage` verbatim when a turn's `stopReason` is `error`/`aborted`), so it isn't recognized as anything special — it just retries the identical call five times over ~11.5 minutes and dies.
 
 Two independent gaps surfaced investigating this:
 
@@ -80,7 +80,7 @@ export class RateLimitFallbackBackend implements AgentBackend {
 
 One retry against the fallback model, same backend instance (so `pi`'s own `openrouter` provider routing handles auth via the `OPENROUTER_API_KEY` already present in the `pi-credentials` secret — confirmed live on `agentops-platform`'s `main`, no provisioning needed). If the fallback also throws, or none is configured, the original (or fallback's) error propagates untouched into the same generic path every other backend error already takes in `create-activities.ts` — no new `ApplicationFailure` type. Temporal's existing `maximumAttempts: 5` + default backoff on `agentActivities` then retries the *whole* activity, which tries primary-then-fallback again each time — bounded, no new bookkeeping.
 
-The heartbeat is the "Temporal warning" — visible live in Pending Activities while the workflow is open. The paired `console.warn` exists because heartbeat/pending-activity detail is ephemeral (gone once the workflow closes, per `debug-devcycle-issue`'s documented limitation) — this incident would not have been fully diagnosable from heartbeat alone once `issue-broccoli-94` was already closed; the log line lands in Loki via the existing stdout pipeline and survives.
+The heartbeat is the "Temporal warning" — visible live in Pending Activities while the workflow is open. The paired `console.warn` exists because heartbeat/pending-activity detail is ephemeral (gone once the workflow closes, per `debug-devcycle-issue`'s documented limitation) — this incident would not have been fully diagnosable from heartbeat alone once `issue-acme-94` was already closed; the log line lands in Loki via the existing stdout pipeline and survives.
 
 ### Wiring: `packages/worker/src/main.ts`
 

@@ -73,7 +73,7 @@ agentops/
 
 Project CI builds a worker image; ArgoCD runs it as a normal Deployment (in a shared `proj` namespace) on the project's own task queue. **Adding/changing a project workflow = the project rebuilds its own worker; the engine image is untouched.** Config-only (Tier 1) projects still need no worker of their own.
 
-The **reference implementation** — the §8-of-master Rollbar monitor — lives in-repo at `examples/project-worker/` and doubles as the cross-worker e2e fixture (§13). It exercises: an own `rollbarFetch` activity (its own secret) + a durable cursor + `continueAsNew` (a `"continuous"` agent); per finding, `engineAgent().runAgent(investigate)` then `engineActivities().createIssue({ labels:['bug'], dedupeFingerprint })`; and `childDevCycle()`.
+The **reference implementation** — the §8-of-master Rollbar monitor — lives in-repo at `docs/project-worker/` and doubles as the cross-worker e2e fixture (§13). It exercises: an own `rollbarFetch` activity (its own secret) + a durable cursor + `continueAsNew` (a `"continuous"` agent); per finding, `engineActivities().createIssue({ labels:['bug'], dedupeFingerprint })`; and optional `childDevCycle()`.
 
 ## 6. Activity routing & child workflows
 
@@ -146,7 +146,7 @@ A baked-in agent-runner skill (the re-homed DSL-authoring request, now aimed at 
 - add the `agents.json` entry (`continuous` or scheduled, with `taskQueue`);
 - add the deploy manifest (a normal Deployment in the shared `proj` namespace, mounting only Temporal connection config + the project's own externals — **no engine secrets**).
 
-It points at the in-repo `examples/project-worker/` reference.
+It points at the in-repo `docs/project-worker/` reference.
 
 ## 12. Contract & vocabulary changes (summary)
 
@@ -165,7 +165,7 @@ It points at the in-repo `examples/project-worker/` reference.
 ## 13. Testing strategy
 
 - **Unit.** `satisfies EngineActivities` compile assertion; interceptor propagation (header set from `workflowInfo().memo`; child inherits memo/search-attr/header); authz guard (repo∈project pass / mismatch → `ProjectAuthorizationError`); `reconcileAgents` continuous diff (start missing / terminate orphaned) and the new `taskQueue` re-point; project-prompt `promptSource` string.
-- **e2e (stub backend, `@temporalio/testing`).** The `examples/project-worker` reference worker on its own queue + the engine worker on `ENGINE_QUEUE` in a shared test namespace. Assert: (a) a Tier-2 workflow's `engineActivities().createIssue` and `childDevCycle()` cross worker boundaries correctly; (b) a workflow stamped with a mismatched `project` is rejected with `ProjectAuthorizationError` before any SCM token is used; (c) starting a `continuous` singleton twice is idempotent (`WorkflowExecutionAlreadyStarted`).
+- **e2e (stub backend, `@temporalio/testing`).** The `docs/project-worker` reference worker on its own queue + the engine worker on `ENGINE_QUEUE` in a shared test namespace. Assert: (a) a Tier-2 workflow's `engineActivities().createIssue` and `childDevCycle()` cross worker boundaries correctly; (b) a workflow stamped with a mismatched `project` is rejected with `ProjectAuthorizationError` before any SCM token is used; (c) starting a `continuous` singleton twice is idempotent (`WorkflowExecutionAlreadyStarted`).
 - **Package.** `pnpm pack` the SDK → install the tarball into a throwaway consumer → typecheck against **both** entry points (proves bundling, peer-dep resolution, and `.d.ts` correctness — not just the in-workspace path).
 - **Publish.** `npm publish --access public` for `@agentic-ops/engine-sdk` (the one outward, irreversible action; performed once the tarball check is green).
 - **Green bar.** `pnpm lint && pnpm typecheck && pnpm test`; `pnpm e2e` (touches workflows/policies/activities/backends).
@@ -183,7 +183,7 @@ It points at the in-repo `examples/project-worker/` reference.
 
 **Phase B**
 - [ ] `@agentic-ops/engine-sdk` builds with tsup (ESM+CJS+`.d.ts`), dual entry, peer-dep `@temporalio/*`, self-contained; tarball-install typecheck green.
-- [ ] `examples/project-worker` reference worker (Rollbar monitor) + cross-worker e2e (delegation, authz-reject, continuous-idempotency) green.
+- [ ] `docs/project-worker` reference worker (Rollbar monitor) + cross-worker e2e (delegation, authz-reject, continuous-idempotency) green.
 - [ ] `@agentic-ops/engine-sdk` published to public npm.
 - [ ] "Author a project workflow" agent-runner skill.
 - [ ] `pnpm lint && typecheck && test` green; `pnpm e2e` green; specs updated if implementation deviates.

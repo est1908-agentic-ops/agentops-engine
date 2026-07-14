@@ -1,6 +1,7 @@
 import { Client, Connection } from '@temporalio/client';
 import { loadEnv, PostgresManagedProjectStore, SpawnGitCommandRunner, type ManagedProjectRegistryDeps } from '@agentops/activities';
 import type { ResolvedProjectEntry } from '@agentops/contracts';
+import { DEFAULT_TRIGGER_LABEL } from '@agentops/contracts';
 import { createGithubPorts } from '@agentops/ports';
 import { Pool } from 'pg';
 import { createGatewayServer } from './create-gateway-server';
@@ -72,7 +73,7 @@ async function main(): Promise<void> {
     client,
     taskQueue: TASK_QUEUE,
     webhookSecret,
-    triggerLabel: process.env.TRIGGER_LABEL ?? 'agentops',
+    triggerLabel: process.env.TRIGGER_LABEL ?? DEFAULT_TRIGGER_LABEL,
     buildScm,
     managedProjectDeps,
     linearWebhookSecret,

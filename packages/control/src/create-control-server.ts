@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { URL } from 'node:url';
 import { WorkflowExecutionAlreadyStartedError, type Client } from '@temporalio/client';
@@ -152,15 +152,37 @@ function isProjectCrudEnabled(deps: ControlDeps): boolean {
   return Boolean(deps.managedProjectStore && deps.projectCredentialPublicKey && deps.projectCrudAuthToken);
 }
 
+function constantTimeTokenEqual(
+  configured: string | undefined,
+  provided: string | string[] | undefined,
+): boolean {
+  // Defend against timing side-channels: measure the time taken to reject a wrong
+  // token should not correlate with how many leading bytes were correct. Use
+  // crypto.timingSafeEqual (constant-time) instead of === (short-circuits at first
+  // differing byte). Also fail-closed when configured token is absent.
+  if (!configured) {
+    return false;
+  }
+  if (typeof provided !== 'string') {
+    return false;
+  }
+  const configuredBuf = Buffer.from(configured, 'utf-8');
+  const providedBuf = Buffer.from(provided, 'utf-8');
+  if (configuredBuf.length !== providedBuf.length) {
+    return false;
+  }
+  return timingSafeEqual(configuredBuf, providedBuf);
+}
+
 function authorizeProjectCrud(deps: ControlDeps, req: IncomingMessage): boolean {
   // X-Control-Crud-Token (not Authorization): Traefik basic-auth on the control
   // ingress consumes the Authorization header, so the CRUD bearer token uses a
   // custom header to avoid collision. Works with or without basic-auth in front.
-  return req.headers['x-control-crud-token'] === deps.projectCrudAuthToken;
+  return constantTimeTokenEqual(deps.projectCrudAuthToken, req.headers['x-control-crud-token']);
 }
 
 function authorizeControlToken(deps: ControlDeps, req: IncomingMessage): boolean {
-  return Boolean(deps.projectCrudAuthToken) && req.headers['x-control-crud-token'] === deps.projectCrudAuthToken;
+  return constantTimeTokenEqual(deps.projectCrudAuthToken, req.headers['x-control-crud-token']);
 }
 
 async function handleListProjects(deps: ControlDeps): Promise<HandlerResponse> {

@@ -12,6 +12,7 @@ describe('PromptPack', () => {
       goal: 'add a widget',
       fullVerifyFindings: '',
       reviewFindings: '',
+      prReviewFeedback: '',
     });
     expect(rendered).toContain('Task t1');
     expect(rendered).toContain('add a widget');
@@ -23,10 +24,11 @@ describe('PromptPack', () => {
     expect(() => pack.render('assess.md', { taskId: 't1', goal: 'g' })).not.toThrow();
     expect(() => pack.render('design.md', { taskId: 't1', goal: 'g' })).not.toThrow();
     expect(() => pack.render('plan.md', { taskId: 't1', goal: 'g' })).not.toThrow();
-    const impl = pack.render('implement.md', { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '' });
+    const impl = pack.render('implement.md', { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' });
     expect(impl).toContain('Task t1');
     expect(impl).toContain('docs/superpowers/specs/t1-design.md');
     expect(impl).toContain('docs/superpowers/plans/t1-plan.md');
+    expect(impl).toContain('Unresolved PR review comments to address');
     expect(() => pack.render('full_verify.md', { taskId: 't1', goal: 'g', verifyCommands: '' })).not.toThrow();
     expect(() => pack.render('review.md', { taskId: 't1', goal: 'g' })).not.toThrow();
   });

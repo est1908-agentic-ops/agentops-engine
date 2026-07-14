@@ -6,7 +6,7 @@ Resolves: #27 (Generic cross-backend, stage-aware fallback for agent runs).
 
 ## Context
 
-`issue-broccoli-94` (`devCycle`, `dev-agents` namespace) died when the Claude subscription session cap hit:
+`issue-acme-94` (`devCycle`, `dev-agents` namespace) died when the Claude subscription session cap hit:
 
 ```
 claude reported is_error: You've hit your session limit · resets 9:30am (UTC)

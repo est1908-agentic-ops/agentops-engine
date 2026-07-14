@@ -39,10 +39,10 @@ const workerManifest = (image: string) =>
 describe('createProjectWorkerParamsProvider', () => {
   it('returns one param per project with a worker block, defaulting queue + replicas', async () => {
     const { publicKey, privateKey } = generateManagedProjectKeyPair();
-    const deps = fakeRegistryDeps(privateKey, [{ project: 'broccoli', repo: 'broccoli/web', encryptedToken: encryptForManagedProject(publicKey, 't') }]);
-    const provider = createProjectWorkerParamsProvider({ managedProjectDeps: deps, buildScm: scmFactory(() => workerManifest('reg/broccoli/agentops-worker:abc')) });
+    const deps = fakeRegistryDeps(privateKey, [{ project: 'acme', repo: 'acme/web', encryptedToken: encryptForManagedProject(publicKey, 't') }]);
+    const provider = createProjectWorkerParamsProvider({ managedProjectDeps: deps, buildScm: scmFactory(() => workerManifest('reg/acme/agentops-worker:abc')) });
     expect(await provider.getParams()).toEqual([
-      { project: 'broccoli', image: 'reg/broccoli/agentops-worker:abc', taskQueue: 'proj-broccoli', replicas: '1', externalSecretRefs: '["rollbar-token"]' },
+      { project: 'acme', image: 'reg/acme/agentops-worker:abc', taskQueue: 'proj-acme', replicas: '1', externalSecretRefs: '["rollbar-token"]' },
     ]);
   });
 
@@ -63,13 +63,13 @@ describe('createProjectWorkerParamsProvider', () => {
 
   it('emits externalSecretRefs "[]" when the worker block declares no externalSecrets', async () => {
     const { publicKey, privateKey } = generateManagedProjectKeyPair();
-    const deps = fakeRegistryDeps(privateKey, [{ project: 'broccoli', repo: 'broccoli/web', encryptedToken: encryptForManagedProject(publicKey, 't') }]);
+    const deps = fakeRegistryDeps(privateKey, [{ project: 'acme', repo: 'acme/web', encryptedToken: encryptForManagedProject(publicKey, 't') }]);
     const provider = createProjectWorkerParamsProvider({
       managedProjectDeps: deps,
       buildScm: scmFactory(() => JSON.stringify({ agents: [], worker: { image: 'reg/w:abc' } })),
     });
     expect(await provider.getParams()).toEqual([
-      { project: 'broccoli', image: 'reg/w:abc', taskQueue: 'proj-broccoli', replicas: '1', externalSecretRefs: '[]' },
+      { project: 'acme', image: 'reg/w:abc', taskQueue: 'proj-acme', replicas: '1', externalSecretRefs: '[]' },
     ]);
   });
 
@@ -90,13 +90,13 @@ describe('createProjectWorkerParamsProvider', () => {
 
   it('serves last-good on a transient read failure (never prunes a live worker)', async () => {
     const { publicKey, privateKey } = generateManagedProjectKeyPair();
-    const deps = fakeRegistryDeps(privateKey, [{ project: 'broccoli', repo: 'broccoli/web', encryptedToken: encryptForManagedProject(publicKey, 't') }]);
+    const deps = fakeRegistryDeps(privateKey, [{ project: 'acme', repo: 'acme/web', encryptedToken: encryptForManagedProject(publicKey, 't') }]);
     let fail = false;
     const provider = createProjectWorkerParamsProvider({
       managedProjectDeps: deps,
       buildScm: scmFactory(() => {
         if (fail) throw new Error('GitHub 503');
-        return workerManifest('reg/broccoli/agentops-worker:abc');
+        return workerManifest('reg/acme/agentops-worker:abc');
       }),
     });
     const first = await provider.getParams();
@@ -108,11 +108,11 @@ describe('createProjectWorkerParamsProvider', () => {
 
   it('drops a worker when its manifest removes the block (a real, successful read)', async () => {
     const { publicKey, privateKey } = generateManagedProjectKeyPair();
-    const deps = fakeRegistryDeps(privateKey, [{ project: 'broccoli', repo: 'broccoli/web', encryptedToken: encryptForManagedProject(publicKey, 't') }]);
+    const deps = fakeRegistryDeps(privateKey, [{ project: 'acme', repo: 'acme/web', encryptedToken: encryptForManagedProject(publicKey, 't') }]);
     let removed = false;
     const provider = createProjectWorkerParamsProvider({
       managedProjectDeps: deps,
-      buildScm: scmFactory(() => (removed ? JSON.stringify({ agents: [] }) : workerManifest('reg/broccoli/agentops-worker:abc'))),
+      buildScm: scmFactory(() => (removed ? JSON.stringify({ agents: [] }) : workerManifest('reg/acme/agentops-worker:abc'))),
     });
     expect(await provider.getParams()).toHaveLength(1);
     removed = true;
@@ -124,7 +124,7 @@ describe('createGatewayServer ArgoCD getparams route', () => {
   let server: ReturnType<typeof createGatewayServer>;
   let port: number;
 
-  const param = { project: 'broccoli', image: 'reg/w:abc', taskQueue: 'proj-broccoli', replicas: '1' };
+  const param = { project: 'acme', image: 'reg/w:abc', taskQueue: 'proj-acme', replicas: '1' };
   const stubProvider: ProjectWorkerParamsProvider = { getParams: vi.fn().mockResolvedValue([param]) };
 
   function boot(over: Partial<GatewayDeps>): Promise<void> {
