@@ -1,5 +1,6 @@
 import type { Client } from '@temporalio/client';
 import { WorkflowExecutionAlreadyStartedError, WorkflowIdReusePolicy } from '@temporalio/client';
+import { slugifyProject } from '@agentops/policies';
 import { devCyclePrRepair } from '@agentops/workflows';
 import type { DevCyclePrRepairInput, ProjectConfig } from '@agentops/contracts';
 import type { PrReviewEvent } from './parse-pr-review-event';
@@ -16,7 +17,8 @@ export async function startDevCyclePrRepair(
   reviewEvent: PrReviewEvent,
   config?: ProjectConfig,
 ): Promise<StartDevCyclePrRepairResult> {
-  const taskId = `pr-repair-${reviewEvent.repo.replace('/', '-')}-${reviewEvent.prRef.split('#')[1]}`;
+  const safeProject = slugifyProject(project);
+  const taskId = `pr-repair-${safeProject}-${reviewEvent.prRef.split('#')[1]}`;
   const workflowId = `devCyclePrRepair-${reviewEvent.prRef.replace('/', '-').replace('#', '-')}`;
 
   const input: DevCyclePrRepairInput = {
