@@ -86,7 +86,7 @@ export class WorkspaceManager implements Workspaces {
       // fetch the branch if it exists on remote
       await git.run(['fetch', 'origin', branch], { cwd: cachePath });
       addResult = await git.run(
-        ['worktree', 'add', workspacePath, `origin/${branch}`],
+        ['worktree', 'add', workspacePath, '-B', branch, `origin/${branch}`],
         { cwd: cachePath },
       );
       if (addResult.exitCode !== 0) {
@@ -261,7 +261,11 @@ export class WorkspaceManager implements Workspaces {
         await git.run(['worktree', 'prune'], { cwd: cachePath });
       }
     }
-    await git.run(['branch', '-D', branch], { cwd: cachePath });
+    // Only force-delete synthetic agentops/* branches (or when no headBranch i.e. normal devCycle flow).
+    // For PR repair (headBranch provided) we must not delete a user feature branch ref that happens to exist in the shared cache.
+    if (!branch || branch.startsWith('agentops/')) {
+      await git.run(['branch', '-D', branch], { cwd: cachePath });
+    }
   }
 
   private async ensureBaseClone(git: GitCommandRunner, cachePath: string, repo: string): Promise<void> {
