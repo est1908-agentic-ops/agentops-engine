@@ -50,6 +50,34 @@ export async function handleGetBudgets(deps: BudgetsRouteDeps): Promise<HandlerR
     }
   }
 
+  // Aggregate Claude usage
+  const claudeRows = rows.filter(
+    (r) => r.backend === 'claude' || r.model.toLowerCase().startsWith('claude'),
+  );
+
+  let claudeTotalTokens = 0;
+  let claudeTokensIn = 0;
+  let claudeTokensOut = 0;
+  const claudeByModel: Record<string, { tokens: number; calls: number }> = {};
+  for (const r of claudeRows) {
+    const tin = r.tokensIn ?? 0;
+    const tout = r.tokensOut ?? 0;
+    const t = tin + tout;
+    claudeTotalTokens += t;
+    claudeTokensIn += tin;
+    claudeTokensOut += tout;
+    if (!claudeByModel[r.model]) {
+      claudeByModel[r.model] = { tokens: 0, calls: 0 };
+    }
+    claudeByModel[r.model].tokens += t;
+    claudeByModel[r.model].calls += 1;
+  }
+
+  const claudeModelBreakdown = Object.entries(claudeByModel)
+    .map(([model, { tokens, calls }]) => ({ model, tokens, calls }))
+    .sort((a, b) => b.tokens - a.tokens);
+
+  // Aggregate OpenRouter spend
   const orRows = rows.filter((r) => r.model.toLowerCase().includes('openrouter'));
 
   let totalTokens = 0;
@@ -71,6 +99,15 @@ export async function handleGetBudgets(deps: BudgetsRouteDeps): Promise<HandlerR
 
   const body = {
     rateWindows,
+    claude: {
+      totalTokens: claudeTotalTokens,
+      tokensIn: claudeTokensIn,
+      tokensOut: claudeTokensOut,
+      calls: claudeRows.length,
+      period:
+        rows.length > 0 ? 'from agent_run_stats (all recorded runs)' : 'no data yet',
+      modelBreakdown: claudeModelBreakdown,
+    },
     openRouter: {
       estimatedUsd: Number(estimatedUsd.toFixed(6)),
       totalTokens,

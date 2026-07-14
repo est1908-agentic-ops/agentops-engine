@@ -30,6 +30,7 @@ export function BudgetsPage() {
   }, [refresh]);
 
   const rw = data?.rateWindows;
+  const cl = data?.claude;
   const or = data?.openRouter;
 
   return (
@@ -46,7 +47,7 @@ export function BudgetsPage() {
         </Button>
       </div>
       <p className="mb-4 text-sm text-muted-foreground">
-        Configured subscription rate windows and estimated spend for OpenRouter (derived from recorded run stats).
+        Configured subscription rate windows, Claude usage, and estimated spend for OpenRouter (derived from recorded run stats).
         Live window utilization and direct provider account data are tracked separately.
       </p>
 
@@ -84,6 +85,53 @@ export function BudgetsPage() {
             </div>
             <p className="mt-2 text-xs text-muted-foreground">
               These are the static configuration values. Current in-window usage count is not yet exposed.
+            </p>
+          </div>
+
+          {/* Claude usage */}
+          <div>
+            <h2 className="mb-2 text-lg font-semibold">Claude usage (recorded runs)</h2>
+            <Card>
+              <CardContent className="pt-4">
+                <div className="mb-3 text-2xl font-semibold">
+                  {cl ? cl.totalTokens : '0'}
+                  <span className="ml-2 text-sm font-normal text-muted-foreground">tokens</span>
+                </div>
+                <div className="text-sm text-muted-foreground">
+                  {cl?.period} — {cl?.calls ?? 0} calls
+                </div>
+
+                {cl && cl.modelBreakdown.length > 0 && (
+                  <div className="mt-4">
+                    <div className="mb-1 text-xs uppercase tracking-wide text-muted-foreground">By model</div>
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead>Model</TableHead>
+                          <TableHead className="text-right">Tokens</TableHead>
+                          <TableHead className="text-right">Calls</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {cl.modelBreakdown.map((row) => (
+                          <TableRow key={row.model}>
+                            <TableCell className="font-mono text-xs">{row.model}</TableCell>
+                            <TableCell className="text-right">{row.tokens}</TableCell>
+                            <TableCell className="text-right">{row.calls}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                )}
+
+                {cl && cl.modelBreakdown.length === 0 && (
+                  <div className="mt-2 text-sm text-muted-foreground">No Claude runs recorded yet.</div>
+                )}
+              </CardContent>
+            </Card>
+            <p className="mt-2 text-xs text-muted-foreground">
+              These are recorded platform runs (from Claude CLI usage output), not authoritative provider-account figures.
             </p>
           </div>
 
