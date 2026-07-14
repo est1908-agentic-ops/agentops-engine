@@ -161,7 +161,10 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
       state.iterations += 1;
 
       state.stage = 'full_verify';
-      const fullVerifyOutput = await runStageAgent('full_verify', implementAttempt);
+      const verifyCommands =
+        [...(config?.fastVerifyCommands ?? []), ...(config?.fullVerifyCommands ?? [])].join('\n') ||
+        '(none configured — use your own judgment on the diff)';
+      const fullVerifyOutput = await runStageAgent('full_verify', implementAttempt, { verifyCommands });
       const fvParsed = parseVerdict(fullVerifyOutput, 'FULL:');
       lastFullVerify = fullVerifyOutput;
 
