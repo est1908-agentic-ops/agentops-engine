@@ -43,6 +43,7 @@ export type { DevCycleState } from '@agentops/contracts';
 
 const MAX_VERDICT_CALLS = 2;
 const DEFAULT_BABYSIT_POLL_MS = 5000;
+const MAX_PR_TITLE_LENGTH = 256;
 // Cap on consecutive no-progress babysit polls before blocking for a human. A
 // `waiting` round never advances `maxBabysitRounds` (only `actionable` repair
 // rounds do), so a PR whose CI never resolves -- e.g. GitHub Actions checks the
@@ -395,7 +396,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     const { prRef } = await activities.openPr({
       repo: input.repo,
       branch: state.branch,
-      title: input.goal,
+      title: buildPrTitle(input.goal),
       body: prBody,
       labels: issueLabels.length > 0 ? issueLabels : undefined,
     });
@@ -504,6 +505,28 @@ function extractBrainstormSummary(design: string | null): string {
   const end = rest.indexOf('\n## ');
   const body = (end === -1 ? rest : rest.slice(0, end)).trim();
   return body || '(empty summary)';
+}
+
+/** Pure helper: derive a GitHub-safe PR title from a goal. Ensures title <= 256 chars. */
+function buildPrTitle(goal: string): string {
+  const firstLine = goal.split(/\r?\n/)[0].trim();
+
+  if (firstLine.length <= MAX_PR_TITLE_LENGTH) {
+    return firstLine;
+  }
+
+  const maxTitleContent = MAX_PR_TITLE_LENGTH - 1;
+  const truncated = firstLine.slice(0, maxTitleContent);
+  const lastSpace = truncated.lastIndexOf(' ');
+
+  let title: string;
+  if (lastSpace > 0) {
+    title = truncated.slice(0, lastSpace);
+  } else {
+    title = truncated;
+  }
+
+  return title + '…';
 }
 
 interface BuildPrBodyInput {

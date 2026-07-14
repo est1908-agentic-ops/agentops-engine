@@ -463,12 +463,13 @@ export function createActivities(deps: ActivityDependencies) {
           // The real ScheduleHandle.update() (unlike .create()) takes an updater
           // function -- (previous) => newSchedule -- not a plain options object.
           // deps.scheduleClient is `tc.schedule as unknown as ScheduleClientLike`
-          // (see worker/src/main.ts), so passing an object here type-checks but
-          // throws at runtime ("updateFn is not a function"), silently eaten by
-          // the .catch below -- every reconcile "succeeds" while the schedule's
-          // taskQueue/spec never actually changes on the server.
+          // (see worker/src/main.ts:453), so the updater must return a flat
+          // ScheduleUpdateOpts object (action, spec, memo, searchAttributes — no
+          // nested schedule wrapper). The updater is best-effort; a single schedule's
+          // update failure is caught and doesn't abort the reconcile sweep.
           await h.update?.(() => ({
-            schedule: { spec: cronScheduleSpec(spec.schedule, spec.timezone), action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: actionQueue, memo, searchAttributes } },
+            action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: actionQueue, memo, searchAttributes },
+            spec: cronScheduleSpec(spec.schedule, spec.timezone),
             memo,
             searchAttributes,
           }))?.catch(() => {});

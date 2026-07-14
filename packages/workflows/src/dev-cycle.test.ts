@@ -129,4 +129,35 @@ describe('devCycle agent:working label lifecycle', () => {
       }),
     );
   });
+
+  it('truncates very long goals to fit GitHub PR title limit (256 chars)', async () => {
+    const longGoal = 'lorem ipsum '.repeat(50);
+    await devCycle({
+      taskId: 't',
+      project: 'p',
+      repo: 'o/r',
+      issueRef: 'o/r#5',
+      goal: longGoal,
+      config,
+    });
+    const call = vi.mocked(openPr).mock.calls.at(-1)?.[0];
+    expect(call).toBeDefined();
+    expect(call!.title.length).toBeLessThanOrEqual(256);
+    expect(call!.title).toContain('…');
+  });
+
+  it('passes short goals through to openPr title unchanged', async () => {
+    const shortGoal = 'fix typo in readme';
+    await devCycle({
+      taskId: 't',
+      project: 'p',
+      repo: 'o/r',
+      issueRef: 'o/r#5',
+      goal: shortGoal,
+      config,
+    });
+    const call = vi.mocked(openPr).mock.calls.at(-1)?.[0];
+    expect(call).toBeDefined();
+    expect(call!.title).toBe(shortGoal);
+  });
 });

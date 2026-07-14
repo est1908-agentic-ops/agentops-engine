@@ -846,7 +846,7 @@ describe('createActivities — resolveRepoConfig', () => {
     // so an already-existing schedule's stale taskQueue (e.g. an unslugified
     // project name) could never actually be corrected by reconcile.
     const update = vi.fn(async (updateFn: (previous: unknown) => unknown) => {
-      update.lastResult = await updateFn({ schedule: { action: { taskQueue: 'proj-Artem private agents' } } });
+      update.lastResult = await updateFn({ action: { taskQueue: 'proj-Artem private agents' }, spec: { cronExpressions: ['0 */2 * * *'], timezone: 'UTC' } });
     }) as any;
     const getHandle = vi.fn(() => ({ update }));
     const deps = {
@@ -864,7 +864,7 @@ describe('createActivities — resolveRepoConfig', () => {
     expect(getHandle).toHaveBeenCalledWith('agent:Artem private agents:gdebenz-watch');
     expect(update).toHaveBeenCalledTimes(1);
     expect(typeof update.mock.calls[0][0]).toBe('function');
-    expect(update.lastResult.schedule.action.taskQueue).toBe('proj-artem-private-agents');
+    expect(update.lastResult.action.taskQueue).toBe('proj-artem-private-agents');
   });
 
   it('startContinuousAgent starts a singleton by deterministic id with identity + taskQueue, tolerating AlreadyStarted', async () => {
