@@ -851,6 +851,18 @@ describe('createControlServer managed-project CRUD', () => {
     expect((await getJsonWithHeaders(port, '/api/projects', { 'x-control-crud-token': 'wrong' })).status).toBe(401);
   });
 
+  it('returns 401 with a wrong token of the same length as the configured token', async () => {
+    await listen();
+    const wrongSameLength = 'crud-secXet'; // same length as 'crud-secret'
+    expect((await getJsonWithHeaders(port, '/api/projects', { 'x-control-crud-token': wrongSameLength })).status).toBe(401);
+  });
+
+  it('returns 401 with a wrong token of a different length than the configured token', async () => {
+    await listen();
+    const wrongDiffLength = 'short'; // different length from 'crud-secret'
+    expect((await getJsonWithHeaders(port, '/api/projects', { 'x-control-crud-token': wrongDiffLength })).status).toBe(401);
+  });
+
   it('returns 503 when CRUD is not configured (no auth token)', async () => {
     delete deps.projectCrudAuthToken;
     await listen();
@@ -917,6 +929,25 @@ describe('createControlServer agents API', () => {
     });
     expect(ok.status).toBe(202);
     expect(trigger).toHaveBeenCalled();
+  });
+
+  it('POST /api/agents/:id/run returns 401 with no token when CRUD token is unconfigured (fail-closed regression)', async () => {
+    delete deps.projectCrudAuthToken;
+    const server2 = createControlServer(deps);
+    const port2 = await new Promise<number>((resolve) => {
+      server2.listen(0, () => {
+        resolve(((server2.address() as AddressInfo).port));
+      });
+    });
+
+    try {
+      const res = await fetch(`http://127.0.0.1:${port2}/api/agents/${encodeURIComponent('agent:acme:nb')}/run`, {
+        method: 'POST',
+      });
+      expect(res.status).toBe(401);
+    } finally {
+      server2.close();
+    }
   });
 });
 
