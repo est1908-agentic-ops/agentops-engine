@@ -12,9 +12,11 @@ import type { ProjectWorkerParamsProvider } from './argocd-project-workers';
 import { matchesLinearTriggerLabel, parseLinearIssueEvent } from './parse-linear-issue-event';
 import { parseIssueTriggerEvent } from './parse-issue-labeled';
 import { parsePushEvent } from './parse-push-event';
+import { parsePrReviewEvent } from './parse-pr-review-event';
 import { startConfigSync } from './start-config-sync';
 import { startDevCycleForLinearIssue } from './start-dev-cycle-for-linear-issue';
 import { startDevCycleForIssue } from './start-dev-cycle';
+import { startDevCyclePrRepair } from './start-dev-cycle-pr-repair';  // added
 import { isFreshLinearWebhook, verifyLinearSignature } from './verify-linear-signature';
 import { verifyGithubSignature } from './verify-signature';
 import { verifyBearerToken } from './verify-bearer-token';
@@ -156,6 +158,30 @@ async function handleGithubWebhook(deps: GatewayDeps, req: IncomingMessage, res:
     } catch (err) {
       console.error('gateway: failed to start configSync from push webhook', err);
       res.writeHead(500).end('failed to start configSync');
+    }
+    return;
+  }
+
+  const reviewEvent = parsePrReviewEvent(eventType, payload);
+  if (reviewEvent) {
+    if (!reviewEvent.hasAgentopsLabel) {
+      res.writeHead(204).end();
+      return;
+    }
+    const entry = await resolveManagedProjectEntry(deps.managedProjectDeps, reviewEvent.repo);
+    if (!entry) {
+      res.writeHead(202).end('no project registered');
+      return;
+    }
+    try {
+      const scm = deps.buildScm(entry);
+      const config = await resolveProjectConfig(deps.managedProjectDeps, scm, entry.repo);
+      const result = await startDevCyclePrRepair(deps.client, deps.taskQueue, entry.project, reviewEvent, config);
+      console.log(`gateway: ${result.started ? 'started' : 'already running'} devCyclePrRepair ${result.taskId} for ${reviewEvent.prRef}`);
+      res.writeHead(202).end(JSON.stringify(result));
+    } catch (err) {
+      console.error('gateway: failed to start pr repair', err);
+      res.writeHead(500).end('failed to start repair');
     }
     return;
   }
