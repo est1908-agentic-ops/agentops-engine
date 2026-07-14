@@ -7,7 +7,6 @@ import {
   proxyActivities,
   setHandler,
   sleep,
-  workflowInfo,
 } from '@temporalio/workflow';
 import type { DevCyclePrRepairInput, ProjectConfig } from '@agentops/contracts';
 import { babysitDecision, nextRepairAction, feedbackHash } from '@agentops/policies';
@@ -28,7 +27,7 @@ const agentActivities = proxyActivities<Pick<DevCycleActivities, 'runAgent'>>({
 export const stopSignal = defineSignal('stop');
 export const cancelSignal = defineSignal('cancel');
 export const resumeSignal = defineSignal('resume');
-export const stateQuery = defineQuery<any>('state'); // reuse/extend DevCycleState shape in real impl
+export const stateQuery = defineQuery<unknown>('state'); // reuse/extend DevCycleState shape in real impl
 
 const DEFAULT_BABYSIT_POLL_MS = 5000;
 const MAX_BABYSIT_WAITS = 240; // ~20min
@@ -43,8 +42,8 @@ function isBudgetExceededFailure(err: unknown): boolean {
   );
 }
 
-export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<any> {
-  const state: any = {
+export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<unknown> {
+  const state: Record<string, unknown> = {
     taskId: input.taskId,
     stage: 'pr_repair',
     status: 'running',
@@ -59,10 +58,10 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<an
   };
 
   let cancelled = false;
-  let stopRequested = false;
-  let effectiveBrakes: any = { maxBabysitRounds: 10, maxIterations: 20 }; // defaults; override with config
+  let _stopRequested = false;
+  let effectiveBrakes: Record<string, unknown> = { maxBabysitRounds: 10, maxIterations: 20 }; // defaults; override with config
 
-  setHandler(stopSignal, () => { stopRequested = true; });
+  setHandler(stopSignal, () => { _stopRequested = true; });
   setHandler(cancelSignal, () => { cancelled = true; });
   setHandler(resumeSignal, () => {
     state.status = 'running';
@@ -85,7 +84,7 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<an
     return cancelled;
   };
 
-  const runStageAgent = async (stage: any, attempt: number, extraContext: Record<string, unknown> = {}) => {
+  const runStageAgent = async (stage: string, attempt: number, extraContext: Record<string, unknown> = {}) => {
     // Simplified — in full impl use the exact routing + budget handling from dev-cycle
     let result;
     while (true) {
@@ -134,7 +133,7 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<an
 
     while (true) {
       state.stage = 'pr_repair_implement';
-      const implOut = await runStageAgent('implement', implementAttempt, {
+      await runStageAgent('implement', implementAttempt, {
         fullVerifyFindings: lastFullVerify,
         reviewFindings: lastReview,
       });
@@ -151,14 +150,14 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<an
 
       const action = nextRepairAction({
         implementAttempts: implementAttempt,
-        iterations: state.iterations,
-        cumulativeTokens: state.cumulativeTokens,
+        iterations: state.iterations as number,
+        cumulativeTokens: state.cumulativeTokens as number,
         fullVerify: 'pass', // simplified
         review: 'pass',
         diffEmpty: false,
-        brakes: effectiveBrakes,
+        brakes: effectiveBrakes as any, // brakes shape from config
         hasEscalationModel: false,
-      } as any);
+      });
 
       if (action.kind === 'continue' || action.kind === 'open-pr-exhausted') break;
       implementAttempt += 1;
@@ -205,14 +204,14 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<an
 
     state.stage = 'done';
     state.status = 'done';
-    await activities.cleanupWorkspace(state.workspaceRef, input.repo);
+    await activities.cleanupWorkspace(state.workspaceRef as string, input.repo);
     return state;
 
   } catch (err) {
     if (!(err instanceof RepairCancelledError)) throw err;
     state.stage = 'failed';
     state.status = 'failed';
-    await activities.cleanupWorkspace(state.workspaceRef, input.repo);
+    await activities.cleanupWorkspace(state.workspaceRef as string, input.repo);
     return state;
   }
 }
