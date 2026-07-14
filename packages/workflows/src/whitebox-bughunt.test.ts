@@ -81,6 +81,7 @@ describe('whiteboxBugHunt', () => {
     const result = await whiteboxBugHunt({ repo: 'est1908/agents' });
 
     expect(createIssue).toHaveBeenCalledTimes(1);
+    expect(createIssue.mock.calls[0][0].labels).toEqual(expect.arrayContaining(['agentops', 'bug', 'whitebox']));
     expect(cleanupWorkspace).toHaveBeenCalledWith('ws', 'est1908/agents');
     expect(result.filed).toBe(1);
     expect(result.deduped).toBe(0);

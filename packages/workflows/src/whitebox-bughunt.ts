@@ -1,5 +1,6 @@
 import { proxyActivities, workflowInfo } from '@temporalio/workflow';
 import { findingFingerprint, parseFindings, slugifyProject } from '@agentops/policies';
+import { DEFAULT_TRIGGER_LABEL } from '@agentops/contracts';
 import type { DevCycleActivities } from './activities-api';
 
 const activities = proxyActivities<DevCycleActivities>({ startToCloseTimeout: '10 minutes', retry: { maximumAttempts: 5 } });
@@ -39,7 +40,7 @@ export async function whiteboxBugHunt(input: { repo: string; focus?: string }): 
       const res = await activities.createIssue({
         repo: input.repo, project, title: `[bughunt] ${f.title}`,
         body: `${f.detail}\n\n**Severity:** ${f.severity}\n**Location:** ${f.location}`,
-        labels: ['bug', 'whitebox'], dedupeFingerprint: findingFingerprint(f),
+        labels: [DEFAULT_TRIGGER_LABEL, 'bug', 'whitebox'], dedupeFingerprint: findingFingerprint(f),
       });
       if (res.deduped) deduped += 1; else filed += 1;
     }
