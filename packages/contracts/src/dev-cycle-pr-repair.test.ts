@@ -1,3 +1,4 @@
+import { describe, expect, it } from 'vitest';
 import { DevCyclePrRepairInputSchema } from './dev-cycle-pr-repair';
 
 describe('DevCyclePrRepairInputSchema', () => {
