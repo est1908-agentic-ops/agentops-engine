@@ -8,7 +8,7 @@ import {
   setHandler,
   sleep,
 } from '@temporalio/workflow';
-import type { DevCyclePrRepairInput, ProjectConfig } from '@agentops/contracts';
+import type { Brakes, DevCyclePrRepairInput, DevCycleState, PrFeedback, ProjectConfig, VerdictKind } from '@agentops/contracts';
 import { babysitDecision, nextRepairAction, parseVerdict } from '@agentops/policies';
 import { feedbackHash } from '@agentops/contracts';
 import type { DevCycleActivities } from './activities-api';
@@ -28,7 +28,7 @@ const agentActivities = proxyActivities<Pick<DevCycleActivities, 'runAgent'>>({
 const stopSignal = defineSignal('stop');
 const cancelSignal = defineSignal('cancel');
 const resumeSignal = defineSignal('resume');
-const stateQuery = defineQuery<unknown>('state'); // reuse/extend DevCycleState shape in real impl
+const stateQuery = defineQuery<DevCycleState>('state');
 
 const DEFAULT_BABYSIT_POLL_MS = 5000;
 const MAX_BABYSIT_WAITS = 240; // ~20min
@@ -43,8 +43,8 @@ function isBudgetExceededFailure(err: unknown): boolean {
   );
 }
 
-export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<unknown> {
-  const state: any = {
+export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<DevCycleState> {
+  const state: DevCycleState = {
     taskId: input.taskId,
     stage: 'pr',
     status: 'running',
@@ -60,7 +60,7 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<un
 
   let cancelled = false;
   let _stopRequested = false;
-  let effectiveBrakes: Record<string, unknown> = { maxBabysitRounds: 10, maxIterations: 20 }; // defaults; override with config
+  let effectiveBrakes: Partial<Brakes> = { maxBabysitRounds: 10, maxIterations: 20 }; // defaults; override with config
 
   setHandler(stopSignal, () => { _stopRequested = true; });
   setHandler(cancelSignal, () => { cancelled = true; });
@@ -88,13 +88,14 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<un
   const runStageAgent = async (stage: 'implement' | 'full_verify' | 'review', attempt: number, extraContext: Record<string, unknown> = {}) => {
     // Simplified — in full impl use the exact routing + budget handling from dev-cycle
     let result;
+    const callIndex = 1;
     while (true) {
       try {
         result = await agentActivities.runAgent({
           taskId: input.taskId,
           stage,
           attempt,
-          callIndex: 1,
+          callIndex,
           tier: 'smart',
           projectTiers: config?.tiers ?? {},
           image: config?.image,
@@ -102,7 +103,7 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<un
           promptRef: `${stage}.md`,
           promptContext: { taskId: input.taskId, goal: 'Address PR review comments', prReviewFeedback: input.prReviewFeedback ?? '', ...extraContext },
           workspaceRef: state.workspaceRef,
-          limits: { maxTokens: effectiveBrakes.maxTokens ?? 100000 },
+          limits: { maxTokens: (effectiveBrakes as Brakes).maxTokens ?? 100000 },
         });
         break;
       } catch (err) {
@@ -113,6 +114,24 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<un
       }
     }
     state.cumulativeTokens += (result.tokensIn || 0) + (result.tokensOut || 0);
+    await activities.recordRunStats({
+      taskId: input.taskId,
+      stage,
+      backend: result.resolvedBackend ?? 'unknown',
+      model: result.resolvedModel ?? 'unknown',
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      wallMs: result.wallMs,
+      outcome: 'pass',
+    });
+    await activities.recordStageResult({
+      taskId: input.taskId,
+      stage,
+      source: 'agent',
+      contentHash: `${stage}-${attempt}-${callIndex}`,
+      tokens: (result.tokensIn || 0) + (result.tokensOut || 0),
+      outcome: 'pass',
+    });
     return result.output;
   };
 
@@ -146,28 +165,29 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<un
       const fvParsed = parseVerdict(fullVerifyOutput, 'FULL:');
       lastFullVerify = fullVerifyOutput;
 
+      let reviewKindForAction: 'pass' | 'fail' = 'fail';
       if (fvParsed.kind === 'pass') {
         state.stage = 'review';
         const reviewOutput = await runStageAgent('review', implementAttempt);
         const rvParsed = parseVerdict(reviewOutput, 'VERDICT:');
         lastReview = reviewOutput;
+        reviewKindForAction = rvParsed.kind === 'pass' ? 'pass' : 'fail';
       }
 
-      const fullVerifyKind = fvParsed.kind === 'pass' ? 'pass' : 'fail';
-      const reviewKind = (typeof lastReview !== 'undefined' && parseVerdict(lastReview, 'VERDICT:').kind === 'pass') ? 'pass' : 'fail';
+      const fullVerifyKind: VerdictKind = fvParsed.kind === 'pass' ? 'pass' : 'fail';
       const action = nextRepairAction({
         implementAttempts: implementAttempt,
-        iterations: state.iterations as number,
-        cumulativeTokens: state.cumulativeTokens as number,
+        iterations: state.iterations,
+        cumulativeTokens: state.cumulativeTokens,
         fullVerify: fullVerifyKind,
-        review: reviewKind,
+        review: reviewKindForAction,
         diffEmpty: implOut ? implOut.trim().length === 0 : false,
         brakes: {
           maxImplementAttempts: 5,
           maxIterations: 20,
           maxTokens: 100000,
           maxBabysitRounds: 10,
-          ...(effectiveBrakes as any),
+          ...(effectiveBrakes as Brakes),
         },
         hasEscalationModel: false,
       });
@@ -186,8 +206,8 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<un
 
     while (true) {
       await sleep(DEFAULT_BABYSIT_POLL_MS);
-      const feedback = await activities.getPrFeedback(input.prRef);
-      const decision = babysitDecision(feedback, seen, state.babysitRounds, effectiveBrakes.maxBabysitRounds ?? 10, waiting, MAX_BABYSIT_WAITS);
+      const feedback: PrFeedback = await activities.getPrFeedback(input.prRef);
+      const decision = babysitDecision(feedback, seen, state.babysitRounds, (effectiveBrakes as Brakes).maxBabysitRounds ?? 10, waiting, MAX_BABYSIT_WAITS);
 
       if (decision === 'merge_ready') break;
 
@@ -197,9 +217,9 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<un
         state.babysitRounds += 1;
         implementAttempt += 1;
         state.stage = 'implement';
-        const reviewComments = (feedback as any).comments
-          ?.filter((c: any) => !c.resolved)
-          .map((c: any) => c.body)
+        const reviewComments = feedback.comments
+          ?.filter((c) => !c.resolved)
+          .map((c) => c.body)
           .join('\n\n---\n\n') || '';
         await runStageAgent('implement', implementAttempt, {
           fullVerifyFindings: lastFullVerify,
@@ -222,14 +242,14 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<un
 
     state.stage = 'done';
     state.status = 'done';
-    await activities.cleanupWorkspace(state.workspaceRef as string, input.repo);
+    await activities.cleanupWorkspace(state.workspaceRef, input.repo);
     return state;
 
   } catch (err) {
     if (!(err instanceof RepairCancelledError)) throw err;
     state.stage = 'failed';
     state.status = 'failed';
-    await activities.cleanupWorkspace(state.workspaceRef as string, input.repo);
+    await activities.cleanupWorkspace(state.workspaceRef, input.repo);
     return state;
   }
 }
