@@ -9,7 +9,8 @@ import {
   sleep,
 } from '@temporalio/workflow';
 import type { DevCyclePrRepairInput, ProjectConfig } from '@agentops/contracts';
-import { babysitDecision, nextRepairAction, feedbackHash } from '@agentops/policies';
+import { babysitDecision, nextRepairAction } from '@agentops/policies';
+import { feedbackHash } from '@agentops/contracts';
 import type { DevCycleActivities } from './activities-api';
 
 // Reuse the same activity proxies and constants as dev-cycle for determinism.
@@ -24,10 +25,10 @@ const agentActivities = proxyActivities<Pick<DevCycleActivities, 'runAgent'>>({
   retry: { maximumAttempts: 5 },
 });
 
-export const stopSignal = defineSignal('stop');
-export const cancelSignal = defineSignal('cancel');
-export const resumeSignal = defineSignal('resume');
-export const stateQuery = defineQuery<unknown>('state'); // reuse/extend DevCycleState shape in real impl
+const stopSignal = defineSignal('stop');
+const cancelSignal = defineSignal('cancel');
+const resumeSignal = defineSignal('resume');
+const stateQuery = defineQuery<unknown>('state'); // reuse/extend DevCycleState shape in real impl
 
 const DEFAULT_BABYSIT_POLL_MS = 5000;
 const MAX_BABYSIT_WAITS = 240; // ~20min
@@ -43,7 +44,7 @@ function isBudgetExceededFailure(err: unknown): boolean {
 }
 
 export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<unknown> {
-  const state: Record<string, unknown> = {
+  const state: any = {
     taskId: input.taskId,
     stage: 'pr_repair',
     status: 'running',
@@ -84,7 +85,7 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<un
     return cancelled;
   };
 
-  const runStageAgent = async (stage: string, attempt: number, extraContext: Record<string, unknown> = {}) => {
+  const runStageAgent = async (stage: 'implement' | 'full_verify' | 'review', attempt: number, extraContext: Record<string, unknown> = {}) => {
     // Simplified — in full impl use the exact routing + budget handling from dev-cycle
     let result;
     while (true) {
@@ -155,7 +156,13 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<un
         fullVerify: 'pass', // simplified
         review: 'pass',
         diffEmpty: false,
-        brakes: effectiveBrakes as unknown as { maxBabysitRounds?: number; maxIterations?: number }, // brakes shape from config
+        brakes: {
+          maxImplementAttempts: 5,
+          maxIterations: 20,
+          maxTokens: 100000,
+          maxBabysitRounds: 10,
+          ...(effectiveBrakes as any),
+        },
         hasEscalationModel: false,
       });
 
