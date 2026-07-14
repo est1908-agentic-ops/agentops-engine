@@ -15,6 +15,11 @@ export interface ProjectWorkerParam {
   image: string;
   taskQueue: string;
   replicas: string;
+  // JSON-encoded string array of K8s Secret names (the project's OWN externals,
+  // agents.json worker.externalSecrets — spec §6.1). JSON so the ApplicationSet
+  // can inline it into the chart's list-typed externalSecretRefs value
+  // (JSON is valid YAML); "[]" when the manifest declares none.
+  externalSecretRefs: string;
 }
 
 export interface ProjectWorkerParamsDeps {
@@ -73,6 +78,7 @@ export function createProjectWorkerParamsProvider(deps: ProjectWorkerParamsDeps)
             image: manifest.worker.image,
             taskQueue: manifest.worker.taskQueue ?? projectQueue(entry.project),
             replicas: String(manifest.worker.replicas),
+            externalSecretRefs: JSON.stringify(manifest.worker.externalSecrets),
           });
         } catch (err) {
           console.warn(`gateway: failed to read worker block for project "${entry.project}" — serving last-good`, err);

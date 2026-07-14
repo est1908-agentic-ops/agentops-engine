@@ -141,13 +141,13 @@ it('excludes a disabled continuous agent (treated as terminate)', () => {
 describe('orphanScheduleIds', () => {
   it('flags agent schedules whose project is no longer managed', () => {
     const ids = [
-      scheduleId('acme', 'smoke-test'),
-      scheduleId('acme', 'nightly-bughunt'),
+      scheduleId('webapp', 'smoke-test'),
+      scheduleId('webapp', 'nightly-bughunt'),
       scheduleId('acme', 'nightly'),
     ];
     expect(orphanScheduleIds(ids, ['acme'])).toEqual([
-      scheduleId('acme', 'smoke-test'),
-      scheduleId('acme', 'nightly-bughunt'),
+      scheduleId('webapp', 'smoke-test'),
+      scheduleId('webapp', 'nightly-bughunt'),
     ]);
   });
 
