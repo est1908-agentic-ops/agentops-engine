@@ -42,7 +42,7 @@ describe('createProjectWorkerParamsProvider', () => {
     const deps = fakeRegistryDeps(privateKey, [{ project: 'broccoli', repo: 'broccoli/web', encryptedToken: encryptForManagedProject(publicKey, 't') }]);
     const provider = createProjectWorkerParamsProvider({ managedProjectDeps: deps, buildScm: scmFactory(() => workerManifest('reg/broccoli/agentops-worker:abc')) });
     expect(await provider.getParams()).toEqual([
-      { project: 'broccoli', image: 'reg/broccoli/agentops-worker:abc', taskQueue: 'proj-broccoli', replicas: '1' },
+      { project: 'broccoli', image: 'reg/broccoli/agentops-worker:abc', taskQueue: 'proj-broccoli', replicas: '1', externalSecretRefs: '["rollbar-token"]' },
     ]);
   });
 
@@ -57,7 +57,19 @@ describe('createProjectWorkerParamsProvider', () => {
     ]);
     const provider = createProjectWorkerParamsProvider({ managedProjectDeps: deps, buildScm: scmFactory(() => workerManifest('reg/agents-worker:abc')) });
     expect(await provider.getParams()).toEqual([
-      { project: 'artem-private-agents', image: 'reg/agents-worker:abc', taskQueue: 'proj-artem-private-agents', replicas: '1' },
+      { project: 'artem-private-agents', image: 'reg/agents-worker:abc', taskQueue: 'proj-artem-private-agents', replicas: '1', externalSecretRefs: '["rollbar-token"]' },
+    ]);
+  });
+
+  it('emits externalSecretRefs "[]" when the worker block declares no externalSecrets', async () => {
+    const { publicKey, privateKey } = generateManagedProjectKeyPair();
+    const deps = fakeRegistryDeps(privateKey, [{ project: 'broccoli', repo: 'broccoli/web', encryptedToken: encryptForManagedProject(publicKey, 't') }]);
+    const provider = createProjectWorkerParamsProvider({
+      managedProjectDeps: deps,
+      buildScm: scmFactory(() => JSON.stringify({ agents: [], worker: { image: 'reg/w:abc' } })),
+    });
+    expect(await provider.getParams()).toEqual([
+      { project: 'broccoli', image: 'reg/w:abc', taskQueue: 'proj-broccoli', replicas: '1', externalSecretRefs: '[]' },
     ]);
   });
 
