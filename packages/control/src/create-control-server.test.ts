@@ -92,7 +92,7 @@ describe('createControlServer', () => {
       await listen();
       const { status, body } = await postJson(port, '/api/platform/runs', {
         prompt: 'investigate the last failures',
-        hintRepos: ['flair-hr/agentops-engine'],
+        hintRepos: ['est1908/agentops-engine'],
       });
 
       expect(status).toBe(202);
@@ -100,7 +100,7 @@ describe('createControlServer', () => {
       expect(start).toHaveBeenCalledTimes(1);
       const [, options] = start.mock.calls[0];
       expect(options.taskQueue).toBe('agentops-devcycle');
-      expect(options.args).toEqual([{ prompt: 'investigate the last failures', hintRepos: ['flair-hr/agentops-engine'] }]);
+      expect(options.args).toEqual([{ prompt: 'investigate the last failures', hintRepos: ['est1908/agentops-engine'] }]);
       expect(options.memo).toEqual({ prompt: 'investigate the last failures' });
       expect(typeof options.workflowId).toBe('string');
     });
@@ -221,14 +221,14 @@ describe('createControlServer', () => {
   it('GET /api/registry/repos returns repos from the managed-project store', async () => {
     const store = createFakeStore();
     const { publicKey } = generateManagedProjectKeyPair();
-    await store.upsert({ project: 'engine', repo: 'flair-hr/agentops-engine', token: 't1' }, publicKey);
-    await store.upsert({ project: 'platform', repo: 'flair-hr/agentops-platform', token: 't2' }, publicKey);
+    await store.upsert({ project: 'engine', repo: 'est1908/agentops-engine', token: 't1' }, publicKey);
+    await store.upsert({ project: 'platform', repo: 'est1908/agentops-platform', token: 't2' }, publicKey);
     deps.managedProjectStore = store;
     await listen();
 
     const { status, body } = await getJson(port, '/api/registry/repos');
     expect(status).toBe(200);
-    expect(body).toEqual({ repos: ['flair-hr/agentops-engine', 'flair-hr/agentops-platform'] });
+    expect(body).toEqual({ repos: ['est1908/agentops-engine', 'est1908/agentops-platform'] });
   });
 
   it('GET /api/registry/repos returns no hints when no managed-project store is configured', async () => {
@@ -255,7 +255,7 @@ describe('createControlServer', () => {
     describe('POST /api/devcycle/runs', () => {
       it('rejects an empty prompt with 400', async () => {
         await listen();
-        const { status } = await postJson(port, '/api/devcycle/runs', { repo: 'flair-hr/agentops-engine', prompt: '' });
+        const { status } = await postJson(port, '/api/devcycle/runs', { repo: 'est1908/agentops-engine', prompt: '' });
         expect(status).toBe(400);
         expect(start).not.toHaveBeenCalled();
       });
@@ -269,11 +269,11 @@ describe('createControlServer', () => {
       });
 
       it('starts devCycle with goal=prompt, no config, a prompt-<project>- workflowId, and the prompt memo', async () => {
-        deps.managedProjectStore = fakeStore([{ repo: 'flair-hr/agentops-engine', project: 'engine' }]);
+        deps.managedProjectStore = fakeStore([{ repo: 'est1908/agentops-engine', project: 'engine' }]);
         start.mockResolvedValue({ workflowId: 'prompt-engine-t1', firstExecutionRunId: 'run-1' });
         await listen();
         const { status, body } = await postJson(port, '/api/devcycle/runs', {
-          repo: 'flair-hr/agentops-engine',
+          repo: 'est1908/agentops-engine',
           prompt: 'add a widget',
           taskId: 't1',
         });
@@ -282,7 +282,7 @@ describe('createControlServer', () => {
         expect(body).toEqual({ workflowId: 'prompt-engine-t1', runId: 'run-1', taskId: 't1' });
         const [, options] = start.mock.calls[0];
         expect(options.workflowId).toBe('prompt-engine-t1');
-        expect(options.args).toEqual([{ taskId: 't1', project: 'engine', repo: 'flair-hr/agentops-engine', goal: 'add a widget' }]);
+        expect(options.args).toEqual([{ taskId: 't1', project: 'engine', repo: 'est1908/agentops-engine', goal: 'add a widget' }]);
         expect(options.memo).toEqual({ prompt: 'add a widget' });
       });
 
@@ -297,11 +297,11 @@ describe('createControlServer', () => {
       });
 
       it('responds 409 when the workflowId is already in use', async () => {
-        deps.managedProjectStore = fakeStore([{ repo: 'flair-hr/agentops-engine', project: 'engine' }]);
+        deps.managedProjectStore = fakeStore([{ repo: 'est1908/agentops-engine', project: 'engine' }]);
         start.mockRejectedValueOnce(new WorkflowExecutionAlreadyStartedError('already started', 'prompt-engine-dup', 'devCycle'));
         await listen();
         const { status } = await postJson(port, '/api/devcycle/runs', {
-          repo: 'flair-hr/agentops-engine',
+          repo: 'est1908/agentops-engine',
           prompt: 'x',
           taskId: 'dup',
         });
@@ -413,7 +413,7 @@ describe('createControlServer', () => {
 
       it('returns managed projects only (the DB is the single source of truth), sorted by project', async () => {
         deps.managedProjectStore = fakeStore([
-          { repo: 'flair-hr/agentops-engine', project: 'engine-managed' },
+          { repo: 'est1908/agentops-engine', project: 'engine-managed' },
           { repo: 'acme/app', project: 'acme-app' },
         ]);
         await listen();
@@ -422,7 +422,7 @@ describe('createControlServer', () => {
         // sorted by project slug: 'acme-app' before 'engine-managed'; no static entries
         expect(targets).toEqual([
           { repo: 'acme/app', project: 'acme-app' },
-          { repo: 'flair-hr/agentops-engine', project: 'engine-managed' },
+          { repo: 'est1908/agentops-engine', project: 'engine-managed' },
         ]);
       });
     });

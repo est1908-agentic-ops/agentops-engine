@@ -4,9 +4,6 @@ How a Temporal workflow, task queue, and worker combine into durable execution,
 and how `agentops-engine`'s own packages sit on top of that — including where the
 worker bursts out into disposable k3s `Job`s.
 
-Related: [`docs/superpowers/specs/2026-07-03-engine-image-and-chart-design.md`](superpowers/specs/2026-07-03-engine-image-and-chart-design.md),
-[`docs/superpowers/specs/2026-07-03-k8s-job-runner-design.md`](superpowers/specs/2026-07-03-k8s-job-runner-design.md).
-
 ## The primitive: code that survives a crash
 
 A **Workflow** is just a function — but every await point it crosses is durably
@@ -40,6 +37,36 @@ proxyActivities<DevCycleActivities>({
   retry: { maximumAttempts: 5 },
 });
 ```
+
+## What event history stores
+
+History is an **append-only log per workflow execution** (`workflowId` + `runId`),
+owned by Temporal's History service and persisted to its backing store. On replay
+the worker re-runs workflow code and uses the log to skip finished steps — it does
+**not** reload workflow-local variables from anywhere else.
+
+**In history:**
+
+| Event kind | What gets serialized |
+| ---------- | -------------------- |
+| Workflow start | Workflow type, **input args** (`TaskInput` for `devCycle`), task queue, memo, search attributes |
+| Each activity | **Input** on schedule, **return value** (or failure) on completion — e.g. `prepareWorkspace` → `{ workspaceRef, branch }`, `runAgent` → `{ output, tokensIn, tokensOut, … }` |
+| Timers | `sleep()` in `pr_babysit` — fire time is fixed at schedule time |
+| Signals | `stop`, `cancel`, `resume`, `clarify` — name + payload, replayed in order |
+| Workflow end | Final **result** (`DevCycleState`) or failure |
+
+Activity **heartbeats** (K8s Job poll progress during `runAgent`) are kept on the
+activity attempt for timeout/debugging; they are not replayed like completions.
+
+**Not in history** (side effects or derived state elsewhere):
+
+- Live `DevCycleState` from `query('state')` — computed on read, never appended
+- Git worktree contents — only the `workspaceRef` path string crosses the activity boundary; files live on the shared PVC
+- PRs, issues, labels — forge/tracker APIs
+- `agent_run_stats` rows — Postgres via `recordRunStats`
+
+Inspect a run from Mission Control's Temporal link, or
+`…/workflows/<workflowId>/<runId>/history` in the Temporal UI.
 
 ## The cluster: four services behind one address
 

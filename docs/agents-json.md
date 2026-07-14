@@ -1,6 +1,6 @@
 # agents.json — Tier 1 custom agent manifest
 
-`agents.json` is a git-committed, PR-reviewed manifest that schedules built-in workflows for a project. It is the configuration source of truth for Tier 1 custom agents (SP1).
+`agents.json` is a git-committed, PR-reviewed manifest that schedules built-in workflows for a project. It is the configuration source of truth for Tier 1 custom agents.
 
 Location: repository root (alongside or near `agentops.json`).
 
@@ -10,19 +10,20 @@ Location: repository root (alongside or near `agentops.json`).
 {
   "agents": [
     {
-      "name": "nightly-bughunt",        // kebab-case, DNS-safe, unique per project
-      "workflow": "whiteboxBugHunt",     // built-in workflow name
-      "schedule": "0 2 * * *",           // 5-field cron, or the literal "continuous"
-      "input": { "focus": "auth" },      // per-workflow, validated for built-ins
-      "enabled": true,                   // default true; false pauses the Schedule
-      "timezone": "UTC",                 // default "UTC"
-      "overlap": "skip"                  // "skip" | "bufferOne" | "allow"; default "skip"
-    }
-  ]
+      "name": "nightly-bughunt", // kebab-case, DNS-safe, unique per project
+      "workflow": "whiteboxBugHunt", // built-in workflow name
+      "schedule": "0 2 * * *", // 5-field cron, or the literal "continuous"
+      "input": { "focus": "auth" }, // per-workflow, validated for built-ins
+      "enabled": true, // default true; false pauses the Schedule
+      "timezone": "UTC", // default "UTC"
+      "overlap": "skip", // "skip" | "bufferOne" | "allow"; default "skip"
+    },
+  ],
 }
 ```
 
 Validation rules:
+
 - Unknown top-level or per-agent keys are rejected (z.strict()).
 - `name` matches `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`.
 - Names are unique within the manifest.
@@ -30,16 +31,16 @@ Validation rules:
 - `input` is validated against the named workflow's manifest schema when known (Tier 1 built-ins). Unknown workflows pass input through (Tier 2).
 - A malformed `agents.json` causes the entire reconcile for that project to fail (no partial apply). Existing Schedules are left as-is.
 
-## Built-in catalog (SP1)
+## Built-in catalog
 
 - `whiteboxBugHunt({ repo, focus? })`
   - Input schema: `{ focus?: string }`
   - Runs a read-only agent, emits `FINDINGS: [...]` JSON, files `bug` + `whitebox` labeled issues.
   - Deduplicated by `filed_findings(project, fingerprint)` using `findingFingerprint({ location, title })`.
 
-`qaProbe` and other Tier-1 finders are SP3.
+More Tier-1 finders (e.g. `qaProbe`) are planned but not yet implemented.
 
-`"continuous"` schedules (singleton workflow, not a Temporal Schedule) are noted for SP2.
+`"continuous"` schedules run the agent as a singleton workflow instead of a Temporal Schedule (used by Tier-2 workers).
 
 ## Schedule identity and lifecycle
 
@@ -54,6 +55,7 @@ Validation rules:
 ## Prompt provenance
 
 `whiteboxBugHunt` (and future built-ins) record on `agent_run_stats` and OTel spans:
+
 - `promptHash` (sha256 of rendered prompt)
 - `promptSource` (e.g. `builtin:whitebox-bughunt.md`)
 - `project`, `workflowType`
@@ -61,6 +63,7 @@ Validation rules:
 ## Search attributes
 
 The engine registers and stamps three custom Keyword search attributes for Schedules and continuous agent workflows:
+
 - `project`
 - `agentName`
 - `workflowType`
@@ -71,7 +74,7 @@ The engine worker **auto-registers** these in its namespace at startup (idempote
 
 - Removing or editing `agents.json` is the supported way to manage automation.
 - Manual edits in the Temporal UI are overwritten on next reconcile.
-- Tier 2 (project-authored workflows via `@agentops/engine-sdk` + per-project worker) is SP2.
-- The issue → `devCycle` "fix" trigger wiring for auto-created bug issues is SP3 (Gateway `issues.opened` + `agent:fix` label).
+- Tier 2 (project-authored workflows via `@agentic-ops/engine-sdk` + a per-project worker) is documented in [authoring-project-workflows.md](authoring-project-workflows.md) and [project-worker-deployment.md](project-worker-deployment.md).
+- Automatic issue → `devCycle` "fix" wiring for auto-created bug issues (Gateway `issues.opened` + an `agent:fix` label) is planned but not yet implemented.
 
 See the design spec `docs/superpowers/specs/2026-07-12-custom-agent-workflows-design.md` for rationale and the full capability ladder.

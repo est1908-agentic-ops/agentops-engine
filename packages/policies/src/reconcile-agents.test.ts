@@ -79,7 +79,7 @@ describe('resolveAgentQueue', () => {
   });
   it('routes a project (Tier-2) workflow to proj-<project>', () => {
     expect(resolveAgentQueue({ workflow: 'rollbarMonitor', taskQueue: undefined }, 'acme')).toBe('proj-acme');
-    expect(projectQueue('broccoli')).toBe('proj-broccoli');
+    expect(projectQueue('acme')).toBe('proj-acme');
   });
   it('slugifies an operator-chosen project name so the queue is k8s/Temporal-safe', () => {
     // "Artem private agents" produced queue "proj-Artem private agents" pre-fix --
@@ -141,13 +141,13 @@ it('excludes a disabled continuous agent (treated as terminate)', () => {
 describe('orphanScheduleIds', () => {
   it('flags agent schedules whose project is no longer managed', () => {
     const ids = [
-      scheduleId('broccoli', 'smoke-test'),
-      scheduleId('broccoli', 'nightly-bughunt'),
+      scheduleId('acme', 'smoke-test'),
+      scheduleId('acme', 'nightly-bughunt'),
       scheduleId('acme', 'nightly'),
     ];
     expect(orphanScheduleIds(ids, ['acme'])).toEqual([
-      scheduleId('broccoli', 'smoke-test'),
-      scheduleId('broccoli', 'nightly-bughunt'),
+      scheduleId('acme', 'smoke-test'),
+      scheduleId('acme', 'nightly-bughunt'),
     ]);
   });
 
@@ -169,7 +169,7 @@ describe('orphanScheduleIds', () => {
   });
 
   it('returns everything when no projects are live', () => {
-    const ids = [scheduleId('acme', 'a'), scheduleId('broccoli', 'b')];
+    const ids = [scheduleId('acme', 'a'), scheduleId('acme', 'b')];
     expect(orphanScheduleIds(ids, [])).toEqual(ids);
   });
 });

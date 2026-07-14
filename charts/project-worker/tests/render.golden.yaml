@@ -3,31 +3,31 @@
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: broccoli-worker
+  name: acme-worker
   namespace: dev-agents
 ---
 # Source: project-worker/templates/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: broccoli-worker
+  name: acme-worker
   namespace: dev-agents
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: broccoli-worker
+      app: acme-worker
   template:
     metadata:
       labels:
-        app: broccoli-worker
+        app: acme-worker
     spec:
-      serviceAccountName: broccoli-worker
+      serviceAccountName: acme-worker
       imagePullSecrets:
         - name: registry-credentials
       containers:
         - name: worker
-          image: "gitactions.est1908.top/broccoli/agentops-worker:testsha"
+          image: "gitactions.est1908.top/acme/agentops-worker:testsha"
           imagePullPolicy: IfNotPresent
           env:
             - name: TEMPORAL_ADDRESS
@@ -35,7 +35,7 @@ spec:
             - name: TEMPORAL_NAMESPACE
               value: "dev-agents"
             - name: PROJECT_TASK_QUEUE
-              value: "proj-broccoli"
+              value: "proj-acme"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: "http://alloy.platform.svc.cluster.local:4317"
           envFrom:

@@ -20,7 +20,7 @@ This doc covers **deploying** that worker.
 Everything about your worker lives in **your repo's `agents.json`** — no platform PR:
 
 1. Author the worker (`worker.ts` using `@agentic-ops/engine-sdk/worker`; see
-   `examples/project-worker/`) and add a `worker` block to `agents.json`:
+   [docs/project-worker/](project-worker/)) and add a `worker` block to `agents.json`:
    ```jsonc
    {
      "agents": [

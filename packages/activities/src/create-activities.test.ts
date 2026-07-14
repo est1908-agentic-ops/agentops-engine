@@ -729,14 +729,14 @@ describe('createActivities — resolveRepoConfig', () => {
   it("resolves project from the registry and loads that repo's ProjectConfig", async () => {
     const deps = buildDeps();
     deps.scm.seedFile(
-      'flair-hr/agentops-engine',
+      'est1908/agentops-engine',
       'agentops.json',
       JSON.stringify({ fastVerifyCommands: ['pnpm lint'] }),
     );
     deps.registry = [
       {
         project: 'engine',
-        repo: 'flair-hr/agentops-engine',
+        repo: 'est1908/agentops-engine',
         trackerType: 'github',
         token: 'fake',
       },
@@ -744,7 +744,7 @@ describe('createActivities — resolveRepoConfig', () => {
     const activities = createActivities(deps);
 
     const { registered, project, config } = await activities.resolveRepoConfig(
-      'flair-hr/agentops-engine',
+      'est1908/agentops-engine',
     );
 
     expect(registered).toBe(true);
@@ -757,7 +757,7 @@ describe('createActivities — resolveRepoConfig', () => {
     const readFileSpy = vi.spyOn(deps.scm, 'readFile');
     const activities = createActivities(deps);
 
-    const { registered, project } = await activities.resolveRepoConfig('flair-hr/some-other-repo');
+    const { registered, project } = await activities.resolveRepoConfig('est1908/some-other-repo');
 
     expect(registered).toBe(false);
     expect(project).toBe('default');

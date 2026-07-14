@@ -76,7 +76,7 @@ Loki wants **nanoseconds since the epoch** for `start`/`end`, not seconds and no
 
 **Gotcha — Alloy can starve itself and silently produce zero real log lines.** If a queried pod's *entire* log is just one line repeated verbatim (seen: `failed to create fsnotify watcher: too many open files`, every few seconds for the pod's whole lifetime), that is not the target container's output — it is Grafana Alloy's own `loki.source.kubernetes.pods` component failing to open a file-watch on that pod's log file (an inotify/fd exhaustion on Alloy's side, likely from high Job churn — one new pod per `runAgent` call), tagged with the target pod's labels. Confirm by querying `{container="alloy"} |= "fsnotify"` directly, or by checking whether an unrelated long-lived pod (e.g. `engine-worker-*`) shows the exact same line in the same window — if so, Loki captured *nothing real* cluster-wide for that window, not just for the pod you're investigating. There is no log-based fallback for that window; the real output for `runAgent` calls lives only in the task workspace PVC (`.agentops/output-<stage>-<attempt>-<callIndex>.json`, per `packages/backends/src/k8s/k8s-job-runner.ts`'s `agentOpsArtifactPaths`), which this skill's toolbelt (Temporal REST + Grafana proxy, no cluster shell) cannot read. Flag this as its own incident if seen — it blocks debugging, it doesn't just complicate it.
 
-## Worked example: `issue-broccoli-94`
+## Worked example: `issue-acme-94`
 
 This is the incident that motivated writing this skill down.
 

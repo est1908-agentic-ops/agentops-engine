@@ -5,7 +5,7 @@ Milestone: M4, sub-project 2 of 5 (see [decomposition](2026-07-06-m4-decompositi
 
 ## Context
 
-Sub-project 1 (merged, `flair-hr/agentops-platform#16`) stood up Alloy/Prometheus/Loki/Tempo/Grafana/MailPit and pinned the concrete OTLP endpoint this sub-project targets: `alloy.platform.svc.cluster.local:4317` (gRPC, in-cluster only). Today `@opentelemetry/api` is only a transitive dependency pulled in by the Temporal SDK — no span is created anywhere in this codebase. This doc wires real tracing into the worker.
+Sub-project 1 (merged, `est1908/agentops-platform#16`) stood up Alloy/Prometheus/Loki/Tempo/Grafana/MailPit and pinned the concrete OTLP endpoint this sub-project targets: `alloy.platform.svc.cluster.local:4317` (gRPC, in-cluster only). Today `@opentelemetry/api` is only a transitive dependency pulled in by the Temporal SDK — no span is created anywhere in this codebase. This doc wires real tracing into the worker.
 
 ## Goal
 
