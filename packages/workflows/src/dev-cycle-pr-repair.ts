@@ -9,7 +9,7 @@ import {
   sleep,
 } from '@temporalio/workflow';
 import type { DevCyclePrRepairInput, ProjectConfig } from '@agentops/contracts';
-import { babysitDecision, nextRepairAction } from '@agentops/policies';
+import { babysitDecision, nextRepairAction, parseVerdict } from '@agentops/policies';
 import { feedbackHash } from '@agentops/contracts';
 import type { DevCycleActivities } from './activities-api';
 
@@ -46,7 +46,7 @@ function isBudgetExceededFailure(err: unknown): boolean {
 export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<unknown> {
   const state: any = {
     taskId: input.taskId,
-    stage: 'pr_repair',
+    stage: 'pr',
     status: 'running',
     blockReason: null,
     prRef: input.prRef,
@@ -133,8 +133,8 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<un
     let lastReview = '';
 
     while (true) {
-      state.stage = 'pr_repair_implement';
-      await runStageAgent('implement', implementAttempt, {
+      state.stage = 'implement';
+      const implOut = await runStageAgent('implement', implementAttempt, {
         fullVerifyFindings: lastFullVerify,
         reviewFindings: lastReview,
       });
@@ -142,20 +142,26 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<un
       state.iterations += 1;
 
       state.stage = 'full_verify';
-      // Simplified verdict call — use real runVerdictStage in final
-      lastFullVerify = await runStageAgent('full_verify', implementAttempt);
+      const fullVerifyOutput = await runStageAgent('full_verify', implementAttempt);
+      const fvParsed = parseVerdict(fullVerifyOutput, 'FULL:');
+      lastFullVerify = fullVerifyOutput;
 
-      // For demo, assume pass and do review
-      state.stage = 'review';
-      lastReview = await runStageAgent('review', implementAttempt);
+      if (fvParsed.kind === 'pass') {
+        state.stage = 'review';
+        const reviewOutput = await runStageAgent('review', implementAttempt);
+        const rvParsed = parseVerdict(reviewOutput, 'VERDICT:');
+        lastReview = reviewOutput;
+      }
 
+      const fullVerifyKind = fvParsed.kind === 'pass' ? 'pass' : 'fail';
+      const reviewKind = (typeof lastReview !== 'undefined' && parseVerdict(lastReview, 'VERDICT:').kind === 'pass') ? 'pass' : 'fail';
       const action = nextRepairAction({
         implementAttempts: implementAttempt,
         iterations: state.iterations as number,
         cumulativeTokens: state.cumulativeTokens as number,
-        fullVerify: 'pass', // simplified
-        review: 'pass',
-        diffEmpty: false,
+        fullVerify: fullVerifyKind,
+        review: reviewKind,
+        diffEmpty: implOut ? implOut.trim().length === 0 : false,
         brakes: {
           maxImplementAttempts: 5,
           maxIterations: 20,
@@ -190,10 +196,15 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<un
         seen.add(feedbackHash(feedback));
         state.babysitRounds += 1;
         implementAttempt += 1;
-        state.stage = 'pr_repair_implement';
+        state.stage = 'implement';
+        const reviewComments = (feedback as any).comments
+          ?.filter((c: any) => !c.resolved)
+          .map((c: any) => c.body)
+          .join('\n\n---\n\n') || '';
         await runStageAgent('implement', implementAttempt, {
           fullVerifyFindings: lastFullVerify,
           reviewFindings: lastReview,
+          prReviewFeedback: reviewComments,
         });
         await activities.pushBranch(input.repo, state.workspaceRef, state.branch, `${input.taskId}-repair-${implementAttempt}`);
         state.stage = 'pr_babysit';

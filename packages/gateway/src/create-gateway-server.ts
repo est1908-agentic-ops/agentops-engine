@@ -163,6 +163,10 @@ async function handleGithubWebhook(deps: GatewayDeps, req: IncomingMessage, res:
 
   const reviewEvent = parsePrReviewEvent(eventType, payload);
   if (reviewEvent) {
+    if (!reviewEvent.hasAgentopsLabel) {
+      res.writeHead(204).end();
+      return;
+    }
     const entry = await resolveManagedProjectEntry(deps.managedProjectDeps, reviewEvent.repo);
     if (!entry) {
       res.writeHead(202).end('no project registered');
