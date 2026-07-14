@@ -19,6 +19,14 @@ export function parseFindings(output: string): WhiteboxFinding[] {
   return out;
 }
 
+function normalizeLocation(location: string): string {
+  // Strip trailing position suffixes (:line, :line:col, :startLine-endLine)
+  // Only strip if the trailing segment(s) after the last colon are purely numeric or n-n format.
+  // Non-numeric trailing segments are left intact (degrade to old behavior).
+  return location.replace(/:\d+(?::\d+|-\d+)?$/, '');
+}
+
 export function findingFingerprint(f: WhiteboxFinding): string {
-  return sha256(`${f.location}::${f.title}`.toLowerCase().replace(/\s+/g, ' ').trim());
+  const normalizedLocation = normalizeLocation(f.location);
+  return sha256(`${normalizedLocation}::${f.title}`.toLowerCase().replace(/\s+/g, ' ').trim());
 }
