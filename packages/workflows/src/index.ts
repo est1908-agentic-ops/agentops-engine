@@ -1,6 +1,7 @@
 export * from './activities-api';
 export * from './dev-cycle';
 export * from './dev-cycle-pr-repair';
+export * from './pr-landing';
 export * from './platform';
 export {
   platformChat,
