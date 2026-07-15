@@ -51,7 +51,6 @@ describe('BlockReasonSchema', () => {
       'babysit-brake',
       'max-attempts',
       'hook-required-failed',
-      'budget-exceeded',
       'pr-landing-blocked',
     ];
     for (const reason of reasons) {

@@ -31,7 +31,6 @@ import {
   createClaudeCliSpec,
   createPiCliSpec,
   K8sJobRunner,
-  LiteLlmBackend,
   ProcessCliRunner,
   RateWindowedBackend,
   RateWindowLimiter,
@@ -199,7 +198,7 @@ function wrapWithRateWindow(
 // In-cluster tasks fail two ways when these are missing or still placeholders:
 // an ImagePullBackOff that eats the whole activity timeout before surfacing
 // anything (AGENT_RUNNER_IMAGE), or a real Job that starts but every call
-// 401s (LITELLM_API_KEY, *_AUTH_SECRET_NAME -- an unset secret name means
+// 401s (*_AUTH_SECRET_NAME -- an unset secret name means
 // envFrom gets no entry at all, not an empty one). Both are worker-startup
 // misconfigurations, not per-task failures, so they belong here, checked
 // once, loud, before the worker ever claims a task -- not discovered
@@ -208,9 +207,6 @@ export function assertLiveBackendConfig(env: NodeJS.ProcessEnv): void {
   const missing: string[] = [];
   if (!env.AGENT_RUNNER_IMAGE || env.AGENT_RUNNER_IMAGE.includes('CHANGEME')) {
     missing.push('AGENT_RUNNER_IMAGE (unset or still the placeholder image)');
-  }
-  if (!env.LITELLM_API_KEY) {
-    missing.push('LITELLM_API_KEY');
   }
   if (!env.CLAUDE_AUTH_SECRET_NAME) {
     missing.push('CLAUDE_AUTH_SECRET_NAME');
@@ -233,14 +229,6 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
     process.env.AGENT_RUNNER_IMAGE ?? 'ghcr.io/CHANGEME/agentops-engine/agent-runner:CHANGEME';
   const claudeSpec = createClaudeCliSpec({ image: agentImage });
   const piSpec = createPiCliSpec({ image: agentImage });
-  // Not a CLI spawn, so it doesn't switch between ProcessCliRunner and
-  // K8sJobRunner like claude/pi do -- it's a plain HTTP call to LiteLLM's
-  // in-cluster Service, made directly from the worker/activity either way.
-  const litellm = new LiteLlmBackend({
-    baseUrl: process.env.LITELLM_BASE_URL ?? 'http://litellm.platform.svc.cluster.local:4000',
-    apiKey: process.env.LITELLM_API_KEY ?? '',
-  });
-
   if (!inCluster) {
     const claudeRateWindowLimiter = buildRateWindowLimiter('CLAUDE');
     return {
@@ -249,7 +237,6 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
       pi: wrapWithRateWindow(new ProcessCliRunner(piSpec), buildRateWindowLimiter('PI'), 'pi'),
       // Same CLI/model/rate window as claude (see the in-cluster branch below for why).
       platform: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), claudeRateWindowLimiter, 'platform'),
-      litellm,
     };
   }
 
@@ -296,7 +283,6 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
       claudeRateWindowLimiter,
       'platform',
     ),
-    litellm,
   };
 }
 

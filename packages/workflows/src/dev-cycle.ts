@@ -1,7 +1,5 @@
 import { trace } from '@opentelemetry/api';
 import {
-  ActivityFailure,
-  ApplicationFailure,
   condition,
   defineQuery,
   defineSignal,
@@ -69,21 +67,6 @@ const MAX_PR_TITLE_LENGTH = 256;
 // (resumable), rather than an unbounded spin. See devcycle:Artem private agents.
 const MAX_BABYSIT_WAIT_MS = 20 * 60_000;
 const MAX_BABYSIT_WAITS = Math.ceil(MAX_BABYSIT_WAIT_MS / DEFAULT_BABYSIT_POLL_MS);
-
-// Thrown only by runStageAgent, to unwind out to devCycle's top-level catch
-// when a cancel signal arrives while blocked on a budget-exceeded retry loop
-// -- the other blockReasons' cancel handling lives inline (checked right
-// after their own call sites) because they don't retry-in-place the way a
-// budget block does.
-class DevCycleCancelledError extends Error {}
-
-function isBudgetExceededFailure(err: unknown): boolean {
-  return (
-    err instanceof ActivityFailure &&
-    err.cause instanceof ApplicationFailure &&
-    err.cause.type === 'LiteLlmBudgetExceededError'
-  );
-}
 
 export async function devCycle(input: TaskInput): Promise<DevCycleState> {
   // Only reads/mutates the span object the workflow-side OTel interceptor
@@ -211,41 +194,21 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     const tier = tierOverride ?? routed?.tier ?? 'smart';
     const effort = routed?.effort;
 
-    let result;
-    while (true) {
-      try {
-        result = await agentActivities.runAgent({
-          taskId: input.taskId,
-          stage,
-          attempt,
-          callIndex,
-          tier,
-          effort,
-          projectTiers: config.tiers,
-          image: config.image,
-          services: config.services,
-          promptRef: `${stage}.md`,
-          promptContext: { taskId: input.taskId, goal: input.goal, ...extraContext },
-          workspaceRef: state.workspaceRef,
-          limits: { maxTokens: config.brakes.maxTokens, ...resolveStageLimits(config, stage) },
-        });
-        break;
-      } catch (err) {
-        if (!isBudgetExceededFailure(err)) {
-          throw err;
-        }
-        // Not a token-count brake -- a LiteLLM virtual key's hard spend cap.
-        // Same resume escape hatch as the other blockReasons (an operator
-        // bumps the budget/rotates the key, then signals resume), but this
-        // one retries the same call in place rather than relaxing a brake
-        // counter and letting the outer loop re-evaluate.
-        state.status = 'blocked';
-        state.blockReason = 'budget-exceeded';
-        if (await waitForResumeOrCancel()) {
-          throw new DevCycleCancelledError();
-        }
-      }
-    }
+    const result = await agentActivities.runAgent({
+      taskId: input.taskId,
+      stage,
+      attempt,
+      callIndex,
+      tier,
+      effort,
+      projectTiers: config.tiers,
+      image: config.image,
+      services: config.services,
+      promptRef: `${stage}.md`,
+      promptContext: { taskId: input.taskId, goal: input.goal, ...extraContext },
+      workspaceRef: state.workspaceRef,
+      limits: { maxTokens: config.brakes.maxTokens, ...resolveStageLimits(config, stage) },
+    });
     state.cumulativeTokens += result.tokensIn + result.tokensOut;
     await activities.recordRunStats({
       taskId: input.taskId,
@@ -288,291 +251,268 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     return { kind: lastKind === 'unparseable' ? 'fail' : lastKind, output: lastOutput };
   };
 
-  // Wrapped so a cancel signal received while runStageAgent is blocked
-  // in-place on a budget-exceeded retry (which can happen at any stage, deep
-  // inside this function) unwinds to one place rather than needing every
-  // call site below to check for it — the pre-existing `cancelled` checks
-  // right after each call site are untouched; this only catches the new
-  // DevCycleCancelledError path.
-  try {
-    for (const stage of preImplementStages({
-      config,
-      hasHumanDesign: false,
-      hasHumanPlan: false,
-    })) {
-      state.stage = stage;
-      const extraContext = stage === 'context' ? { issueBody } : {};
-      await runStageAgent(stage as RoutableStage, 1, 1, undefined, extraContext);
-      if (cancelled) {
+  for (const stage of preImplementStages({
+    config,
+    hasHumanDesign: false,
+    hasHumanPlan: false,
+  })) {
+    state.stage = stage;
+    const extraContext = stage === 'context' ? { issueBody } : {};
+    await runStageAgent(stage as RoutableStage, 1, 1, undefined, extraContext);
+    if (cancelled) {
+      state.stage = 'failed';
+      state.status = 'failed';
+      await dropAgentWorking();
+      await activities.cleanupWorkspace(state.workspaceRef, input.repo);
+      return state;
+    }
+    if (stopRequested) {
+      state.status = 'pending';
+      return state;
+    }
+  }
+
+  let implementAttempt = 1;
+  let reviewAttempt = 1;
+  let useEscalation = false;
+  let exhausted = false;
+  let fullVerifyVerdict: VerdictKind = 'unparseable';
+  let reviewVerdict: VerdictKind | null = null;
+  let lastFullVerifyOutput = '';
+  let lastReviewOutput = '';
+
+  while (true) {
+    state.stage = 'implement';
+    const escalationTier = useEscalation ? config.escalation?.tier : undefined;
+    const implementOutput = await runStageAgent('implement', implementAttempt, 1, escalationTier, {
+      fullVerifyFindings: lastFullVerifyOutput,
+      reviewFindings: lastReviewOutput,
+      prReviewFeedback: '',
+    });
+    state.implementAttempts = implementAttempt;
+    state.iterations += 1;
+    const diffEmpty = implementOutput.trim().length === 0;
+
+    state.stage = 'full_verify';
+    const verifyCommands =
+      [...(config.fastVerifyCommands ?? []), ...(config.fullVerifyCommands ?? [])].join('\n') ||
+      '(none configured — use your own judgment on the diff)';
+    const fullVerifyResult = await runVerdictStage('full_verify', implementAttempt, 'FULL:', {
+      verifyCommands,
+    });
+    fullVerifyVerdict = fullVerifyResult.kind;
+    lastFullVerifyOutput = fullVerifyResult.output;
+
+    if (fullVerifyVerdict === 'pass') {
+      state.stage = 'review';
+      const reviewResult = await runVerdictStage('review', reviewAttempt, 'VERDICT:');
+      reviewVerdict = reviewResult.kind;
+      lastReviewOutput = reviewResult.output;
+      reviewAttempt += 1;
+    } else {
+      reviewVerdict = null;
+    }
+
+    const evaluate = () =>
+      nextRepairAction({
+        implementAttempts: implementAttempt,
+        iterations: state.iterations,
+        cumulativeTokens: state.cumulativeTokens,
+        fullVerify: fullVerifyVerdict,
+        review: reviewVerdict ?? 'unparseable',
+        diffEmpty,
+        brakes: effectiveBrakes,
+        hasEscalationModel: config.escalation != null,
+      });
+
+    let action = evaluate();
+    while (action.kind === 'block') {
+      state.status = 'blocked';
+      state.blockReason = action.reason;
+      if (await waitForResumeOrCancel()) {
         state.stage = 'failed';
         state.status = 'failed';
         await dropAgentWorking();
         await activities.cleanupWorkspace(state.workspaceRef, input.repo);
         return state;
       }
-      if (stopRequested) {
-        state.status = 'pending';
-        return state;
-      }
+      action = evaluate();
     }
 
-    let implementAttempt = 1;
-    let reviewAttempt = 1;
-    let useEscalation = false;
-    let exhausted = false;
-    let fullVerifyVerdict: VerdictKind = 'unparseable';
-    let reviewVerdict: VerdictKind | null = null;
-    let lastFullVerifyOutput = '';
-    let lastReviewOutput = '';
+    if (action.kind === 'continue') {
+      break;
+    }
+    if (action.kind === 'open-pr-exhausted') {
+      exhausted = true;
+      break;
+    }
+    useEscalation = action.useEscalationModel;
+    implementAttempt += 1;
+  }
 
-    while (true) {
-      state.stage = 'implement';
-      const escalationTier = useEscalation ? config.escalation?.tier : undefined;
-      const implementOutput = await runStageAgent(
-        'implement',
-        implementAttempt,
-        1,
-        escalationTier,
+  state.stage = 'pr';
+  await activities.pushBranch(
+    input.repo,
+    state.workspaceRef,
+    state.branch,
+    `${input.taskId}-${implementAttempt}`,
+  );
+
+  // Read the committed design/plan artifacts from the canonical superpowers locations
+  // (right after the final push, before opening the PR — per design).
+  const designPath = `docs/superpowers/specs/${input.taskId}-design.md`;
+  const planPath = `docs/superpowers/plans/${input.taskId}-plan.md`;
+
+  const [designContent, planContent] = await Promise.all([
+    activities.readWorkspaceFile(state.workspaceRef, designPath),
+    activities.readWorkspaceFile(state.workspaceRef, planPath),
+  ]);
+
+  const findingsSummary = `full_verify: ${fullVerifyVerdict}; review: ${reviewVerdict ?? 'not-run'}`;
+  const prBody = buildRichPrBody({
+    taskId: input.taskId,
+    goal: input.goal,
+    issueRef: input.issueRef,
+    issueBody,
+    designContent,
+    planContent,
+    exhausted,
+    implementAttempts: state.implementAttempts,
+    iterations: state.iterations,
+    cumulativeTokens: state.cumulativeTokens,
+    findingsSummary,
+  });
+
+  const prLabels = [...new Set([...issueLabels, 'agentops', AGENTOPS_MANAGED_LABEL])];
+  const { prRef } = await activities.openPr({
+    repo: input.repo,
+    branch: state.branch,
+    title: buildPrTitle(input.goal),
+    body: prBody,
+    labels: prLabels,
+  });
+  state.prRef = prRef;
+  await dropAgentWorking();
+  if (exhausted) {
+    await activities.commentOnIssue(input.issueRef ?? input.taskId, prBody);
+  }
+
+  if (patched('shared-pr-landing-v1')) {
+    const snapshot = await activities.getPrSnapshot(prRef);
+    const handle = await startChild(prLanding, {
+      workflowId: prLandingWorkflowId(prRef),
+      args: [
         {
-          fullVerifyFindings: lastFullVerifyOutput,
-          reviewFindings: lastReviewOutput,
-          prReviewFeedback: '',
-        },
-      );
-      state.implementAttempts = implementAttempt;
-      state.iterations += 1;
-      const diffEmpty = implementOutput.trim().length === 0;
-
-      state.stage = 'full_verify';
-      const verifyCommands =
-        [...(config.fastVerifyCommands ?? []), ...(config.fullVerifyCommands ?? [])].join('\n') ||
-        '(none configured — use your own judgment on the diff)';
-      const fullVerifyResult = await runVerdictStage('full_verify', implementAttempt, 'FULL:', {
-        verifyCommands,
-      });
-      fullVerifyVerdict = fullVerifyResult.kind;
-      lastFullVerifyOutput = fullVerifyResult.output;
-
-      if (fullVerifyVerdict === 'pass') {
-        state.stage = 'review';
-        const reviewResult = await runVerdictStage('review', reviewAttempt, 'VERDICT:');
-        reviewVerdict = reviewResult.kind;
-        lastReviewOutput = reviewResult.output;
-        reviewAttempt += 1;
-      } else {
-        reviewVerdict = null;
-      }
-
-      const evaluate = () =>
-        nextRepairAction({
-          implementAttempts: implementAttempt,
-          iterations: state.iterations,
-          cumulativeTokens: state.cumulativeTokens,
-          fullVerify: fullVerifyVerdict,
-          review: reviewVerdict ?? 'unparseable',
-          diffEmpty,
-          brakes: effectiveBrakes,
-          hasEscalationModel: config.escalation != null,
-        });
-
-      let action = evaluate();
-      while (action.kind === 'block') {
-        state.status = 'blocked';
-        state.blockReason = action.reason;
-        if (await waitForResumeOrCancel()) {
-          state.stage = 'failed';
-          state.status = 'failed';
-          await dropAgentWorking();
-          await activities.cleanupWorkspace(state.workspaceRef, input.repo);
-          return state;
-        }
-        action = evaluate();
-      }
-
-      if (action.kind === 'continue') {
-        break;
-      }
-      if (action.kind === 'open-pr-exhausted') {
-        exhausted = true;
-        break;
-      }
-      useEscalation = action.useEscalationModel;
-      implementAttempt += 1;
-    }
-
-    state.stage = 'pr';
-    await activities.pushBranch(
-      input.repo,
-      state.workspaceRef,
-      state.branch,
-      `${input.taskId}-${implementAttempt}`,
-    );
-
-    // Read the committed design/plan artifacts from the canonical superpowers locations
-    // (right after the final push, before opening the PR — per design).
-    const designPath = `docs/superpowers/specs/${input.taskId}-design.md`;
-    const planPath = `docs/superpowers/plans/${input.taskId}-plan.md`;
-
-    const [designContent, planContent] = await Promise.all([
-      activities.readWorkspaceFile(state.workspaceRef, designPath),
-      activities.readWorkspaceFile(state.workspaceRef, planPath),
-    ]);
-
-    const findingsSummary = `full_verify: ${fullVerifyVerdict}; review: ${reviewVerdict ?? 'not-run'}`;
-    const prBody = buildRichPrBody({
-      taskId: input.taskId,
-      goal: input.goal,
-      issueRef: input.issueRef,
-      issueBody,
-      designContent,
-      planContent,
-      exhausted,
-      implementAttempts: state.implementAttempts,
-      iterations: state.iterations,
-      cumulativeTokens: state.cumulativeTokens,
-      findingsSummary,
-    });
-
-    const prLabels = [...new Set([...issueLabels, 'agentops', AGENTOPS_MANAGED_LABEL])];
-    const { prRef } = await activities.openPr({
-      repo: input.repo,
-      branch: state.branch,
-      title: buildPrTitle(input.goal),
-      body: prBody,
-      labels: prLabels,
-    });
-    state.prRef = prRef;
-    await dropAgentWorking();
-    if (exhausted) {
-      await activities.commentOnIssue(input.issueRef ?? input.taskId, prBody);
-    }
-
-    if (patched('shared-pr-landing-v1')) {
-      const snapshot = await activities.getPrSnapshot(prRef);
-      const handle = await startChild(prLanding, {
-        workflowId: prLandingWorkflowId(prRef),
-        args: [
-          {
-            taskId: `landing-${input.taskId}`,
-            project: input.project,
-            repo: input.repo,
-            prRef,
-            agentCreated: true,
-            config,
-            workspace: {
-              workspaceRef: state.workspaceRef,
-              branch: state.branch,
-              validatedHeadSha: snapshot.headSha,
-            },
+          taskId: `landing-${input.taskId}`,
+          project: input.project,
+          repo: input.repo,
+          prRef,
+          agentCreated: true,
+          config,
+          workspace: {
+            workspaceRef: state.workspaceRef,
+            branch: state.branch,
+            validatedHeadSha: snapshot.headSha,
           },
-        ],
-      });
-      landingChild = handle;
-      const landing = await handle.result();
-      state.landingOutcome = landing.outcome;
-      if (landing.outcome === 'blocked') {
-        state.stage = 'pr_babysit';
-        state.status = 'blocked';
-        state.blockReason = 'pr-landing-blocked';
-      } else if (landing.outcome === 'failed' || landing.outcome === 'cancelled') {
-        state.stage = 'failed';
-        state.status = 'failed';
-      } else {
-        state.stage = 'done';
-        state.status = 'done';
-      }
-      return state;
+        },
+      ],
+    });
+    landingChild = handle;
+    const landing = await handle.result();
+    state.landingOutcome = landing.outcome;
+    if (landing.outcome === 'blocked') {
+      state.stage = 'pr_babysit';
+      state.status = 'blocked';
+      state.blockReason = 'pr-landing-blocked';
+    } else if (landing.outcome === 'failed' || landing.outcome === 'cancelled') {
+      state.stage = 'failed';
+      state.status = 'failed';
+    } else {
+      state.stage = 'done';
+      state.status = 'done';
     }
-
-    state.stage = 'pr_babysit';
-    const seenFeedbackHashes = new Set<string>();
-    let waitingRounds = 0;
-    // Lifted to unbounded once a human resumes a babysit brake -- same escape
-    // hatch as maxBabysitRounds (see resumeSignal): after "keep going" we don't
-    // want the loop to immediately re-brake.
-    let maxBabysitWaits = MAX_BABYSIT_WAITS;
-
-    while (true) {
-      await sleep(DEFAULT_BABYSIT_POLL_MS);
-      const feedback = await activities.getPrFeedback(prRef);
-      const decision = babysitDecision(
-        feedback,
-        seenFeedbackHashes,
-        state.babysitRounds,
-        effectiveBrakes.maxBabysitRounds,
-        waitingRounds,
-        maxBabysitWaits,
-      );
-
-      if (decision === 'merge_ready') {
-        break;
-      }
-
-      if (decision === 'braked') {
-        state.status = 'blocked';
-        state.blockReason = 'babysit-brake';
-        if (await waitForResumeOrCancel()) {
-          state.stage = 'failed';
-          state.status = 'failed';
-          await dropAgentWorking();
-          await activities.cleanupWorkspace(state.workspaceRef, input.repo);
-          return state;
-        }
-        // Human resumed: stop auto-braking (the round cap is lifted by
-        // resumeSignal; lift the no-progress cap here too) and restart the
-        // no-progress counter so continued babysitting isn't instantly re-braked.
-        maxBabysitWaits = Number.MAX_SAFE_INTEGER;
-        waitingRounds = 0;
-        state.stage = 'pr_babysit';
-        continue;
-      }
-
-      if (decision === 'actionable') {
-        waitingRounds = 0; // real progress -- reset the no-progress counter
-        seenFeedbackHashes.add(feedbackHash(feedback));
-        state.babysitRounds += 1;
-        implementAttempt += 1;
-        state.stage = 'implement';
-        const reviewComments = feedback.comments
-          .filter((c) => !c.resolved)
-          .map((c) => c.body)
-          .join('\n\n---\n\n');
-        await runStageAgent('implement', implementAttempt, 1, undefined, {
-          fullVerifyFindings: lastFullVerifyOutput,
-          reviewFindings: lastReviewOutput,
-          prReviewFeedback: reviewComments || '',
-        });
-        state.implementAttempts = implementAttempt;
-        state.iterations += 1;
-        await activities.pushBranch(
-          input.repo,
-          state.workspaceRef,
-          state.branch,
-          `${input.taskId}-${implementAttempt}`,
-        );
-        state.stage = 'pr_babysit';
-        continue;
-      }
-
-      // decision === 'waiting': no actionable signal this poll. Count it toward
-      // the no-progress cap, then loop again after the next poll interval.
-      waitingRounds += 1;
-    }
-
-    state.stage = 'done';
-    state.status = 'done';
-    await activities.cleanupWorkspace(state.workspaceRef, input.repo);
-    return state;
-  } catch (err) {
-    if (!(err instanceof DevCycleCancelledError)) {
-      throw err;
-    }
-    state.stage = 'failed';
-    state.status = 'failed';
-    await dropAgentWorking();
-    await activities.cleanupWorkspace(state.workspaceRef, input.repo);
     return state;
   }
+
+  state.stage = 'pr_babysit';
+  const seenFeedbackHashes = new Set<string>();
+  let waitingRounds = 0;
+  // Lifted to unbounded once a human resumes a babysit brake -- same escape
+  // hatch as maxBabysitRounds (see resumeSignal): after "keep going" we don't
+  // want the loop to immediately re-brake.
+  let maxBabysitWaits = MAX_BABYSIT_WAITS;
+
+  while (true) {
+    await sleep(DEFAULT_BABYSIT_POLL_MS);
+    const feedback = await activities.getPrFeedback(prRef);
+    const decision = babysitDecision(
+      feedback,
+      seenFeedbackHashes,
+      state.babysitRounds,
+      effectiveBrakes.maxBabysitRounds,
+      waitingRounds,
+      maxBabysitWaits,
+    );
+
+    if (decision === 'merge_ready') {
+      break;
+    }
+
+    if (decision === 'braked') {
+      state.status = 'blocked';
+      state.blockReason = 'babysit-brake';
+      if (await waitForResumeOrCancel()) {
+        state.stage = 'failed';
+        state.status = 'failed';
+        await dropAgentWorking();
+        await activities.cleanupWorkspace(state.workspaceRef, input.repo);
+        return state;
+      }
+      // Human resumed: stop auto-braking (the round cap is lifted by
+      // resumeSignal; lift the no-progress cap here too) and restart the
+      // no-progress counter so continued babysitting isn't instantly re-braked.
+      maxBabysitWaits = Number.MAX_SAFE_INTEGER;
+      waitingRounds = 0;
+      state.stage = 'pr_babysit';
+      continue;
+    }
+
+    if (decision === 'actionable') {
+      waitingRounds = 0; // real progress -- reset the no-progress counter
+      seenFeedbackHashes.add(feedbackHash(feedback));
+      state.babysitRounds += 1;
+      implementAttempt += 1;
+      state.stage = 'implement';
+      const reviewComments = feedback.comments
+        .filter((c) => !c.resolved)
+        .map((c) => c.body)
+        .join('\n\n---\n\n');
+      await runStageAgent('implement', implementAttempt, 1, undefined, {
+        fullVerifyFindings: lastFullVerifyOutput,
+        reviewFindings: lastReviewOutput,
+        prReviewFeedback: reviewComments || '',
+      });
+      state.implementAttempts = implementAttempt;
+      state.iterations += 1;
+      await activities.pushBranch(
+        input.repo,
+        state.workspaceRef,
+        state.branch,
+        `${input.taskId}-${implementAttempt}`,
+      );
+      state.stage = 'pr_babysit';
+      continue;
+    }
+
+    // decision === 'waiting': no actionable signal this poll. Count it toward
+    // the no-progress cap, then loop again after the next poll interval.
+    waitingRounds += 1;
+  }
+
+  state.stage = 'done';
+  state.status = 'done';
+  await activities.cleanupWorkspace(state.workspaceRef, input.repo);
+  return state;
 }
 
 /** Pure helper: extract the explicit Brainstorm Summary section (added in design prompt). */

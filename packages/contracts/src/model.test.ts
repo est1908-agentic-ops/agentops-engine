@@ -13,6 +13,10 @@ describe('ModelRefSchema', () => {
     expect(() => ModelRefSchema.parse({ backend: 'stub', model: '' })).toThrow();
   });
 
+  it('rejects an unknown backend', () => {
+    expect(ModelRefSchema.safeParse({ backend: 'retired-gateway', model: 'model' }).success).toBe(false);
+  });
+
   it('accepts an optional effort level', () => {
     expect(() =>
       ModelRefSchema.parse({ backend: 'claude', model: 'claude-sonnet-5', effort: 'high' }),

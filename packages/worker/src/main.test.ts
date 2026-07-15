@@ -8,7 +8,6 @@ import { assertLiveBackendConfig, buildActivityDependencies, resolveCacheDir, re
 
 const validLiveEnv: NodeJS.ProcessEnv = {
   AGENT_RUNNER_IMAGE: 'gitactions.est1908.top/agentic-ops/agent-runner:abc123',
-  LITELLM_API_KEY: 'sk-real-key',
   CLAUDE_AUTH_SECRET_NAME: 'claude-credentials',
   PI_AUTH_SECRET_NAME: 'pi-credentials',
 };
@@ -29,9 +28,8 @@ describe('assertLiveBackendConfig', () => {
     ).toThrow(/AGENT_RUNNER_IMAGE/);
   });
 
-  it('throws when LITELLM_API_KEY is unset', () => {
-    const { LITELLM_API_KEY: _drop, ...rest } = validLiveEnv;
-    expect(() => assertLiveBackendConfig(rest)).toThrow(/LITELLM_API_KEY/);
+  it('requires only configured direct-backend credentials', () => {
+    expect(() => assertLiveBackendConfig(validLiveEnv)).not.toThrow();
   });
 
   it('throws when CLAUDE_AUTH_SECRET_NAME is unset', () => {
@@ -46,7 +44,7 @@ describe('assertLiveBackendConfig', () => {
 
   it('lists every missing setting at once, not just the first', () => {
     expect(() => assertLiveBackendConfig({})).toThrow(
-      /AGENT_RUNNER_IMAGE.*LITELLM_API_KEY.*CLAUDE_AUTH_SECRET_NAME.*PI_AUTH_SECRET_NAME/s,
+      /AGENT_RUNNER_IMAGE.*CLAUDE_AUTH_SECRET_NAME.*PI_AUTH_SECRET_NAME/s,
     );
   });
 });

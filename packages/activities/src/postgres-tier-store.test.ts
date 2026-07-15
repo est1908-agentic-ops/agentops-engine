@@ -44,13 +44,13 @@ function fakePool(): Queryable & {
 }
 
 describe('PostgresTierStore', () => {
-  it('ensureSchema issues a single idempotent CREATE TABLE', async () => {
+  it('ensures the table and removes unsupported persisted backends', async () => {
     const db = fakeDb();
     const store = new PostgresTierStore(db);
     await store.ensureSchema();
-    expect(db.calls).toHaveLength(1);
+    expect(db.calls).toHaveLength(2);
     expect(db.calls[0].sql).toMatch(/CREATE TABLE IF NOT EXISTS tiers/);
-    // UNIQUE(tier_name, position) is a table constraint, not a separate index call.
+    expect(db.calls[1].sql).toMatch(/DELETE FROM tiers WHERE backend NOT IN/);
   });
 
   it('loadAll returns tiers grouped by name, ordered by position', async () => {

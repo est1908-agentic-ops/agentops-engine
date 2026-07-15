@@ -6,7 +6,7 @@ import { readJsonBody, type HandlerResponse } from './handler-util';
 // The full tier table: tier name -> ordered ModelRef[]. PUT replaces it wholesale.
 const TiersTableSchema = z.record(z.string().min(1), z.array(ModelRefSchema));
 
-const ALLOWED_BACKENDS = ['claude', 'cursor', 'pi', 'codex', 'stub', 'litellm', 'platform'] as const;
+const ALLOWED_BACKENDS = ['claude', 'cursor', 'pi', 'codex', 'stub', 'platform'] as const;
 const ALLOWED_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 
 export interface TierEntryInput {
