@@ -12,11 +12,12 @@ import type { ProjectWorkerParamsProvider } from './argocd-project-workers';
 import { matchesLinearTriggerLabel, parseLinearIssueEvent } from './parse-linear-issue-event';
 import { parseIssueTriggerEvent } from './parse-issue-labeled';
 import { parsePushEvent } from './parse-push-event';
+import { parsePrLandingEvent } from './parse-pr-landing-event';
 import { parsePrReviewEvent } from './parse-pr-review-event';
 import { startConfigSync } from './start-config-sync';
 import { startDevCycleForLinearIssue } from './start-dev-cycle-for-linear-issue';
 import { startDevCycleForIssue } from './start-dev-cycle';
-import { startDevCyclePrRepair } from './start-dev-cycle-pr-repair';  // added
+import { startOrSignalPrLanding } from './start-pr-landing';
 import { isFreshLinearWebhook, verifyLinearSignature } from './verify-linear-signature';
 import { verifyGithubSignature } from './verify-signature';
 import { verifyBearerToken } from './verify-bearer-token';
@@ -162,27 +163,33 @@ async function handleGithubWebhook(deps: GatewayDeps, req: IncomingMessage, res:
     return;
   }
 
-  const reviewEvent = parsePrReviewEvent(eventType, payload);
-  if (reviewEvent) {
-    if (!reviewEvent.hasAgentopsLabel) {
-      res.writeHead(204).end();
-      return;
-    }
-    const entry = await resolveManagedProjectEntry(deps.managedProjectDeps, reviewEvent.repo);
+  const landingEvent = parsePrLandingEvent(eventType, payload);
+  if (landingEvent) {
+    const entry = await resolveManagedProjectEntry(deps.managedProjectDeps, landingEvent.repo);
     if (!entry) {
       res.writeHead(202).end('no project registered');
       return;
     }
-    try {
-      const scm = deps.buildScm(entry);
-      const config = await resolveProjectConfig(deps.managedProjectDeps, scm, entry.repo);
-      const result = await startDevCyclePrRepair(deps.client, deps.taskQueue, entry.project, reviewEvent, config);
-      console.log(`gateway: ${result.started ? 'started' : 'already running'} devCyclePrRepair ${result.taskId} for ${reviewEvent.prRef}`);
-      res.writeHead(202).end(JSON.stringify(result));
-    } catch (err) {
-      console.error('gateway: failed to start pr repair', err);
-      res.writeHead(500).end('failed to start repair');
+    const scm = deps.buildScm(entry);
+    const config = await resolveProjectConfig(deps.managedProjectDeps, scm, entry.repo);
+    if (!landingEvent.managed && landingEvent.kind === 'enroll' && (config.autoMerge ?? 'disabled') === 'disabled') {
+      res.writeHead(204).end();
+      return;
     }
+    try {
+      const result = await startOrSignalPrLanding(deps.client, deps.taskQueue, entry.project, landingEvent, config);
+      console.log(`gateway: ${result.started ? 'started' : 'signalled'} prLanding ${result.workflowId} for ${landingEvent.prRef}`);
+      res.writeHead(result.started ? 202 : 204).end(JSON.stringify(result));
+    } catch (err) {
+      console.error('gateway: failed to start or signal pr landing', err);
+      res.writeHead(500).end('failed to start landing');
+    }
+    return;
+  }
+
+  const reviewEvent = parsePrReviewEvent(eventType, payload);
+  if (reviewEvent) {
+    res.writeHead(204).end();
     return;
   }
 

@@ -462,4 +462,69 @@ describe('createGatewayServer config branch (DB config vs file fallback)', () =>
     const [, options] = start.mock.calls[0];
     expect(options.args[0].config.fastVerifyCommands).toEqual(['pnpm lint']);
   });
+
+  it('starts prLanding on external automerge enrollment when autoMerge is enabled', async () => {
+    start = vi.fn().mockResolvedValue(undefined);
+    const { publicKey, privateKey } = generateManagedProjectKeyPair();
+    const managedProjectDeps = fakeManagedProjectDeps(privateKey, [
+      {
+        project: 'my-project',
+        repo: 'octocat/hello-world',
+        config: { stages: {}, routing: {}, brakes: { maxImplementAttempts: 1, maxIterations: 1, maxTokens: 1, maxBabysitRounds: 1 }, autoMerge: 'label' },
+        encryptedToken: encryptForManagedProject(publicKey, 't'),
+      },
+    ]);
+    await listen({
+      client: { workflow: { start } } as never,
+      taskQueue: 'agentops-devcycle',
+      webhookSecret: SECRET,
+      triggerLabel: TRIGGER_LABEL,
+      buildScm: () => new MemoryScmPort(),
+      managedProjectDeps,
+    });
+
+    const body = JSON.stringify({
+      action: 'labeled',
+      label: { name: 'automerge' },
+      pull_request: { number: 7, head: { ref: 'feature/x' }, labels: [{ name: 'automerge' }] },
+      repository: { full_name: 'octocat/hello-world' },
+    });
+    const res = await post(port, '/webhooks/github', body, {
+      'content-type': 'application/json',
+      'x-github-event': 'pull_request',
+      'x-hub-signature-256': sign(body),
+    });
+    expect(res.status).toBe(202);
+    expect(start).toHaveBeenCalledOnce();
+    expect(start.mock.calls[0][1].args[0]).toMatchObject({ agentCreated: false, prRef: 'octocat/hello-world#7' });
+  });
+
+  it('returns 204 for external automerge enrollment when autoMerge is disabled', async () => {
+    start = vi.fn().mockResolvedValue(undefined);
+    const { publicKey, privateKey } = generateManagedProjectKeyPair();
+    const managedProjectDeps = fakeManagedProjectDeps(privateKey, [
+      { project: 'my-project', repo: 'octocat/hello-world', encryptedToken: encryptForManagedProject(publicKey, 't') },
+    ]);
+    await listen({
+      client: { workflow: { start } } as never,
+      taskQueue: 'agentops-devcycle',
+      webhookSecret: SECRET,
+      triggerLabel: TRIGGER_LABEL,
+      buildScm: () => new MemoryScmPort(),
+      managedProjectDeps,
+    });
+    const body = JSON.stringify({
+      action: 'labeled',
+      label: { name: 'automerge' },
+      pull_request: { number: 7, head: { ref: 'feature/x' }, labels: [{ name: 'automerge' }] },
+      repository: { full_name: 'octocat/hello-world' },
+    });
+    const res = await post(port, '/webhooks/github', body, {
+      'content-type': 'application/json',
+      'x-github-event': 'pull_request',
+      'x-hub-signature-256': sign(body),
+    });
+    expect(res.status).toBe(204);
+    expect(start).not.toHaveBeenCalled();
+  });
 });
