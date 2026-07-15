@@ -78,7 +78,7 @@ const config = {
   fullVerifyCommands: [],
   stages: {},
   routing: {},
-  brakes: { maxImplementAttempts: 5, maxIterations: 20, maxBabysitRounds: 10 },
+  brakes: { maxImplementAttempts: 5, maxIterations: 20, maxTokens: 1000000, maxBabysitRounds: 10 },
 };
 
 describe('devCyclePrRepair babysit brake cancel', () => {
