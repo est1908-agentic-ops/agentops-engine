@@ -1,11 +1,11 @@
-# Software Lifecycle Vision
+# Software Lifecycle Development System (SLDS)
 
 This document is the source of truth for how Agentic Ops develops, repairs, and
 improves software. It defines the target lifecycle. The current implementation
 may be incomplete, but every upcoming change must move toward this model or
 update this document deliberately.
 
-## Issue development lifecycle
+## Software development cycle
 
 `devCycle` turns an issue into a merge-ready pull request:
 
