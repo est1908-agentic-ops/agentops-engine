@@ -71,6 +71,8 @@ export function createProjectScopedPorts(entries: ProjectScopedPortsEntry[]): Pr
       // instead of an uncaught synchronous exception from the dispatcher.
       openPr: async (req) => resolve(req.repo).scm.openPr(req),
       getPrFeedback: async (prRef) => resolve(repoFromRef(prRef)).scm.getPrFeedback(prRef),
+      getPrSnapshot: async (prRef) => resolve(repoFromRef(prRef)).scm.getPrSnapshot(prRef),
+      mergePr: async (req) => resolve(repoFromRef(req.prRef)).scm.mergePr(req),
       push: async (repo, workspaceRef, branch, contentHash) =>
         resolve(repo).scm.push(repo, workspaceRef, branch, contentHash),
       readFile: async (repo, path) => resolve(repo).scm.readFile(repo, path),

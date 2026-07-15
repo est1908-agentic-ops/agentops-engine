@@ -170,6 +170,19 @@ describe('createActivities', () => {
     expect(deps.tracker.getLabels('issue-1')).toEqual(['bug']);
   });
 
+  it('getPrSnapshot and mergePr validate and return zod-parsed SCM results', async () => {
+    const deps = buildDeps();
+    const activities = createActivities(deps);
+    deps.scm.scriptSnapshots('demo/repo#7', [{
+      prRef: 'demo/repo#7', headSha: 'abc', headRepo: 'demo/repo', headBranch: 'feature/x', checkoutRef: 'refs/pull/7/head',
+      labels: ['automerge'], state: 'open', draft: false, mergeable: true, mergedHeadSha: null,
+      ciStatus: 'green', unresolvedThreads: 0, comments: [],
+    }]);
+    await expect(activities.getPrSnapshot('demo/repo#7')).resolves.toMatchObject({ headSha: 'abc', labels: ['automerge'] });
+    await expect(activities.mergePr({ prRef: 'demo/repo#7', expectedHeadSha: 'abc' }))
+      .resolves.toEqual({ kind: 'merged', headSha: 'abc', mergeCommitSha: 'merge-abc' });
+  });
+
   it('openPr/getPrFeedback/pushBranch delegate to the scm port', async () => {
     const deps = buildDeps();
     const activities = createActivities(deps);

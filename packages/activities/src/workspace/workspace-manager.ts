@@ -21,7 +21,7 @@ export interface PreparedWorkspace {
 }
 
 export interface Workspaces {
-  prepare(taskId: string, repo: string, initCommands?: string[], headBranch?: string): Promise<PreparedWorkspace>;
+  prepare(taskId: string, repo: string, initCommands?: string[], headBranch?: string, headRef?: string): Promise<PreparedWorkspace>;
   cleanup(workspaceRef: string, repo: string): Promise<void>;
   prepareScratch(taskId: string): Promise<{ workspaceRef: string }>;
   cleanupScratch(workspaceRef: string): Promise<void>;
@@ -66,7 +66,7 @@ export class WorkspaceManager implements Workspaces {
     this.commandRunner = opts.commandRunner ?? new SpawnCommandRunner();
   }
 
-  async prepare(taskId: string, repo: string, initCommands?: string[], headBranch?: string): Promise<PreparedWorkspace> {
+  async prepare(taskId: string, repo: string, initCommands?: string[], headBranch?: string, headRef?: string): Promise<PreparedWorkspace> {
     const git = this.resolveGit(repo);
     await mkdir(this.cacheDir, { recursive: true });
     await mkdir(this.workspacesDir, { recursive: true });
@@ -79,18 +79,23 @@ export class WorkspaceManager implements Workspaces {
 
     await this.reclaimStaleWorktree(git, cachePath, workspacePath, branch);
 
-    // For repair on existing PR branch (headBranch provided), try to checkout existing branch from origin
-    // instead of always creating new.
     let addResult;
-    if (headBranch) {
-      // fetch the branch if it exists on remote
+    if (headRef) {
+      const fetchResult = await git.run(['fetch', 'origin', headRef], { cwd: cachePath });
+      if (fetchResult.exitCode !== 0) {
+        throw new WorkspaceError(`git fetch origin ${headRef} failed for ${repo}: ${fetchResult.stderr}`, fetchResult.spawnFailed === true);
+      }
+      addResult = await git.run(
+        ['worktree', 'add', workspacePath, '-B', branch, 'FETCH_HEAD'],
+        { cwd: cachePath },
+      );
+    } else if (headBranch) {
       await git.run(['fetch', 'origin', branch], { cwd: cachePath });
       addResult = await git.run(
         ['worktree', 'add', workspacePath, '-B', branch, `origin/${branch}`],
         { cwd: cachePath },
       );
       if (addResult.exitCode !== 0) {
-        // fallback to create
         addResult = await git.run(
           ['worktree', 'add', workspacePath, '-b', branch, `origin/${baseBranch}`],
           { cwd: cachePath },

@@ -10,6 +10,7 @@ import {
 } from '@agentops/backends';
 import {
   normalizeRepo,
+  parseRef,
   type Issue,
   type OpenPrRequest,
   type OpenPrResult,
@@ -21,13 +22,16 @@ import type {
   AgentRunResult,
   ExecutePlatformActionRequest,
   ExecutePlatformActionResult,
+  MergePrRequest,
+  MergePrResult,
   ModelRef,
   PrFeedback,
+  PrSnapshot,
   ProjectConfig,
   ResolvedProjectEntry,
   RunStats,
 } from '@agentops/contracts';
-import { parseProjectConfig, sha256, type AgentSpec, type AgentsManifest } from '@agentops/contracts';
+import { MergePrResultSchema, parseProjectConfig, PrSnapshotSchema, sha256, type AgentSpec, type AgentsManifest } from '@agentops/contracts';
 import { parseAgentsManifest, BUILTIN_WORKFLOW_INPUTS } from '@agentops/contracts';
 import type { FiledFindingStore } from './filed-finding-store';
 import { cronScheduleSpec, type ScheduleClientLike } from './schedule-ops';
@@ -314,6 +318,18 @@ export function createActivities(deps: ActivityDependencies) {
     async getPrFeedback(prRef: string): Promise<PrFeedback> {
       return deps.scm.getPrFeedback(prRef);
     },
+    async getPrSnapshot(prRef: string): Promise<PrSnapshot> {
+      const { owner, repo } = parseRef(prRef);
+      assertProjectOwnsRepo(`${owner}/${repo}`, deps.registry);
+      const snapshot = await deps.scm.getPrSnapshot(prRef);
+      return PrSnapshotSchema.parse(snapshot);
+    },
+    async mergePr(req: MergePrRequest): Promise<MergePrResult> {
+      const { owner, repo } = parseRef(req.prRef);
+      assertProjectOwnsRepo(`${owner}/${repo}`, deps.registry);
+      const result = await deps.scm.mergePr(req);
+      return MergePrResultSchema.parse(result);
+    },
     async pushBranch(
       repo: string,
       workspaceRef: string,
@@ -333,11 +349,12 @@ export function createActivities(deps: ActivityDependencies) {
       taskId: string;
       repo: string;
       initCommands?: string[];
-      headBranch?: string;  // for PR repair to work on existing PR head
+      headBranch?: string;
+      headRef?: string;
     }): Promise<PreparedWorkspace> {
       assertProjectOwnsRepo(req.repo, deps.registry);
       try {
-        return await deps.workspaces.prepare(req.taskId, req.repo, req.initCommands, req.headBranch);
+        return await deps.workspaces.prepare(req.taskId, req.repo, req.initCommands, req.headBranch, req.headRef);
       } catch (err) {
         rethrowWorkspaceError(err);
       }

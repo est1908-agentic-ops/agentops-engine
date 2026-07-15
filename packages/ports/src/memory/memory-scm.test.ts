@@ -51,4 +51,29 @@ describe('MemoryScmPort', () => {
     const scm = new MemoryScmPort();
     await expect(scm.push('demo/repo', '/some/workspace/path', 'branch-x', 'hash-x')).resolves.toBeUndefined();
   });
+
+  it('scripts snapshots and merges at the exact expected head SHA', async () => {
+    const scm = new MemoryScmPort();
+    scm.scriptSnapshots('pr-1', [{
+      prRef: 'pr-1', headSha: 'abc', headRepo: 'demo/repo', headBranch: 'feature/x', checkoutRef: 'refs/pull/1/head',
+      labels: ['automerge'], state: 'open', draft: false, mergeable: true, mergedHeadSha: null,
+      ciStatus: 'green', unresolvedThreads: 0, comments: [],
+    }]);
+    await expect(scm.mergePr({ prRef: 'pr-1', expectedHeadSha: 'abc' }))
+      .resolves.toEqual({ kind: 'merged', headSha: 'abc', mergeCommitSha: 'merge-abc' });
+    expect(scm.getOperations()).toContainEqual({ type: 'mergePr', prRef: 'pr-1', expectedHeadSha: 'abc' });
+    await expect(scm.getPrSnapshot('pr-1')).resolves.toMatchObject({ state: 'merged', mergedHeadSha: 'abc' });
+  });
+
+  it('returns head-changed when the expected SHA does not match', async () => {
+    const scm = new MemoryScmPort();
+    scm.scriptSnapshots('pr-1', [{
+      prRef: 'pr-1', headSha: 'abc', headRepo: 'demo/repo', headBranch: 'feature/x', checkoutRef: 'refs/pull/1/head',
+      labels: [], state: 'open', draft: false, mergeable: true, mergedHeadSha: null,
+      ciStatus: 'green', unresolvedThreads: 0, comments: [],
+    }]);
+    await expect(scm.mergePr({ prRef: 'pr-1', expectedHeadSha: 'def' }))
+      .resolves.toEqual({ kind: 'head-changed' });
+    expect(scm.getOperations()).toHaveLength(0);
+  });
 });

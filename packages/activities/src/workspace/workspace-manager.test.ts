@@ -380,4 +380,22 @@ describe('WorkspaceManager.pruneOrphans', () => {
     const { manager } = buildManager();
     await expect(manager.pruneOrphans(['owner/live'])).resolves.toEqual({ removed: [] });
   });
+
+  it('fetches refs/pull/<n>/head and checks out FETCH_HEAD without falling back to the base branch', async () => {
+    writeFileSync(join(remoteDir, 'pr-feature.md'), 'pr head');
+    execFileSync('git', ['add', 'pr-feature.md'], { cwd: remoteDir });
+    execFileSync('git', ['commit', '-m', 'pr head commit'], { cwd: remoteDir });
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: remoteDir }).toString().trim();
+    execFileSync('git', ['update-ref', 'refs/pull/7/head', headSha], { cwd: remoteDir });
+
+    const { manager, gitCalls } = buildManager();
+    const result = await manager.prepare('task-pr', 'owner/repo', undefined, 'feature/pr', 'refs/pull/7/head');
+
+    expect(result.branch).toBe('feature/pr');
+    expect(gitCalls.some((args) => args[0] === 'fetch' && args[1] === 'origin' && args[2] === 'refs/pull/7/head')).toBe(true);
+    expect(gitCalls.some((args) =>
+      args[0] === 'worktree' && args[1] === 'add' && args[3] === '-B' && args[4] === 'feature/pr' && args[5] === 'FETCH_HEAD',
+    )).toBe(true);
+    expect(readFileSync(join(result.workspaceRef, 'pr-feature.md'), 'utf8')).toBe('pr head');
+  });
 });

@@ -22,7 +22,23 @@ export interface GithubClient {
         title: string;
         body: string;
       }): Promise<{ data: { number: number; html_url: string } }>;
-      get(params: { owner: string; repo: string; pull_number: number }): Promise<{ data: { head: { sha: string } } }>;
+      get(params: { owner: string; repo: string; pull_number: number }): Promise<{
+        data: {
+          head: { sha: string; ref: string; repo: { full_name: string } };
+          labels: Array<{ name: string }>;
+          state: 'open' | 'closed';
+          draft: boolean;
+          merged: boolean;
+          mergeable: boolean | null;
+          merge_commit_sha: string | null;
+        };
+      }>;
+      merge(params: {
+        owner: string;
+        repo: string;
+        pull_number: number;
+        sha: string;
+      }): Promise<{ data: { merged: boolean; message: string; sha: string } }>;
       list(params: {
         owner: string;
         repo: string;
