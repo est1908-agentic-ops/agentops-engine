@@ -1,8 +1,7 @@
 # Software Lifecycle Development System (SLDS)
 
 This document is the source of truth for how Agentic Ops develops, repairs, and
-improves software. It defines the target lifecycle. The current implementation
-may be incomplete, but every upcoming change must move toward this model or
+improves software. The current implementation may be incomplete, but every upcoming change must move toward this model or
 update this document deliberately.
 
 ## Software development cycle
@@ -17,15 +16,6 @@ turns that direction into working software:
 - Autonomous work may proceed only when it is aligned with the product vision
   and architecture. Work that would change either requires a human decision
   first.
-
-`devCycle` turns an issue into a merge-ready pull request:
-
-**Issue → Context → Assess → Design → Plan → Implement ↔ Verify ↔ Review → PR →
-Babysit ↔ Repair → Merge-ready**
-
-Stages may be skipped when policy determines they add no value. Verification
-failures, review findings, CI failures, and PR comments return the change to the
-repair loop.
 
 ## Development workflows
 
