@@ -7,6 +7,17 @@ update this document deliberately.
 
 ## Software development cycle
 
+Humans define the product vision, architecture, intent, and ideas. The SLDS
+turns that direction into working software:
+
+- `devCycle` implements human-defined intent as a merge-ready change.
+- Autonomous recurring workflows, such as bug hunting and self-healing,
+  continuously discover improvements and turn aligned findings into
+  merge-ready PRs through the same development cycle.
+- Autonomous work may proceed only when it is aligned with the product vision
+  and architecture. Work that would change either requires a human decision
+  first.
+
 `devCycle` turns an issue into a merge-ready pull request:
 
 **Issue → Context → Assess → Design → Plan → Implement ↔ Verify ↔ Review → PR →
