@@ -117,7 +117,7 @@ interface ControlDeps {
 
 **`HomePage`:**
 - Prompt textarea; three suggested-prompt chips (hardcoded `SUGGESTED_PROMPTS` constant) that fill the textarea on click.
-- Hint-repos: a single freeform text input (comma-separated `owner/repo`), always usable even with no registry configured, with a suggestions dropdown populated from `GET /api/registry/repos` when non-empty. **Decided over a strict registry-only picker** — `hintRepos` was designed as unvalidated prompt context, not a scope restriction (per `docs/superpowers/specs/2026-07-07-platform-agent-design.md` §3), so gating the input on registry membership would be more restrictive than the workflow itself.
+- Hint-repos: a single freeform text input (comma-separated `owner/repo`), always usable even with no registry configured, with a suggestions dropdown populated from `GET /api/registry/repos` when non-empty. **Decided over a strict registry-only picker** — `hintRepos` is unvalidated prompt context, not a scope restriction, so gating the input on registry membership would be more restrictive than the workflow itself.
 - Run button, disabled while the prompt is empty/whitespace-only or a submit is in flight. On success, navigates to `/runs/:workflowId`.
 - Recent-runs table below: fetches `GET /api/platform/runs?limit=20` once on mount (not continuously polled — an operator watching a specific run uses the detail page's live status instead). Columns: status badge, `promptSnippet` (falls back to `workflowId` if absent), started-at, link to detail.
 

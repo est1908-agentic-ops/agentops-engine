@@ -84,6 +84,6 @@ The engine stamps `project` in memo at start (from your agents.json entry) and
 enforces repo ownership on every privileged activity.
 
 See [docs/project-worker/](project-worker/) for a full reference (Rollbar monitor),
-[project-worker-deployment.md](project-worker-deployment.md) for deploying the worker, and the
-[custom-agent-workflows design spec](superpowers/specs/2026-07-12-custom-agent-workflows-sp2-design.md)
-for the security model and continuous-vs-scheduled details.
+[project-worker-deployment.md](project-worker-deployment.md) for deploying the
+worker, and the [software lifecycle vision](software-lifecycle-vision.md) for
+how project workflows fit into the wider development system.

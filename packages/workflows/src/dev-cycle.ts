@@ -127,7 +127,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
 
   // Prompt-started runs (control BFF) pass no config -- resolve it here on
   // the worker, which holds the credential private key and the merged
-  // static+managed registry (prompt-devcycle design §3/§5). Gateway, CLI,
+  // static+managed registry. Gateway, CLI,
   // and platform-children keep pre-resolving and passing config as before.
   let config: ProjectConfig;
   if (input.config) {
