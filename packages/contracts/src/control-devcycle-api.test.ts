@@ -61,6 +61,7 @@ describe('DevCycleRunDetailSchema', () => {
         prRef: 'pr-1',
         workspaceRef: 'ws-1',
         branch: 'task/t1',
+        landingOutcome: null,
       },
     });
     expect(detail.state?.prRef).toBe('pr-1');
