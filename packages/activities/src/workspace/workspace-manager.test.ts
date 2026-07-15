@@ -38,7 +38,12 @@ function buildManager(): { manager: WorkspaceManager; gitCalls: string[][] } {
       return real.run(args, opts);
     },
   };
-  const manager = new WorkspaceManager({ resolveGit: () => recording, cacheDir, workspacesDir, cloneUrl: () => remoteDir });
+  const manager = new WorkspaceManager({
+    resolveGit: () => recording,
+    cacheDir,
+    workspacesDir,
+    cloneUrl: () => remoteDir,
+  });
   return { manager, gitCalls };
 }
 
@@ -86,7 +91,12 @@ describe('WorkspaceManager', () => {
 
   it('never writes the auth token into the cached clone config', async () => {
     const git = new SpawnGitCommandRunner({ authToken: () => 'super-secret' });
-    const manager = new WorkspaceManager({ resolveGit: () => git, cacheDir, workspacesDir, cloneUrl: () => remoteDir });
+    const manager = new WorkspaceManager({
+      resolveGit: () => git,
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+    });
 
     await manager.prepare('task-1', 'owner/repo');
 
@@ -180,7 +190,10 @@ describe('WorkspaceManager — stale-state reclaim', () => {
 
 describe('WorkspaceManager — initCommands', () => {
   function buildManagerWithCommandRunner(commandRunner: {
-    run: (command: string, opts: { cwd: string }) => Promise<{ stdout: string; stderr: string; exitCode: number; spawnFailed?: boolean }>;
+    run: (
+      command: string,
+      opts: { cwd: string },
+    ) => Promise<{ stdout: string; stderr: string; exitCode: number; spawnFailed?: boolean }>;
   }): WorkspaceManager {
     const real = new SpawnGitCommandRunner();
     return new WorkspaceManager({
@@ -235,7 +248,9 @@ describe('WorkspaceManager — initCommands', () => {
       },
     });
 
-    await expect(manager.prepare('task-1', 'owner/repo', ['pnpm install', 'pnpm build'])).rejects.toThrow(/boom/);
+    await expect(
+      manager.prepare('task-1', 'owner/repo', ['pnpm install', 'pnpm build']),
+    ).rejects.toThrow(/boom/);
     expect(calls).toEqual(['pnpm install']);
   });
 
@@ -263,7 +278,12 @@ describe('WorkspaceManager — initCommands', () => {
 describe('WorkspaceManager — spawn failure classification', () => {
   it('throws a non-retryable WorkspaceError when the git binary itself fails to spawn', async () => {
     const fakeGit = {
-      run: async () => ({ stdout: '', stderr: 'spawn git ENOENT', exitCode: -1, spawnFailed: true }),
+      run: async () => ({
+        stdout: '',
+        stderr: 'spawn git ENOENT',
+        exitCode: -1,
+        spawnFailed: true,
+      }),
     };
     const manager = new WorkspaceManager({
       resolveGit: () => fakeGit,
@@ -272,7 +292,9 @@ describe('WorkspaceManager — spawn failure classification', () => {
       cloneUrl: () => remoteDir,
     });
 
-    await expect(manager.prepare('task-1', 'owner/repo')).rejects.toMatchObject({ nonRetryable: true });
+    await expect(manager.prepare('task-1', 'owner/repo')).rejects.toMatchObject({
+      nonRetryable: true,
+    });
   });
 
   it('throws a retryable WorkspaceError when git runs but exits non-zero for an ordinary reason', async () => {
@@ -286,7 +308,9 @@ describe('WorkspaceManager — spawn failure classification', () => {
       cloneUrl: () => remoteDir,
     });
 
-    await expect(manager.prepare('task-1', 'owner/repo')).rejects.toMatchObject({ nonRetryable: false });
+    await expect(manager.prepare('task-1', 'owner/repo')).rejects.toMatchObject({
+      nonRetryable: false,
+    });
   });
 });
 
@@ -379,5 +403,42 @@ describe('WorkspaceManager.pruneOrphans', () => {
   it('is a no-op when there are no cache/workspaces dirs yet', async () => {
     const { manager } = buildManager();
     await expect(manager.pruneOrphans(['owner/live'])).resolves.toEqual({ removed: [] });
+  });
+
+  it('fetches refs/pull/<n>/head and checks out FETCH_HEAD without falling back to the base branch', async () => {
+    writeFileSync(join(remoteDir, 'pr-feature.md'), 'pr head');
+    execFileSync('git', ['add', 'pr-feature.md'], { cwd: remoteDir });
+    execFileSync('git', ['commit', '-m', 'pr head commit'], { cwd: remoteDir });
+    const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: remoteDir })
+      .toString()
+      .trim();
+    execFileSync('git', ['update-ref', 'refs/pull/7/head', headSha], { cwd: remoteDir });
+
+    const { manager, gitCalls } = buildManager();
+    const result = await manager.prepare(
+      'task-pr',
+      'owner/repo',
+      undefined,
+      'feature/pr',
+      'refs/pull/7/head',
+    );
+
+    expect(result.branch).toBe('feature/pr');
+    expect(
+      gitCalls.some(
+        (args) => args[0] === 'fetch' && args[1] === 'origin' && args[2] === 'refs/pull/7/head',
+      ),
+    ).toBe(true);
+    expect(
+      gitCalls.some(
+        (args) =>
+          args[0] === 'worktree' &&
+          args[1] === 'add' &&
+          args[3] === '-B' &&
+          args[4] === 'feature/pr' &&
+          args[5] === 'FETCH_HEAD',
+      ),
+    ).toBe(true);
+    expect(readFileSync(join(result.workspaceRef, 'pr-feature.md'), 'utf8')).toBe('pr head');
   });
 });

@@ -19,7 +19,14 @@ function scriptedActivities(outputs: string[]): PlatformActivities {
     async runAgent() {
       const output = outputs[Math.min(i, outputs.length - 1)];
       i += 1;
-      return { output, tokensIn: 1, tokensOut: 1, wallMs: 1, resolvedBackend: 'stub', resolvedModel: 'stub' } as never;
+      return {
+        output,
+        tokensIn: 1,
+        tokensOut: 1,
+        wallMs: 1,
+        resolvedBackend: 'stub',
+        resolvedModel: 'stub',
+      } as never;
     },
     async recordRunStats() {},
     async resolveRepoConfig() {
@@ -100,7 +107,10 @@ describe('platformChat', () => {
     // `${taskId}-${stage}-${attempt}-${callIndex}` key only stays collision-free
     // across turns if `attempt` varies per turn.
     const attempts: number[] = [];
-    const outputs = ['CHAT_TURN: {"message":"turn one"}', 'CHAT_TURN: {"message":"turn two","done":true}'];
+    const outputs = [
+      'CHAT_TURN: {"message":"turn one"}',
+      'CHAT_TURN: {"message":"turn two","done":true}',
+    ];
     let i = 0;
     const activities: PlatformActivities = {
       async prepareScratchWorkspace() {
@@ -111,7 +121,14 @@ describe('platformChat', () => {
         attempts.push(req.attempt);
         const output = outputs[Math.min(i, outputs.length - 1)];
         i += 1;
-        return { output, tokensIn: 1, tokensOut: 1, wallMs: 1, resolvedBackend: 'stub', resolvedModel: 'stub' } as never;
+        return {
+          output,
+          tokensIn: 1,
+          tokensOut: 1,
+          wallMs: 1,
+          resolvedBackend: 'stub',
+          resolvedModel: 'stub',
+        } as never;
       },
       async recordRunStats() {},
       async resolveRepoConfig() {
@@ -137,23 +154,19 @@ describe('platformChat', () => {
     expect(attempts[0]).not.toBe(attempts[1]);
   });
 
-  it(
-    'auto-closes after the idle timeout with no input',
-    async () => {
-      const activities = scriptedActivities(['CHAT_TURN: {"message":"unused"}']);
-      await withTestEnv(activities, async ({ env, taskQueue }) => {
-        const handle = await env.client.workflow.start(platformChat, {
-          taskQueue,
-          workflowId: 'chat-3',
-          args: [{}], // no seeded prompt -> waits, then times out
-        });
-        // Let prepareScratchWorkspace finish before skipping the idle timer.
-        await env.sleep('1 second');
-        await env.sleep('31 minutes'); // time-skipping fast-forwards the idle timer
-        const result = await handle.result();
-        expect(result.turns).toBe(0);
+  it('auto-closes after the idle timeout with no input', async () => {
+    const activities = scriptedActivities(['CHAT_TURN: {"message":"unused"}']);
+    await withTestEnv(activities, async ({ env, taskQueue }) => {
+      const handle = await env.client.workflow.start(platformChat, {
+        taskQueue,
+        workflowId: 'chat-3',
+        args: [{}], // no seeded prompt -> waits, then times out
       });
-    },
-    30_000,
-  );
+      // Let prepareScratchWorkspace finish before skipping the idle timer.
+      await env.sleep('1 second');
+      await env.sleep('31 minutes'); // time-skipping fast-forwards the idle timer
+      const result = await handle.result();
+      expect(result.turns).toBe(0);
+    });
+  }, 30_000);
 });

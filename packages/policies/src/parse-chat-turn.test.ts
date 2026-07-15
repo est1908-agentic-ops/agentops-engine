@@ -11,7 +11,8 @@ describe('parseChatTurn', () => {
   });
 
   it('parses a proposal turn', () => {
-    const out = 'CHAT_TURN: {"message":"Terminate it?","pending":{"kind":"proposal","proposal":{"type":"terminate","workflowId":"wf-1","reason":"stuck"}}}';
+    const out =
+      'CHAT_TURN: {"message":"Terminate it?","pending":{"kind":"proposal","proposal":{"type":"terminate","workflowId":"wf-1","reason":"stuck"}}}';
     const parsed = parseChatTurn(out);
     expect(parsed.parseable).toBe(true);
     expect(parsed.turn.pending?.kind).toBe('proposal');

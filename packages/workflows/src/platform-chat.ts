@@ -84,7 +84,8 @@ export async function platformChat(
 
   // Prepare a scratch workspace once and reuse it across turns; carry it across
   // continueAsNew so the running conversation keeps the same workspace.
-  const workspaceRef = carry?.workspaceRef ?? (await activities.prepareScratchWorkspace(chatId)).workspaceRef;
+  const workspaceRef =
+    carry?.workspaceRef ?? (await activities.prepareScratchWorkspace(chatId)).workspaceRef;
 
   // Seed the optional first prompt as the first operator turn.
   if (!carry && input.prompt) {
@@ -115,11 +116,19 @@ export async function platformChat(
         continue;
       }
       if (!decision.approve) {
-        push('system', `Operator rejected: ${proposal.reason}${decision.note ? ` — ${decision.note}` : ''}`, 'decision');
+        push(
+          'system',
+          `Operator rejected: ${proposal.reason}${decision.note ? ` — ${decision.note}` : ''}`,
+          'decision',
+        );
       } else if (proposal.type === 'fix') {
         const resolved = await activities.resolveRepoConfig(proposal.repo ?? '');
         if (!resolved.registered) {
-          push('system', `cannot fix "${proposal.repo}": no project registered for that repo`, 'error');
+          push(
+            'system',
+            `cannot fix "${proposal.repo}": no project registered for that repo`,
+            'error',
+          );
         } else {
           // Same slug-vs-readable split as platform.ts: keep chatId-derived workflowId
           // (which may contain special chars) for Temporal visibility, slug only the
@@ -134,8 +143,16 @@ export async function platformChat(
             config: resolved.config,
           };
           await executeChild(devCycle, { workflowId: childWorkflowId, args: [taskInput] });
-          childWorkflows.push({ workflowId: childWorkflowId, repo: proposal.repo!, goal: taskInput.goal });
-          push('system', `Started fix devCycle ${childWorkflowId} for ${proposal.repo}`, 'action-result');
+          childWorkflows.push({
+            workflowId: childWorkflowId,
+            repo: proposal.repo!,
+            goal: taskInput.goal,
+          });
+          push(
+            'system',
+            `Started fix devCycle ${childWorkflowId} for ${proposal.repo}`,
+            'action-result',
+          );
         }
       } else {
         const res = await activities.executePlatformAction({
@@ -146,7 +163,11 @@ export async function platformChat(
         });
         push('system', res.detail, 'action-result');
         if (res.ok) {
-          actionsExecuted.push({ type: proposal.type, workflowId: proposal.workflowId!, reason: proposal.reason });
+          actionsExecuted.push({
+            type: proposal.type,
+            workflowId: proposal.workflowId!,
+            reason: proposal.reason,
+          });
         }
       }
     }
@@ -178,7 +199,11 @@ export async function platformChat(
           hintRepos: (input.hintRepos ?? []).join(', ') || '(none provided)',
         },
         workspaceRef,
-        limits: { maxTokens: CHAT_MAX_TOKENS, idleTimeoutMs: CHAT_IDLE_TIMEOUT_MS, timeoutMs: CHAT_TIMEOUT_MS },
+        limits: {
+          maxTokens: CHAT_MAX_TOKENS,
+          idleTimeoutMs: CHAT_IDLE_TIMEOUT_MS,
+          timeoutMs: CHAT_TIMEOUT_MS,
+        },
       });
       await activities.recordRunStats({
         taskId: chatId,
@@ -198,7 +223,11 @@ export async function platformChat(
     }
 
     if (!turn) {
-      push('agent', 'I could not produce a well-formed response. Please rephrase or try again.', 'error');
+      push(
+        'agent',
+        'I could not produce a well-formed response. Please rephrase or try again.',
+        'error',
+      );
       phase = 'awaiting-user';
       continue;
     }

@@ -22,13 +22,25 @@ export const CreateManagedProjectRequestSchema = z
       return;
     }
     if (!data.linearTeamKey) {
-      ctx.addIssue({ code: 'custom', path: ['linearTeamKey'], message: 'linearTeamKey is required when trackerType is "linear"' });
+      ctx.addIssue({
+        code: 'custom',
+        path: ['linearTeamKey'],
+        message: 'linearTeamKey is required when trackerType is "linear"',
+      });
     }
     if (!data.linearTriggerLabelId) {
-      ctx.addIssue({ code: 'custom', path: ['linearTriggerLabelId'], message: 'linearTriggerLabelId is required when trackerType is "linear"' });
+      ctx.addIssue({
+        code: 'custom',
+        path: ['linearTriggerLabelId'],
+        message: 'linearTriggerLabelId is required when trackerType is "linear"',
+      });
     }
     if (!data.linearToken) {
-      ctx.addIssue({ code: 'custom', path: ['linearToken'], message: 'linearToken is required when trackerType is "linear"' });
+      ctx.addIssue({
+        code: 'custom',
+        path: ['linearToken'],
+        message: 'linearToken is required when trackerType is "linear"',
+      });
     }
   });
 export type CreateManagedProjectRequest = z.infer<typeof CreateManagedProjectRequestSchema>;

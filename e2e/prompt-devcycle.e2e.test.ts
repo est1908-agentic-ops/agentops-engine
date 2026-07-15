@@ -20,7 +20,13 @@ describe('DevCycle e2e: prompt-started run resolves config in-workflow', () => {
     const piStub = new StubBackend();
     testEnv = await buildTestEnv({
       registry: [
-        { project: 'demo', repo: 'demo/repo', trackerType: 'github', tokenEnvVar: 'DEMO_TOKEN', token: 'test-token' },
+        {
+          project: 'demo',
+          repo: 'demo/repo',
+          trackerType: 'github',
+          tokenEnvVar: 'DEMO_TOKEN',
+          token: 'test-token',
+        },
       ],
       extraBackends: { pi: piStub },
     });

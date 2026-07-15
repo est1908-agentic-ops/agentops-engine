@@ -59,6 +59,19 @@ root so the engine knows how to verify and route work. Point the repo's GitHub w
 `POST https://<gateway>/webhooks/github` (Issues events, shared secret) — then label an
 issue `agentops` to start a run.
 
+Optional auto-merge policy in `agentops.json` (disabled by default):
+
+```json
+{
+  "autoMerge": "label"
+}
+```
+
+Modes: `disabled` (default kill switch), `label` (merge when the PR carries `automerge`),
+`all` (merge AgentOps-created PRs without a label). `automerge:disable` always wins.
+AgentOps-managed PRs receive `agentops:managed`. External enrollment uses GitHub
+`Pull request` and `Pull request review` webhook events in addition to Issues.
+
 ## Images & chart
 
 Three images build from `images/`:
@@ -85,12 +98,12 @@ helm template engine charts/engine --namespace <namespace>
 
 ## Docs
 
-| Doc                                                                        | What it covers                                                             |
-| -------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
-| [docs/software-lifecycle-vision.md](docs/software-lifecycle-vision.md)     | Target lifecycle and authority for future workflow changes                |
-| [docs/temporal-architecture.md](docs/temporal-architecture.md)             | Durable-execution architecture, package map, k8s Job bursting              |
-| [docs/authoring-project-workflows.md](docs/authoring-project-workflows.md) | Writing custom Tier-2 workflows with `@agentic-ops/engine-sdk`             |
-| [docs/project-worker-deployment.md](docs/project-worker-deployment.md)     | Deploying a Tier-2 project worker                                          |
-| [docs/runbooks/](docs/runbooks/)                                           | Operational runbooks                                                       |
-| [docs/superpowers/specs/](docs/superpowers/specs/)                         | Historical feature design notes                                            |
-| [docs/project-worker/](docs/project-worker/)                               | Reference Tier-2 project worker (Rollbar monitor)                          |
+| Doc                                                                        | What it covers                                                 |
+| -------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| [docs/software-lifecycle-vision.md](docs/software-lifecycle-vision.md)     | Target lifecycle and authority for future workflow changes     |
+| [docs/temporal-architecture.md](docs/temporal-architecture.md)             | Durable-execution architecture, package map, k8s Job bursting  |
+| [docs/authoring-project-workflows.md](docs/authoring-project-workflows.md) | Writing custom Tier-2 workflows with `@agentic-ops/engine-sdk` |
+| [docs/project-worker-deployment.md](docs/project-worker-deployment.md)     | Deploying a Tier-2 project worker                              |
+| [docs/runbooks/](docs/runbooks/)                                           | Operational runbooks                                           |
+| [docs/superpowers/specs/](docs/superpowers/specs/)                         | Historical feature design notes                                |
+| [docs/project-worker/](docs/project-worker/)                               | Reference Tier-2 project worker (Rollbar monitor)              |

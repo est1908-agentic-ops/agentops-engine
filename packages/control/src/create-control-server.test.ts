@@ -337,6 +337,7 @@ describe('createControlServer', () => {
         prRef: null,
         workspaceRef: 'ws-1',
         branch: 'task/t1',
+        landingOutcome: null,
       };
 
       it('returns live state from the state query while RUNNING', async () => {

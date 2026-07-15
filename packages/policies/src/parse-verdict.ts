@@ -20,7 +20,10 @@ function escapeRegExp(value: string): string {
 const SENTINEL_PREFIX = '[\\s>#*_-]{0,6}';
 
 export function parseVerdict(text: string, sentinel: string): ParsedVerdict {
-  const pattern = new RegExp(`^${SENTINEL_PREFIX}${escapeRegExp(sentinel)}\\s*(PASS|FAIL)\\b(.*)$`, 'gm');
+  const pattern = new RegExp(
+    `^${SENTINEL_PREFIX}${escapeRegExp(sentinel)}\\s*(PASS|FAIL)\\b(.*)$`,
+    'gm',
+  );
   let lastMatch: RegExpExecArray | null = null;
   let match: RegExpExecArray | null;
   while ((match = pattern.exec(text)) !== null) {

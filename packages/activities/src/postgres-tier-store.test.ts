@@ -4,7 +4,9 @@ import type { Queryable } from './postgres-stats-store';
 
 // Minimal fake pg pool: records calls + returns scripted rows. Mirrors the
 // pattern in postgres-managed-project-store.test.ts / postgres-stats-store.test.ts.
-function fakeDb(scriptedRows: unknown[] = []): Queryable & { calls: { sql: string; params?: unknown[] }[] } {
+function fakeDb(
+  scriptedRows: unknown[] = [],
+): Queryable & { calls: { sql: string; params?: unknown[] }[] } {
   const calls: { sql: string; params?: unknown[] }[] = [];
   return {
     calls,
@@ -55,7 +57,13 @@ describe('PostgresTierStore', () => {
     const db = fakeDb([
       { tier_name: 'smart', position: 0, backend: 'claude', model: 'opus', effort: 'high' },
       { tier_name: 'smart', position: 1, backend: 'pi', model: 'zai/glm-5.2', effort: null },
-      { tier_name: 'implementation', position: 0, backend: 'pi', model: 'openrouter/deepseek-v4-flash', effort: 'high' },
+      {
+        tier_name: 'implementation',
+        position: 0,
+        backend: 'pi',
+        model: 'openrouter/deepseek-v4-flash',
+        effort: 'high',
+      },
     ]);
     const store = new PostgresTierStore(db);
     const tiers = await store.loadAll();
@@ -120,9 +128,9 @@ describe('PostgresTierStore', () => {
       query: async () => ({ rows: [] }),
     };
     const store = new PostgresTierStore(pool);
-    await expect(store.replaceAll({ smart: [{ backend: 'claude', model: 'opus' }] })).rejects.toThrow(
-      'constraint violation',
-    );
+    await expect(
+      store.replaceAll({ smart: [{ backend: 'claude', model: 'opus' }] }),
+    ).rejects.toThrow('constraint violation');
     expect(calls.map((c) => c.sql)).toContain('ROLLBACK');
     expect(beginCount).toBe(1); // no retry
   });
@@ -134,7 +142,9 @@ describe('PostgresTierStore', () => {
     expect(seeded).toBe(true);
     expect(emptyDb.calls.filter((c) => /INSERT INTO tiers/.test(c.sql)).length).toBeGreaterThan(0);
 
-    const fullDb = fakeDb([{ tier_name: 'smart', position: 0, backend: 'claude', model: 'opus', effort: null }]);
+    const fullDb = fakeDb([
+      { tier_name: 'smart', position: 0, backend: 'claude', model: 'opus', effort: null },
+    ]);
     const fullStore = new PostgresTierStore(fullDb);
     const seededAgain = await fullStore.seedIfEmpty();
     expect(seededAgain).toBe(false);

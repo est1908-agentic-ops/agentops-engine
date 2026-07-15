@@ -97,7 +97,9 @@ export const PlatformChatResultSchema = z.object({
   turns: z.number().int().nonnegative(),
   actionsExecuted: z.array(PlatformActionSchema).default([]),
   childWorkflows: z
-    .array(z.object({ workflowId: z.string().min(1), repo: z.string().min(1), goal: z.string().min(1) }))
+    .array(
+      z.object({ workflowId: z.string().min(1), repo: z.string().min(1), goal: z.string().min(1) }),
+    )
     .default([]),
 });
 export type PlatformChatResult = z.output<typeof PlatformChatResultSchema>;

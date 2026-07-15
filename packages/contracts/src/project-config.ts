@@ -1,5 +1,14 @@
 import { z, ZodError } from 'zod';
-import { ModelRefSchema, BrakesSchema, RoutingSchema, StageToggleSchema, TimeoutsSchema } from './model';
+import {
+  ModelRefSchema,
+  BrakesSchema,
+  RoutingSchema,
+  StageToggleSchema,
+  TimeoutsSchema,
+} from './model';
+
+export const AutoMergeModeSchema = z.enum(['disabled', 'label', 'all']);
+export type AutoMergeMode = z.infer<typeof AutoMergeModeSchema>;
 
 export const VerifyServiceReadinessSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('exec'), command: z.array(z.string()).min(1) }),
@@ -30,6 +39,7 @@ export const ProjectConfigSchema = z.object({
   tiers: z.record(z.string(), z.array(ModelRefSchema)).optional(),
   brakes: BrakesSchema,
   timeouts: TimeoutsSchema.optional(),
+  autoMerge: AutoMergeModeSchema.optional(),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 
@@ -49,6 +59,7 @@ export const DEFAULT_PROJECT_CONFIG: Omit<
   },
   escalation: { tier: 'escalation' },
   brakes: { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 },
+  autoMerge: 'disabled' as const,
 };
 
 export class InvalidProjectConfigError extends Error {
@@ -61,7 +72,9 @@ export class InvalidProjectConfigError extends Error {
 }
 
 function formatZodError(err: ZodError): string {
-  return err.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ');
+  return err.issues
+    .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+    .join('; ');
 }
 
 export function parseProjectConfig(raw: unknown): ProjectConfig {

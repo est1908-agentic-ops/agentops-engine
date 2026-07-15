@@ -9,20 +9,27 @@ update this document deliberately.
 Humans define the product vision, architecture, intent, and ideas. The SLDS
 turns that direction into working software:
 
-- `devCycle` implements human-defined intent as a merge-ready change.
+- `devCycle` implements human-defined intent as a verified PR and hands it to
+  the shared PR landing lifecycle.
 - Autonomous recurring workflows, such as bug hunting and self-healing,
   continuously discover improvements and turn aligned findings into
-  merge-ready PRs through the same development cycle.
+  verified PRs through the same development cycle.
+- PR landing brings a verified PR to merge-ready and either merges it when
+  project policy grants Agentic Ops that authority or leaves it open for human
+  handling.
 - Autonomous work may proceed only when it is aligned with the product vision
   and architecture. Work that would change either requires a human decision
   first.
 
 ## Development workflows
 
-- **Issue development (`devCycle`)** — turns an issue into a verified, reviewed,
-  merge-ready PR.
+- **Issue development (`devCycle`)** — turns an issue into a verified, reviewed
+  PR and hands it to PR landing.
 - **PR repair (`devCyclePrRepair`)** — responds to review feedback on an existing
-  PR, verifies the repair, and babysits it back to merge-ready.
+  PR, verifies the repair, and returns it to PR landing.
+- **PR landing (`prLanding`)** — gives Agentic Ops-created and explicitly
+  enrolled PRs one durable review, repair, verification, babysitting, and
+  policy-controlled merge lifecycle.
 - **Bug hunting (`whiteboxBugHunt`)** — inspects source code, deduplicates
   findings, and files issues that enter the issue development lifecycle.
 - **Self-healing (`selfHeal`)** — inspects failed platform runs, diagnoses
@@ -39,7 +46,7 @@ turns that direction into working software:
 - **One connected system.** Findings become issues, issues become PRs, PR
   feedback becomes repairs, and platform failures become new development work.
 - **One quality bar.** Every code-producing path converges on implementation,
-  verification, review, and PR babysitting.
+  verification, review, PR babysitting, and the shared landing decision.
 - **Durable autonomy.** Workflows are resumable, observable, bounded by brakes,
   and able to wait for human input without losing progress.
 - **Humans set intent and authority.** Agents execute the lifecycle continuously;

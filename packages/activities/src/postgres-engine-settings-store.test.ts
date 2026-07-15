@@ -5,7 +5,9 @@ import {
 } from './postgres-engine-settings-store';
 import type { Queryable } from './postgres-stats-store';
 
-function fakeDb(scriptedRows: unknown[] = []): Queryable & { calls: { sql: string; params?: unknown[] }[] } {
+function fakeDb(
+  scriptedRows: unknown[] = [],
+): Queryable & { calls: { sql: string; params?: unknown[] }[] } {
   const calls: { sql: string; params?: unknown[] }[] = [];
   let rows = [...scriptedRows];
   return {
@@ -16,7 +18,9 @@ function fakeDb(scriptedRows: unknown[] = []): Queryable & { calls: { sql: strin
         return { rows: [] };
       }
       if (/SELECT self_heal_enabled/.test(sql)) {
-        return { rows: rows.length ? rows : [{ self_heal_enabled: true, self_heal_cron: '*/30 * * * *' }] };
+        return {
+          rows: rows.length ? rows : [{ self_heal_enabled: true, self_heal_cron: '*/30 * * * *' }],
+        };
       }
       if (/INSERT INTO engine_settings/.test(sql) && params) {
         rows = [{ self_heal_enabled: params[0], self_heal_cron: params[1] }];
@@ -44,7 +48,10 @@ describe('PostgresEngineSettingsStore', () => {
     expect(seeded).toBe(true);
     expect(db.calls.some((c) => c.sql.includes('INSERT INTO engine_settings'))).toBe(true);
     const insert = db.calls.find((c) => c.sql.includes('INSERT INTO engine_settings'));
-    expect(insert?.params).toEqual([DEFAULT_SELF_HEAL_SETTINGS.enabled, DEFAULT_SELF_HEAL_SETTINGS.cron]);
+    expect(insert?.params).toEqual([
+      DEFAULT_SELF_HEAL_SETTINGS.enabled,
+      DEFAULT_SELF_HEAL_SETTINGS.cron,
+    ]);
     const seededAgain = await store.seedIfEmpty();
     expect(seededAgain).toBe(false);
   });

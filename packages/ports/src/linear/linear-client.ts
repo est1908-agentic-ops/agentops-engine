@@ -66,7 +66,13 @@ export class LinearGraphqlClient implements LinearClient {
       }
     `;
     const data = await this.request<{
-      issue: { id: string; identifier: string; title: string; description: string | null; labels: { nodes: Array<{ id: string; name: string }> } };
+      issue: {
+        id: string;
+        identifier: string;
+        title: string;
+        description: string | null;
+        labels: { nodes: Array<{ id: string; name: string }> };
+      };
     }>(query, { id: identifier });
     return {
       id: data.issue.id,
@@ -95,7 +101,10 @@ export class LinearGraphqlClient implements LinearClient {
         }
       }
     `;
-    const data = await this.request<{ issueLabels: { nodes: Array<{ id: string }> } }>(query, { teamKey, name });
+    const data = await this.request<{ issueLabels: { nodes: Array<{ id: string }> } }>(query, {
+      teamKey,
+      name,
+    });
     return data.issueLabels.nodes[0]?.id ?? null;
   }
 

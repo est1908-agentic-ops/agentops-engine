@@ -27,7 +27,11 @@ function createFakeDb(): Queryable {
     async query(sql: string, params: unknown[] = []) {
       const normalized = sql.replace(/\s+/g, ' ').trim();
 
-      if (normalized.startsWith('CREATE TABLE') || normalized.startsWith('ALTER TABLE') || normalized.startsWith('CREATE UNIQUE INDEX')) {
+      if (
+        normalized.startsWith('CREATE TABLE') ||
+        normalized.startsWith('ALTER TABLE') ||
+        normalized.startsWith('CREATE UNIQUE INDEX')
+      ) {
         return { rows: [] };
       }
       if (normalized.startsWith('SELECT * FROM managed_projects WHERE project')) {
@@ -54,7 +58,16 @@ function createFakeDb(): Queryable {
         return { rows: [...rows] };
       }
       if (normalized.startsWith('INSERT INTO managed_projects')) {
-        const [project, repo, encryptedToken, config, trackerType, encryptedLinearToken, linearTeamKey, linearTriggerLabelId] = params as [
+        const [
+          project,
+          repo,
+          encryptedToken,
+          config,
+          trackerType,
+          encryptedLinearToken,
+          linearTeamKey,
+          linearTriggerLabelId,
+        ] = params as [
           string,
           string,
           string,
@@ -108,7 +121,10 @@ describe('PostgresManagedProjectStore', () => {
     const store = new PostgresManagedProjectStore(createFakeDb());
     const { publicKey, privateKey } = generateManagedProjectKeyPair();
 
-    const created = await store.upsert({ project: 'acme-web', repo: 'acme/web', token: 'ghp_abc123' }, publicKey);
+    const created = await store.upsert(
+      { project: 'acme-web', repo: 'acme/web', token: 'ghp_abc123' },
+      publicKey,
+    );
 
     expect(created.project).toBe('acme-web');
     expect(created.credentialSet).toBe(true);
@@ -122,7 +138,9 @@ describe('PostgresManagedProjectStore', () => {
   it('throws when creating a new project without a token', async () => {
     const store = new PostgresManagedProjectStore(createFakeDb());
     const { publicKey } = generateManagedProjectKeyPair();
-    await expect(store.upsert({ project: 'acme-web', repo: 'acme/web' }, publicKey)).rejects.toThrow(/token is required/);
+    await expect(
+      store.upsert({ project: 'acme-web', repo: 'acme/web' }, publicKey),
+    ).rejects.toThrow(/token is required/);
   });
 
   it('updates config without a new token, preserving the existing credential', async () => {
@@ -130,8 +148,20 @@ describe('PostgresManagedProjectStore', () => {
     const { publicKey, privateKey } = generateManagedProjectKeyPair();
     await store.upsert({ project: 'acme-web', repo: 'acme/web', token: 'ghp_abc123' }, publicKey);
 
-    const config = { stages: {}, routing: {}, brakes: { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 } };
-    const updated = await store.upsert({ project: 'acme-web', repo: 'acme/web', config }, publicKey);
+    const config = {
+      stages: {},
+      routing: {},
+      brakes: {
+        maxImplementAttempts: 3,
+        maxIterations: 6,
+        maxTokens: 200_000,
+        maxBabysitRounds: 5,
+      },
+    };
+    const updated = await store.upsert(
+      { project: 'acme-web', repo: 'acme/web', config },
+      publicKey,
+    );
 
     expect(updated.config).toEqual(config);
     const encrypted = await store.getEncryptedToken('acme/web');
@@ -141,10 +171,25 @@ describe('PostgresManagedProjectStore', () => {
   it('rotates the token, preserving the existing config', async () => {
     const store = new PostgresManagedProjectStore(createFakeDb());
     const { publicKey, privateKey } = generateManagedProjectKeyPair();
-    const config = { stages: {}, routing: {}, brakes: { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 } };
-    await store.upsert({ project: 'acme-web', repo: 'acme/web', token: 'ghp_old', config }, publicKey);
+    const config = {
+      stages: {},
+      routing: {},
+      brakes: {
+        maxImplementAttempts: 3,
+        maxIterations: 6,
+        maxTokens: 200_000,
+        maxBabysitRounds: 5,
+      },
+    };
+    await store.upsert(
+      { project: 'acme-web', repo: 'acme/web', token: 'ghp_old', config },
+      publicKey,
+    );
 
-    const updated = await store.upsert({ project: 'acme-web', repo: 'acme/web', token: 'ghp_new' }, publicKey);
+    const updated = await store.upsert(
+      { project: 'acme-web', repo: 'acme/web', token: 'ghp_new' },
+      publicKey,
+    );
 
     expect(updated.config).toEqual(config); // unchanged
     const encrypted = await store.getEncryptedToken('acme/web');
@@ -154,10 +199,25 @@ describe('PostgresManagedProjectStore', () => {
   it('clears config back to file-based with an explicit null', async () => {
     const store = new PostgresManagedProjectStore(createFakeDb());
     const { publicKey } = generateManagedProjectKeyPair();
-    const config = { stages: {}, routing: {}, brakes: { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 } };
-    await store.upsert({ project: 'acme-web', repo: 'acme/web', token: 'ghp_abc123', config }, publicKey);
+    const config = {
+      stages: {},
+      routing: {},
+      brakes: {
+        maxImplementAttempts: 3,
+        maxIterations: 6,
+        maxTokens: 200_000,
+        maxBabysitRounds: 5,
+      },
+    };
+    await store.upsert(
+      { project: 'acme-web', repo: 'acme/web', token: 'ghp_abc123', config },
+      publicKey,
+    );
 
-    const updated = await store.upsert({ project: 'acme-web', repo: 'acme/web', config: null }, publicKey);
+    const updated = await store.upsert(
+      { project: 'acme-web', repo: 'acme/web', config: null },
+      publicKey,
+    );
 
     expect(updated.config).toBeNull();
   });
@@ -200,7 +260,10 @@ describe('PostgresManagedProjectStore', () => {
     it('resolves a URL-stored project when queried by the short owner/repo form', async () => {
       const store = new PostgresManagedProjectStore(createFakeDb());
       const { publicKey } = generateManagedProjectKeyPair();
-      await store.upsert({ project: 'acme-web', repo: 'https://github.com/acme/web', token: 'ghp_abc' }, publicKey);
+      await store.upsert(
+        { project: 'acme-web', repo: 'https://github.com/acme/web', token: 'ghp_abc' },
+        publicKey,
+      );
 
       expect((await store.get('acme/web'))?.project).toBe('acme-web');
       expect(await store.getEncryptedToken('acme/web')).not.toBeNull();
@@ -219,7 +282,10 @@ describe('PostgresManagedProjectStore', () => {
     it('removes a URL-stored project addressed by the short owner/repo form', async () => {
       const store = new PostgresManagedProjectStore(createFakeDb());
       const { publicKey } = generateManagedProjectKeyPair();
-      await store.upsert({ project: 'acme-web', repo: 'https://github.com/acme/web', token: 'ghp_abc' }, publicKey);
+      await store.upsert(
+        { project: 'acme-web', repo: 'https://github.com/acme/web', token: 'ghp_abc' },
+        publicKey,
+      );
 
       await store.remove('acme/web');
 
@@ -229,7 +295,10 @@ describe('PostgresManagedProjectStore', () => {
     it('still returns null for a genuinely unregistered repo', async () => {
       const store = new PostgresManagedProjectStore(createFakeDb());
       const { publicKey } = generateManagedProjectKeyPair();
-      await store.upsert({ project: 'acme-web', repo: 'https://github.com/acme/web', token: 'ghp_abc' }, publicKey);
+      await store.upsert(
+        { project: 'acme-web', repo: 'https://github.com/acme/web', token: 'ghp_abc' },
+        publicKey,
+      );
 
       expect(await store.get('acme/other')).toBeNull();
     });
@@ -266,7 +335,15 @@ describe('PostgresManagedProjectStore', () => {
       const store = new PostgresManagedProjectStore(createFakeDb());
       const { publicKey } = generateManagedProjectKeyPair();
       await expect(
-        store.upsert({ project: 'acme-linear', repo: 'acme/linear-tracked', token: 'ghp_abc', trackerType: 'linear' }, publicKey),
+        store.upsert(
+          {
+            project: 'acme-linear',
+            repo: 'acme/linear-tracked',
+            token: 'ghp_abc',
+            trackerType: 'linear',
+          },
+          publicKey,
+        ),
       ).rejects.toThrow(/linearTeamKey, linearTriggerLabelId, and linearToken are all required/);
     });
 
@@ -286,7 +363,10 @@ describe('PostgresManagedProjectStore', () => {
         publicKey,
       );
 
-      await store.upsert({ project: 'acme-linear', repo: 'acme/linear-tracked', linearToken: 'lin_new' }, publicKey);
+      await store.upsert(
+        { project: 'acme-linear', repo: 'acme/linear-tracked', linearToken: 'lin_new' },
+        publicKey,
+      );
 
       const encryptedGithubToken = await store.getEncryptedToken('acme/linear-tracked');
       const encryptedLinearToken = await store.getEncryptedLinearToken('acme/linear-tracked');
@@ -319,9 +399,9 @@ describe('PostgresManagedProjectStore', () => {
       const { publicKey } = generateManagedProjectKeyPair();
       await store.upsert({ project: 'acme-web', repo: 'acme/web', token: 'ghp_abc' }, publicKey);
 
-      await expect(store.upsert({ project: 'acme-web', repo: 'acme/web', linearTeamKey: 'ENG' }, publicKey)).rejects.toThrow(
-        /is not linear-tracked/,
-      );
+      await expect(
+        store.upsert({ project: 'acme-web', repo: 'acme/web', linearTeamKey: 'ENG' }, publicKey),
+      ).rejects.toThrow(/is not linear-tracked/);
     });
 
     it('trackerType is immutable once created, even if input omits/changes it', async () => {
@@ -341,7 +421,10 @@ describe('PostgresManagedProjectStore', () => {
       );
 
       // Default trackerType ('github') on this update input must not override the existing row's tracker.
-      const updated = await store.upsert({ project: 'acme-linear', repo: 'acme/linear-tracked', config: null }, publicKey);
+      const updated = await store.upsert(
+        { project: 'acme-linear', repo: 'acme/linear-tracked', config: null },
+        publicKey,
+      );
 
       expect(updated.trackerType).toBe('linear');
     });

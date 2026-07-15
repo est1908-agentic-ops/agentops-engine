@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import { encryptForManagedProject, generateManagedProjectKeyPair } from './credential-crypto';
-import { loadManagedProjectRegistry, resolveManagedProjectEntry, resolveManagedProjectEntryByLinearTeamKey } from './resolve-managed-projects';
+import {
+  loadManagedProjectRegistry,
+  resolveManagedProjectEntry,
+  resolveManagedProjectEntryByLinearTeamKey,
+} from './resolve-managed-projects';
 import type { PostgresManagedProjectStore } from './postgres-managed-project-store';
 
 interface FakeRow {
@@ -16,9 +20,23 @@ interface FakeRow {
 
 function fakeStore(rows: FakeRow[]) {
   function toManagedProject(row: FakeRow) {
-    const base = { id: '1', project: row.project, repo: row.repo, credentialSet: true, config: row.config ?? null, createdAt: '', updatedAt: '' };
+    const base = {
+      id: '1',
+      project: row.project,
+      repo: row.repo,
+      credentialSet: true,
+      config: row.config ?? null,
+      createdAt: '',
+      updatedAt: '',
+    };
     if (row.trackerType === 'linear') {
-      return { ...base, trackerType: 'linear' as const, linearTeamKey: row.linearTeamKey, linearTriggerLabelId: row.linearTriggerLabelId, linearCredentialSet: Boolean(row.encryptedLinearToken) };
+      return {
+        ...base,
+        trackerType: 'linear' as const,
+        linearTeamKey: row.linearTeamKey,
+        linearTriggerLabelId: row.linearTriggerLabelId,
+        linearCredentialSet: Boolean(row.encryptedLinearToken),
+      };
     }
     return { ...base, trackerType: 'github' as const };
   }
@@ -51,7 +69,12 @@ describe('resolveManagedProjectEntry', () => {
 
     const resolved = await resolveManagedProjectEntry({ store, privateKey }, 'acme/web');
 
-    expect(resolved).toEqual({ project: 'acme-web', repo: 'acme/web', trackerType: 'github', token: 'db-token' });
+    expect(resolved).toEqual({
+      project: 'acme-web',
+      repo: 'acme/web',
+      trackerType: 'github',
+      token: 'db-token',
+    });
   });
 
   it('returns null when no DB deps are configured at all', async () => {
@@ -61,12 +84,17 @@ describe('resolveManagedProjectEntry', () => {
 
   it('returns null when the repo is not DB-managed', async () => {
     const store = fakeStore([]);
-    const resolved = await resolveManagedProjectEntry({ store, privateKey: 'unused' }, 'acme/nowhere');
+    const resolved = await resolveManagedProjectEntry(
+      { store, privateKey: 'unused' },
+      'acme/nowhere',
+    );
     expect(resolved).toBeNull();
   });
 
   it('returns null (not the raw ciphertext) when decrypt fails', async () => {
-    const store = fakeStore([{ project: 'acme-web', repo: 'acme/web', encryptedToken: 'not-valid-ciphertext' }]);
+    const store = fakeStore([
+      { project: 'acme-web', repo: 'acme/web', encryptedToken: 'not-valid-ciphertext' },
+    ]);
     const resolved = await resolveManagedProjectEntry({ store, privateKey: 'unused' }, 'acme/web');
     expect(resolved).toBeNull();
   });
@@ -111,7 +139,9 @@ describe('resolveManagedProjectEntry', () => {
       },
     ]);
 
-    expect(await resolveManagedProjectEntry({ store, privateKey }, 'acme/linear-tracked')).toBeNull();
+    expect(
+      await resolveManagedProjectEntry({ store, privateKey }, 'acme/linear-tracked'),
+    ).toBeNull();
   });
 });
 
@@ -142,7 +172,9 @@ describe('resolveManagedProjectEntryByLinearTeamKey', () => {
 
   it('returns null when no project matches the team key', async () => {
     const store = fakeStore([]);
-    expect(await resolveManagedProjectEntryByLinearTeamKey({ store, privateKey: 'unused' }, 'ENG')).toBeNull();
+    expect(
+      await resolveManagedProjectEntryByLinearTeamKey({ store, privateKey: 'unused' }, 'ENG'),
+    ).toBeNull();
   });
 });
 
@@ -150,8 +182,16 @@ describe('loadManagedProjectRegistry', () => {
   it('decrypts every managed project into a ResolvedProjectEntry', async () => {
     const { publicKey, privateKey } = generateManagedProjectKeyPair();
     const store = fakeStore([
-      { project: 'a', repo: 'acme/a', encryptedToken: encryptForManagedProject(publicKey, 'token-a') },
-      { project: 'b', repo: 'acme/b', encryptedToken: encryptForManagedProject(publicKey, 'token-b') },
+      {
+        project: 'a',
+        repo: 'acme/a',
+        encryptedToken: encryptForManagedProject(publicKey, 'token-a'),
+      },
+      {
+        project: 'b',
+        repo: 'acme/b',
+        encryptedToken: encryptForManagedProject(publicKey, 'token-b'),
+      },
     ]);
 
     const entries = await loadManagedProjectRegistry({ store, privateKey });
@@ -165,7 +205,11 @@ describe('loadManagedProjectRegistry', () => {
   it('canonicalizes a full-URL repo to short owner/repo in the resolved entry', async () => {
     const { publicKey, privateKey } = generateManagedProjectKeyPair();
     const store = fakeStore([
-      { project: 'webapp', repo: 'https://github.com/acme/webapp', encryptedToken: encryptForManagedProject(publicKey, 't') },
+      {
+        project: 'webapp',
+        repo: 'https://github.com/acme/webapp',
+        encryptedToken: encryptForManagedProject(publicKey, 't'),
+      },
     ]);
 
     const entries = await loadManagedProjectRegistry({ store, privateKey });
@@ -176,19 +220,29 @@ describe('loadManagedProjectRegistry', () => {
   it('skips managed projects that cannot be decrypted', async () => {
     const { publicKey, privateKey } = generateManagedProjectKeyPair();
     const store = fakeStore([
-      { project: 'good', repo: 'acme/good', encryptedToken: encryptForManagedProject(publicKey, 'token-good') },
+      {
+        project: 'good',
+        repo: 'acme/good',
+        encryptedToken: encryptForManagedProject(publicKey, 'token-good'),
+      },
       { project: 'bad', repo: 'acme/bad', encryptedToken: 'not-valid-ciphertext' },
     ]);
 
     const entries = await loadManagedProjectRegistry({ store, privateKey });
 
-    expect(entries).toEqual([{ project: 'good', repo: 'acme/good', trackerType: 'github', token: 'token-good' }]);
+    expect(entries).toEqual([
+      { project: 'good', repo: 'acme/good', trackerType: 'github', token: 'token-good' },
+    ]);
   });
 
   it('includes linear-tracked projects alongside github ones', async () => {
     const { publicKey, privateKey } = generateManagedProjectKeyPair();
     const store = fakeStore([
-      { project: 'gh-project', repo: 'acme/gh', encryptedToken: encryptForManagedProject(publicKey, 'token-gh') },
+      {
+        project: 'gh-project',
+        repo: 'acme/gh',
+        encryptedToken: encryptForManagedProject(publicKey, 'token-gh'),
+      },
       {
         project: 'linear-project',
         repo: 'acme/linear-tracked',

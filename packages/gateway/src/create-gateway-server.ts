@@ -12,11 +12,12 @@ import type { ProjectWorkerParamsProvider } from './argocd-project-workers';
 import { matchesLinearTriggerLabel, parseLinearIssueEvent } from './parse-linear-issue-event';
 import { parseIssueTriggerEvent } from './parse-issue-labeled';
 import { parsePushEvent } from './parse-push-event';
+import { parsePrLandingEvent } from './parse-pr-landing-event';
 import { parsePrReviewEvent } from './parse-pr-review-event';
 import { startConfigSync } from './start-config-sync';
 import { startDevCycleForLinearIssue } from './start-dev-cycle-for-linear-issue';
 import { startDevCycleForIssue } from './start-dev-cycle';
-import { startDevCyclePrRepair } from './start-dev-cycle-pr-repair';  // added
+import { startOrSignalPrLanding } from './start-pr-landing';
 import { isFreshLinearWebhook, verifyLinearSignature } from './verify-linear-signature';
 import { verifyGithubSignature } from './verify-signature';
 import { verifyBearerToken } from './verify-bearer-token';
@@ -74,7 +75,11 @@ export function createGatewayServer(deps: GatewayDeps): Server {
   });
 }
 
-async function handleRequest(deps: GatewayDeps, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function handleRequest(
+  deps: GatewayDeps,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
   if (req.method === 'GET' && req.url === '/healthz') {
     res.writeHead(200).end('ok');
     return;
@@ -99,7 +104,11 @@ async function handleRequest(deps: GatewayDeps, req: IncomingMessage, res: Serve
   res.writeHead(404).end();
 }
 
-async function handleArgoCdGetParams(deps: GatewayDeps, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function handleArgoCdGetParams(
+  deps: GatewayDeps,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
   // Off unless configured — 404 (same "not built here" posture as the Linear route).
   if (!deps.argocdPluginToken || !deps.argocdParams) {
     res.writeHead(404).end();
@@ -116,18 +125,30 @@ async function handleArgoCdGetParams(deps: GatewayDeps, req: IncomingMessage, re
   try {
     const parameters = await deps.argocdParams.getParams();
     // ArgoCD plugin-generator response contract: { output: { parameters: [...] } }.
-    res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ output: { parameters } }));
+    res
+      .writeHead(200, { 'content-type': 'application/json' })
+      .end(JSON.stringify({ output: { parameters } }));
   } catch (err) {
     console.error('gateway: failed to compute ArgoCD project-worker params', err);
     res.writeHead(500).end('failed to compute params');
   }
 }
 
-async function handleGithubWebhook(deps: GatewayDeps, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function handleGithubWebhook(
+  deps: GatewayDeps,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
   const rawBody = await readRawBody(req);
   const signature = req.headers['x-hub-signature-256'];
 
-  if (!verifyGithubSignature(rawBody, typeof signature === 'string' ? signature : undefined, deps.webhookSecret)) {
+  if (
+    !verifyGithubSignature(
+      rawBody,
+      typeof signature === 'string' ? signature : undefined,
+      deps.webhookSecret,
+    )
+  ) {
     res.writeHead(401).end('invalid signature');
     return;
   }
@@ -153,7 +174,9 @@ async function handleGithubWebhook(deps: GatewayDeps, req: IncomingMessage, res:
     }
     try {
       const result = await startConfigSync(deps.client, deps.taskQueue, entry.project, entry.repo);
-      console.log(`gateway: push → configSync for project "${entry.project}" (started=${result.started})`);
+      console.log(
+        `gateway: push → configSync for project "${entry.project}" (started=${result.started})`,
+      );
       res.writeHead(result.started ? 202 : 204).end();
     } catch (err) {
       console.error('gateway: failed to start configSync from push webhook', err);
@@ -162,27 +185,45 @@ async function handleGithubWebhook(deps: GatewayDeps, req: IncomingMessage, res:
     return;
   }
 
-  const reviewEvent = parsePrReviewEvent(eventType, payload);
-  if (reviewEvent) {
-    if (!reviewEvent.hasAgentopsLabel) {
-      res.writeHead(204).end();
-      return;
-    }
-    const entry = await resolveManagedProjectEntry(deps.managedProjectDeps, reviewEvent.repo);
+  const landingEvent = parsePrLandingEvent(eventType, payload);
+  if (landingEvent) {
+    const entry = await resolveManagedProjectEntry(deps.managedProjectDeps, landingEvent.repo);
     if (!entry) {
       res.writeHead(202).end('no project registered');
       return;
     }
-    try {
-      const scm = deps.buildScm(entry);
-      const config = await resolveProjectConfig(deps.managedProjectDeps, scm, entry.repo);
-      const result = await startDevCyclePrRepair(deps.client, deps.taskQueue, entry.project, reviewEvent, config);
-      console.log(`gateway: ${result.started ? 'started' : 'already running'} devCyclePrRepair ${result.taskId} for ${reviewEvent.prRef}`);
-      res.writeHead(202).end(JSON.stringify(result));
-    } catch (err) {
-      console.error('gateway: failed to start pr repair', err);
-      res.writeHead(500).end('failed to start repair');
+    const scm = deps.buildScm(entry);
+    const config = await resolveProjectConfig(deps.managedProjectDeps, scm, entry.repo);
+    if (
+      !landingEvent.managed &&
+      landingEvent.kind === 'enroll' &&
+      (config.autoMerge ?? 'disabled') === 'disabled'
+    ) {
+      res.writeHead(204).end();
+      return;
     }
+    try {
+      const result = await startOrSignalPrLanding(
+        deps.client,
+        deps.taskQueue,
+        entry.project,
+        landingEvent,
+        config,
+      );
+      console.log(
+        `gateway: ${result.started ? 'started' : 'signalled'} prLanding ${result.workflowId} for ${landingEvent.prRef}`,
+      );
+      res.writeHead(result.started ? 202 : 204).end(JSON.stringify(result));
+    } catch (err) {
+      console.error('gateway: failed to start or signal pr landing', err);
+      res.writeHead(500).end('failed to start landing');
+    }
+    return;
+  }
+
+  const reviewEvent = parsePrReviewEvent(eventType, payload);
+  if (reviewEvent) {
+    res.writeHead(204).end();
     return;
   }
 
@@ -196,7 +237,9 @@ async function handleGithubWebhook(deps: GatewayDeps, req: IncomingMessage, res:
 
   const entry = await resolveManagedProjectEntry(deps.managedProjectDeps, event.repo);
   if (!entry) {
-    console.warn(`gateway: no project registered for repo "${event.repo}" — ignoring labeled event`);
+    console.warn(
+      `gateway: no project registered for repo "${event.repo}" — ignoring labeled event`,
+    );
     res.writeHead(202).end('no project registered for this repo');
     return;
   }
@@ -204,7 +247,13 @@ async function handleGithubWebhook(deps: GatewayDeps, req: IncomingMessage, res:
   try {
     const scm = deps.buildScm(entry);
     const config = await resolveProjectConfig(deps.managedProjectDeps, scm, entry.repo);
-    const result = await startDevCycleForIssue(deps.client, deps.taskQueue, entry.project, event, config);
+    const result = await startDevCycleForIssue(
+      deps.client,
+      deps.taskQueue,
+      entry.project,
+      event,
+      config,
+    );
     console.log(
       result.started
         ? `gateway: started devCycle ${result.taskId} for ${event.issueRef}`
@@ -217,7 +266,11 @@ async function handleGithubWebhook(deps: GatewayDeps, req: IncomingMessage, res:
   }
 }
 
-async function handleLinearWebhook(deps: GatewayDeps, req: IncomingMessage, res: ServerResponse): Promise<void> {
+async function handleLinearWebhook(
+  deps: GatewayDeps,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
   if (!deps.linearWebhookSecret) {
     // No Linear-tracked project has ever been configured on this deployment
     // — same 404 as any other unrecognized route, not a 401/500, so an
@@ -230,7 +283,13 @@ async function handleLinearWebhook(deps: GatewayDeps, req: IncomingMessage, res:
   const rawBody = await readRawBody(req);
   const signature = req.headers['linear-signature'];
 
-  if (!verifyLinearSignature(rawBody, typeof signature === 'string' ? signature : undefined, deps.linearWebhookSecret)) {
+  if (
+    !verifyLinearSignature(
+      rawBody,
+      typeof signature === 'string' ? signature : undefined,
+      deps.linearWebhookSecret,
+    )
+  ) {
     res.writeHead(401).end('invalid signature');
     return;
   }
@@ -251,9 +310,14 @@ async function handleLinearWebhook(deps: GatewayDeps, req: IncomingMessage, res:
     return;
   }
 
-  const entry = await resolveManagedProjectEntryByLinearTeamKey(deps.managedProjectDeps, parsed.teamKey);
+  const entry = await resolveManagedProjectEntryByLinearTeamKey(
+    deps.managedProjectDeps,
+    parsed.teamKey,
+  );
   if (!entry) {
-    console.warn(`gateway: no project registered for Linear team "${parsed.teamKey}" — ignoring issue event`);
+    console.warn(
+      `gateway: no project registered for Linear team "${parsed.teamKey}" — ignoring issue event`,
+    );
     res.writeHead(202).end('no project registered for this Linear team');
     return;
   }
@@ -267,7 +331,14 @@ async function handleLinearWebhook(deps: GatewayDeps, req: IncomingMessage, res:
   try {
     const scm = deps.buildScm(entry);
     const config = await resolveProjectConfig(deps.managedProjectDeps, scm, entry.repo);
-    const result = await startDevCycleForLinearIssue(deps.client, deps.taskQueue, entry.project, parsed, entry.repo, config);
+    const result = await startDevCycleForLinearIssue(
+      deps.client,
+      deps.taskQueue,
+      entry.project,
+      parsed,
+      entry.repo,
+      config,
+    );
     console.log(
       result.started
         ? `gateway: started devCycle ${result.taskId} for linear:${parsed.identifier}`

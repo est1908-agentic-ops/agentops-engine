@@ -19,12 +19,23 @@ const {
       full_verify: 'FULL: PASS',
       review: 'VERDICT: PASS',
     };
-    return { output: outputs[req.stage] ?? 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1, promptHash: 'h', promptSource: 's' };
+    return {
+      output: outputs[req.stage] ?? 'ok',
+      tokensIn: 1,
+      tokensOut: 1,
+      wallMs: 1,
+      promptHash: 'h',
+      promptSource: 's',
+    };
   });
   return {
-    prepareWorkspace: vi.fn().mockResolvedValue({ workspaceRef: 'ws', branch: 'br', baseBranch: 'main' }),
+    prepareWorkspace: vi
+      .fn()
+      .mockResolvedValue({ workspaceRef: 'ws', branch: 'br', baseBranch: 'main' }),
     pushBranch: vi.fn().mockResolvedValue(undefined),
-    getPrFeedback: vi.fn().mockResolvedValue({ ciStatus: 'pending', unresolvedThreads: 0, comments: [] }),
+    getPrFeedback: vi
+      .fn()
+      .mockResolvedValue({ ciStatus: 'pending', unresolvedThreads: 0, comments: [] }),
     cleanupWorkspace: vi.fn().mockResolvedValue(undefined),
     recordStageResult: vi.fn().mockResolvedValue(undefined),
     recordRunStats: vi.fn().mockResolvedValue(undefined),

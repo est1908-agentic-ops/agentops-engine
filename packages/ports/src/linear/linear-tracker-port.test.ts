@@ -24,7 +24,9 @@ const issue: LinearIssueData = {
 describe('LinearTrackerPort', () => {
   it('rejects a non-linear ref', async () => {
     const port = new LinearTrackerPort(fakeClient());
-    await expect(port.getIssue('octocat/hello-world#1')).rejects.toThrow(/expected a "linear:" ref/);
+    await expect(port.getIssue('octocat/hello-world#1')).rejects.toThrow(
+      /expected a "linear:" ref/,
+    );
   });
 
   it('getIssue maps a linear ref to an Issue', async () => {
@@ -34,7 +36,12 @@ describe('LinearTrackerPort', () => {
     const result = await port.getIssue('linear:ENG-123');
 
     expect(client.getIssue).toHaveBeenCalledWith('ENG-123');
-    expect(result).toEqual({ ref: 'linear:ENG-123', title: 'Fix the thing', body: 'body text', labels: ['bug'] });
+    expect(result).toEqual({
+      ref: 'linear:ENG-123',
+      title: 'Fix the thing',
+      body: 'body text',
+      labels: ['bug'],
+    });
   });
 
   it('comment resolves the issue id and posts through the client', async () => {
@@ -56,7 +63,10 @@ describe('LinearTrackerPort', () => {
     await port.label('linear:ENG-123', 'agentops');
 
     expect(client.findLabelId).toHaveBeenCalledWith('ENG', 'agentops');
-    expect(client.setLabelIds).toHaveBeenCalledWith('issue-uuid', ['existing-label-uuid', 'agentops-label-uuid']);
+    expect(client.setLabelIds).toHaveBeenCalledWith('issue-uuid', [
+      'existing-label-uuid',
+      'agentops-label-uuid',
+    ]);
   });
 
   it('label is a no-op when the issue already carries the label', async () => {
@@ -78,6 +88,8 @@ describe('LinearTrackerPort', () => {
     });
     const port = new LinearTrackerPort(client);
 
-    await expect(port.label('linear:ENG-123', 'missing')).rejects.toThrow(/no label named "missing"/);
+    await expect(port.label('linear:ENG-123', 'missing')).rejects.toThrow(
+      /no label named "missing"/,
+    );
   });
 });

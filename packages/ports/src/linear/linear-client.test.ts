@@ -12,7 +12,15 @@ function fakeFetch(body: unknown, ok = true, status = 200): typeof fetch {
 describe('LinearGraphqlClient', () => {
   it('sends the API key as a raw Authorization header, no Bearer prefix', async () => {
     const fetchImpl = fakeFetch({
-      data: { issue: { id: 'uuid-1', identifier: 'ENG-1', title: 't', description: null, labels: { nodes: [] } } },
+      data: {
+        issue: {
+          id: 'uuid-1',
+          identifier: 'ENG-1',
+          title: 't',
+          description: null,
+          labels: { nodes: [] },
+        },
+      },
     });
     const client = new LinearGraphqlClient('lin_api_key', fetchImpl);
 
@@ -66,7 +74,7 @@ describe('LinearGraphqlClient', () => {
     const fetchImpl = fakeFetch({ data: { issueLabels: { nodes: [{ id: 'label-uuid' }] } } });
     const client = new LinearGraphqlClient('key', fetchImpl);
 
-    expect(await client.findLabelId('ENG', 'agentops')) .toBe('label-uuid');
+    expect(await client.findLabelId('ENG', 'agentops')).toBe('label-uuid');
 
     const emptyFetch = fakeFetch({ data: { issueLabels: { nodes: [] } } });
     const emptyClient = new LinearGraphqlClient('key', emptyFetch);

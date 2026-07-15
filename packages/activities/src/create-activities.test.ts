@@ -84,7 +84,13 @@ describe('createActivities', () => {
       backend: 'stub',
       model: 'stub-v1',
       promptRef: 'implement.md',
-      promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
+      promptContext: {
+        taskId: 't1',
+        goal: 'g',
+        fullVerifyFindings: '',
+        reviewFindings: '',
+        prReviewFeedback: '',
+      },
       workspaceRef: 'demo/repo',
       limits: { maxTokens: 1000, timeoutMs: 60_000 },
     });
@@ -105,13 +111,27 @@ describe('createActivities', () => {
       backend: 'stub',
       model: 'stub-v1',
       promptRef: 'implement.md',
-      promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
+      promptContext: {
+        taskId: 't1',
+        goal: 'g',
+        fullVerifyFindings: '',
+        reviewFindings: '',
+        prReviewFeedback: '',
+      },
       workspaceRef: 'demo/repo',
       limits: { maxTokens: 1000, timeoutMs: 60_000 },
     });
 
     expect(heartbeats).toEqual([
-      { phase: 'started', taskId: 't1', stage: 'implement', attempt: 1, callIndex: 1, backend: 'stub', model: 'stub-v1' },
+      {
+        phase: 'started',
+        taskId: 't1',
+        stage: 'implement',
+        attempt: 1,
+        callIndex: 1,
+        backend: 'stub',
+        model: 'stub-v1',
+      },
     ]);
   });
 
@@ -169,6 +189,35 @@ describe('createActivities', () => {
     expect(deps.tracker.getLabels('issue-1')).toEqual(['bug']);
   });
 
+  it('getPrSnapshot and mergePr validate and return zod-parsed SCM results', async () => {
+    const deps = buildDeps();
+    const activities = createActivities(deps);
+    deps.scm.scriptSnapshots('demo/repo#7', [
+      {
+        prRef: 'demo/repo#7',
+        headSha: 'abc',
+        headRepo: 'demo/repo',
+        headBranch: 'feature/x',
+        checkoutRef: 'refs/pull/7/head',
+        labels: ['automerge'],
+        state: 'open',
+        draft: false,
+        mergeable: true,
+        mergedHeadSha: null,
+        ciStatus: 'green',
+        unresolvedThreads: 0,
+        comments: [],
+      },
+    ]);
+    await expect(activities.getPrSnapshot('demo/repo#7')).resolves.toMatchObject({
+      headSha: 'abc',
+      labels: ['automerge'],
+    });
+    await expect(
+      activities.mergePr({ prRef: 'demo/repo#7', expectedHeadSha: 'abc' }),
+    ).resolves.toEqual({ kind: 'merged', headSha: 'abc', mergeCommitSha: 'merge-abc' });
+  });
+
   it('openPr/getPrFeedback/pushBranch delegate to the scm port', async () => {
     const deps = buildDeps();
     const activities = createActivities(deps);
@@ -190,8 +239,22 @@ describe('createActivities', () => {
     const filedFindings = new InMemoryFiledFindingStore();
     const deps = { ...buildDeps(), tracker, filedFindings };
     const activities = createActivities(deps);
-    const a = await activities.createIssue({ repo: 'o/r', project: 'p', title: 'T', body: 'B', labels: ['bug'], dedupeFingerprint: 'fp1' });
-    const b = await activities.createIssue({ repo: 'o/r', project: 'p', title: 'T2', body: 'B2', labels: ['bug'], dedupeFingerprint: 'fp1' });
+    const a = await activities.createIssue({
+      repo: 'o/r',
+      project: 'p',
+      title: 'T',
+      body: 'B',
+      labels: ['bug'],
+      dedupeFingerprint: 'fp1',
+    });
+    const b = await activities.createIssue({
+      repo: 'o/r',
+      project: 'p',
+      title: 'T2',
+      body: 'B2',
+      labels: ['bug'],
+      dedupeFingerprint: 'fp1',
+    });
     expect(a.deduped).toBe(false);
     expect(b).toEqual({ ref: a.ref, url: '', deduped: true });
   });
@@ -208,7 +271,13 @@ describe('createActivities', () => {
       backend: 'stub',
       model: 'stub-v1',
       promptRef: 'implement.md',
-      promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
+      promptContext: {
+        taskId: 't1',
+        goal: 'g',
+        fullVerifyFindings: '',
+        reviewFindings: '',
+        prReviewFeedback: '',
+      },
       workspaceRef: 'demo/repo',
       limits: { maxTokens: 1000, timeoutMs: 60_000 },
     } as never);
@@ -221,8 +290,23 @@ describe('createActivities', () => {
     (deps.backends.stub as StubBackend).scriptResponse('bughunt', 1, { output: 'FINDINGS: []' });
     const activities = createActivities(deps);
     const res = await activities.runAgent({
-      taskId: 't1', stage: 'bughunt', repo: 'acme/web', project: 'acme', attempt: 1, callIndex: 1, backend: 'stub', model: 'm',
-      promptRef: 'implement.md', promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' }, workspaceRef: 'ws',
+      taskId: 't1',
+      stage: 'bughunt',
+      repo: 'acme/web',
+      project: 'acme',
+      attempt: 1,
+      callIndex: 1,
+      backend: 'stub',
+      model: 'm',
+      promptRef: 'implement.md',
+      promptContext: {
+        taskId: 't1',
+        goal: 'g',
+        fullVerifyFindings: '',
+        reviewFindings: '',
+        prReviewFeedback: '',
+      },
+      workspaceRef: 'ws',
       limits: { maxTokens: 1000, maxIterations: 1, maxImplementAttempts: 1, maxBabysitRounds: 1 },
       promptSource: { repo: 'acme/web', commit: 'abc123', path: 'agentops/prompts/x.md' },
     } as any);
@@ -233,8 +317,23 @@ describe('createActivities', () => {
     (deps.backends.stub as StubBackend).scriptResponse('bughunt', 1, { output: 'FINDINGS: []' });
     const activities = createActivities(deps);
     const res = await activities.runAgent({
-      taskId: 't1', stage: 'bughunt', repo: 'o/r', project: 'p', attempt: 1, callIndex: 1, backend: 'stub', model: 'm',
-      promptRef: 'implement.md', promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' }, workspaceRef: 'ws',
+      taskId: 't1',
+      stage: 'bughunt',
+      repo: 'o/r',
+      project: 'p',
+      attempt: 1,
+      callIndex: 1,
+      backend: 'stub',
+      model: 'm',
+      promptRef: 'implement.md',
+      promptContext: {
+        taskId: 't1',
+        goal: 'g',
+        fullVerifyFindings: '',
+        reviewFindings: '',
+        prReviewFeedback: '',
+      },
+      workspaceRef: 'ws',
       limits: { maxTokens: 1000, maxIterations: 1, maxImplementAttempts: 1, maxBabysitRounds: 1 },
     } as any);
     expect(res.promptSource).toBe('builtin:implement.md');
@@ -273,7 +372,13 @@ describe('createActivities — tracing', () => {
         backend: 'stub',
         model: 'stub-v1',
         promptRef: 'implement.md',
-        promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
+        promptContext: {
+          taskId: 't1',
+          goal: 'g',
+          fullVerifyFindings: '',
+          reviewFindings: '',
+          prReviewFeedback: '',
+        },
         workspaceRef: 'demo/repo',
         limits: { maxTokens: 1000, timeoutMs: 60_000 },
       }),
@@ -309,7 +414,13 @@ describe('createActivities — tracing', () => {
         backend: 'stub',
         model: 'stub-v1',
         promptRef: 'implement.md',
-        promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
+        promptContext: {
+          taskId: 't1',
+          goal: 'g',
+          fullVerifyFindings: '',
+          reviewFindings: '',
+          prReviewFeedback: '',
+        },
         workspaceRef: 'demo/repo',
         limits: { maxTokens: 1000, timeoutMs: 60_000 },
       }),
@@ -497,7 +608,13 @@ function runAgentReq(backend: string) {
     backend,
     model: 'm',
     promptRef: 'implement.md',
-    promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
+    promptContext: {
+      taskId: 't1',
+      goal: 'g',
+      fullVerifyFindings: '',
+      reviewFindings: '',
+      prReviewFeedback: '',
+    },
     workspaceRef: 'demo/repo',
     limits: { maxTokens: 1000, timeoutMs: 60_000 },
   };
@@ -577,7 +694,9 @@ describe('createActivities — tier resolution + fallback', () => {
 
   it('falls back cross-backend on SessionLimitError and attributes to the fallback', async () => {
     const claude: AgentBackend = {
-      run: async () => { throw new SessionLimitError('session limit'); },
+      run: async () => {
+        throw new SessionLimitError('session limit');
+      },
     };
     const pi: AgentBackend = {
       run: async () => ({ output: 'fallback', tokensIn: 1, tokensOut: 1, wallMs: 1 }),
@@ -606,7 +725,9 @@ describe('createActivities — tier resolution + fallback', () => {
   it('maps SessionLimitExhaustedError to a non-retryable ApplicationFailure', async () => {
     // Both tier entries throw SessionLimitError -> chain exhausted.
     const sessionLimited: AgentBackend = {
-      run: async () => { throw new SessionLimitError('session limit'); },
+      run: async () => {
+        throw new SessionLimitError('session limit');
+      },
     };
     const deps = {
       ...buildDeps(),
@@ -616,9 +737,15 @@ describe('createActivities — tier resolution + fallback', () => {
 
     const err: unknown = await activities
       .runAgent({
-        taskId: 't1', stage: 'design', attempt: 1, callIndex: 1, tier: 'smart',
-        promptRef: 'design.md', promptContext: { taskId: 't1', goal: 'g' },
-        workspaceRef: 'demo/repo', limits: { maxTokens: 1000, timeoutMs: 60_000 },
+        taskId: 't1',
+        stage: 'design',
+        attempt: 1,
+        callIndex: 1,
+        tier: 'smart',
+        promptRef: 'design.md',
+        promptContext: { taskId: 't1', goal: 'g' },
+        workspaceRef: 'demo/repo',
+        limits: { maxTokens: 1000, timeoutMs: 60_000 },
       })
       .catch((e) => e);
 
@@ -629,16 +756,24 @@ describe('createActivities — tier resolution + fallback', () => {
 
   it('maps RateLimitError to a retryable ApplicationFailure with a nextRetryDelay', async () => {
     const claude: AgentBackend = {
-      run: async () => { throw new RateLimitError('429 rate limit'); },
+      run: async () => {
+        throw new RateLimitError('429 rate limit');
+      },
     };
     const deps = { ...buildDeps(), backends: { claude } };
     const activities = createActivities(deps);
 
     const err: unknown = await activities
       .runAgent({
-        taskId: 't1', stage: 'design', attempt: 1, callIndex: 1, tier: 'smart',
-        promptRef: 'design.md', promptContext: { taskId: 't1', goal: 'g' },
-        workspaceRef: 'demo/repo', limits: { maxTokens: 1000, timeoutMs: 60_000 },
+        taskId: 't1',
+        stage: 'design',
+        attempt: 1,
+        callIndex: 1,
+        tier: 'smart',
+        promptRef: 'design.md',
+        promptContext: { taskId: 't1', goal: 'g' },
+        workspaceRef: 'demo/repo',
+        limits: { maxTokens: 1000, timeoutMs: 60_000 },
       })
       .catch((e) => e);
 
@@ -652,16 +787,25 @@ describe('createActivities — tier resolution + fallback', () => {
 describe('createActivities — runAgent project authorization', () => {
   it('rejects a project-scoped caller requesting the platform backend directly', async () => {
     const { projectContext } = await import('./project-context');
-    const platform: AgentBackend = { run: async () => ({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }) };
+    const platform: AgentBackend = {
+      run: async () => ({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }),
+    };
     const deps = { ...buildDeps(), backends: { platform } };
     const activities = createActivities(deps);
 
     const err: unknown = await projectContext
       .run({ project: 'acme' }, () =>
         activities.runAgent({
-          taskId: 't1', stage: 'agent', attempt: 1, callIndex: 1, backend: 'platform', model: 'claude-sonnet-5',
-          promptRef: 'agent.md', promptContext: { taskId: 't1', instructions: 'x' },
-          workspaceRef: 'memory://scratch/t1', limits: { maxTokens: 1000, timeoutMs: 60_000 },
+          taskId: 't1',
+          stage: 'agent',
+          attempt: 1,
+          callIndex: 1,
+          backend: 'platform',
+          model: 'claude-sonnet-5',
+          promptRef: 'agent.md',
+          promptContext: { taskId: 't1', instructions: 'x' },
+          workspaceRef: 'memory://scratch/t1',
+          limits: { maxTokens: 1000, timeoutMs: 60_000 },
         }),
       )
       .catch((e) => e);
@@ -672,17 +816,25 @@ describe('createActivities — runAgent project authorization', () => {
 
   it('rejects a project-scoped caller whose own projectTiers resolves to the platform backend', async () => {
     const { projectContext } = await import('./project-context');
-    const platform: AgentBackend = { run: async () => ({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }) };
+    const platform: AgentBackend = {
+      run: async () => ({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }),
+    };
     const deps = { ...buildDeps(), backends: { platform } };
     const activities = createActivities(deps);
 
     const err: unknown = await projectContext
       .run({ project: 'acme' }, () =>
         activities.runAgent({
-          taskId: 't1', stage: 'agent', attempt: 1, callIndex: 1,
-          tier: 'sneaky', projectTiers: { sneaky: [{ backend: 'platform', model: 'claude-sonnet-5' }] },
-          promptRef: 'agent.md', promptContext: { taskId: 't1', instructions: 'x' },
-          workspaceRef: 'memory://scratch/t1', limits: { maxTokens: 1000, timeoutMs: 60_000 },
+          taskId: 't1',
+          stage: 'agent',
+          attempt: 1,
+          callIndex: 1,
+          tier: 'sneaky',
+          projectTiers: { sneaky: [{ backend: 'platform', model: 'claude-sonnet-5' }] },
+          promptRef: 'agent.md',
+          promptContext: { taskId: 't1', instructions: 'x' },
+          workspaceRef: 'memory://scratch/t1',
+          limits: { maxTokens: 1000, timeoutMs: 60_000 },
         }),
       )
       .catch((e) => e);
@@ -692,14 +844,23 @@ describe('createActivities — runAgent project authorization', () => {
   });
 
   it('allows an engine-internal caller (no project in context) to use the platform backend', async () => {
-    const platform: AgentBackend = { run: async () => ({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }) };
+    const platform: AgentBackend = {
+      run: async () => ({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }),
+    };
     const deps = { ...buildDeps(), backends: { platform } };
     const activities = createActivities(deps);
 
     const result = await activities.runAgent({
-      taskId: 't1', stage: 'platform', attempt: 1, callIndex: 1, backend: 'platform', model: 'claude-sonnet-5',
-      promptRef: 'platform.md', promptContext: { taskId: 't1', prompt: 'p', hintRepos: '' },
-      workspaceRef: 'memory://scratch/t1', limits: { maxTokens: 1000, timeoutMs: 60_000 },
+      taskId: 't1',
+      stage: 'platform',
+      attempt: 1,
+      callIndex: 1,
+      backend: 'platform',
+      model: 'claude-sonnet-5',
+      promptRef: 'platform.md',
+      promptContext: { taskId: 't1', prompt: 'p', hintRepos: '' },
+      workspaceRef: 'memory://scratch/t1',
+      limits: { maxTokens: 1000, timeoutMs: 60_000 },
     });
 
     expect(result.output).toBe('ok');
@@ -724,9 +885,8 @@ describe('createActivities — resolveRepoConfig', () => {
     ];
     const activities = createActivities(deps);
 
-    const { registered, project, config } = await activities.resolveRepoConfig(
-      'est1908/agentops-engine',
-    );
+    const { registered, project, config } =
+      await activities.resolveRepoConfig('est1908/agentops-engine');
 
     expect(registered).toBe(true);
     expect(project).toBe('engine');
@@ -751,11 +911,21 @@ describe('createActivities — resolveRepoConfig', () => {
   it('createIssue throws ProjectAuthorizationError when caller project does not own the repo', async () => {
     const { projectContext } = await import('./project-context');
     const tracker = new MemoryTrackerPort();
-    const deps = { ...buildDeps(), tracker, registry: [{ project: 'acme', repo: 'acme/web', trackerType: 'github' as const, token: 't' }] };
+    const deps = {
+      ...buildDeps(),
+      tracker,
+      registry: [{ project: 'acme', repo: 'acme/web', trackerType: 'github' as const, token: 't' }],
+    };
     const activities = createActivities(deps);
     await expect(
       projectContext.run({ project: 'other' }, () =>
-        activities.createIssue({ repo: 'acme/web', project: 'acme', title: 't', body: 'b', labels: [] }),
+        activities.createIssue({
+          repo: 'acme/web',
+          project: 'acme',
+          title: 't',
+          body: 'b',
+          labels: [],
+        }),
       ),
     ).rejects.toThrow(/ProjectAuthorizationError|not authorized/);
   });
@@ -787,8 +957,22 @@ describe('createActivities — resolveRepoConfig', () => {
     } as any;
     const activities = createActivities(deps);
     const plan = {
-      toCreate: [{ name: 'nightly', workflow: 'projectScan', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip', taskQueue: 'proj-acme' }],
-      toUpdate: [], toDelete: [], toPause: [], toResume: [],
+      toCreate: [
+        {
+          name: 'nightly',
+          workflow: 'projectScan',
+          schedule: '0 2 * * *',
+          input: {},
+          enabled: true,
+          timezone: 'UTC',
+          overlap: 'skip',
+          taskQueue: 'proj-acme',
+        },
+      ],
+      toUpdate: [],
+      toDelete: [],
+      toPause: [],
+      toResume: [],
     } as any;
     await activities.applyScheduleChanges('acme', 'acme/web', plan);
     expect(create.mock.calls[0][0].action.taskQueue).toBe('proj-acme');
@@ -809,14 +993,35 @@ describe('createActivities — resolveRepoConfig', () => {
     } as any;
     const activities = createActivities(deps);
     const plan = {
-      toCreate: [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: { focus: 'auth' }, enabled: true, timezone: 'UTC', overlap: 'skip' }],
-      toUpdate: [], toDelete: [], toPause: [], toResume: [],
+      toCreate: [
+        {
+          name: 'nb',
+          workflow: 'whiteboxBugHunt',
+          schedule: '0 2 * * *',
+          input: { focus: 'auth' },
+          enabled: true,
+          timezone: 'UTC',
+          overlap: 'skip',
+        },
+      ],
+      toUpdate: [],
+      toDelete: [],
+      toPause: [],
+      toResume: [],
     } as any;
     await activities.applyScheduleChanges('acme', 'acme/web', plan);
     const arg = create.mock.calls[0][0];
     expect(arg.action.args[0]).toMatchObject({ repo: 'acme/web', project: 'acme', focus: 'auth' });
-    expect(arg.memo).toMatchObject({ project: 'acme', agentName: 'nb', workflowType: 'whiteboxBugHunt' });
-    expect(arg.searchAttributes).toMatchObject({ project: ['acme'], agentName: ['nb'], workflowType: ['whiteboxBugHunt'] });
+    expect(arg.memo).toMatchObject({
+      project: 'acme',
+      agentName: 'nb',
+      workflowType: 'whiteboxBugHunt',
+    });
+    expect(arg.searchAttributes).toMatchObject({
+      project: ['acme'],
+      agentName: ['nb'],
+      workflowType: ['whiteboxBugHunt'],
+    });
   });
 
   it('applyScheduleChanges updates an existing schedule via an updater function, matching the real ScheduleHandle.update contract', async () => {
@@ -828,19 +1033,41 @@ describe('createActivities — resolveRepoConfig', () => {
     // so an already-existing schedule's stale taskQueue (e.g. an unslugified
     // project name) could never actually be corrected by reconcile.
     const update = vi.fn(async (updateFn: (previous: unknown) => unknown) => {
-      update.lastResult = await updateFn({ action: { taskQueue: 'proj-Artem private agents' }, spec: { cronExpressions: ['0 */2 * * *'], timezone: 'UTC' } });
+      update.lastResult = await updateFn({
+        action: { taskQueue: 'proj-Artem private agents' },
+        spec: { cronExpressions: ['0 */2 * * *'], timezone: 'UTC' },
+      });
     }) as any;
     const getHandle = vi.fn(() => ({ update }));
     const deps = {
       ...buildDeps(),
       scheduleClient: { getHandle } as any,
-      registry: [{ project: 'Artem private agents', repo: 'est1908/agents', trackerType: 'github' as const, token: 't' }],
+      registry: [
+        {
+          project: 'Artem private agents',
+          repo: 'est1908/agents',
+          trackerType: 'github' as const,
+          token: 't',
+        },
+      ],
     } as any;
     const activities = createActivities(deps);
     const plan = {
       toCreate: [],
-      toUpdate: [{ name: 'gdebenz-watch', workflow: 'productOwnerReview', schedule: '0 */2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' }],
-      toDelete: [], toPause: [], toResume: [],
+      toUpdate: [
+        {
+          name: 'gdebenz-watch',
+          workflow: 'productOwnerReview',
+          schedule: '0 */2 * * *',
+          input: {},
+          enabled: true,
+          timezone: 'UTC',
+          overlap: 'skip',
+        },
+      ],
+      toDelete: [],
+      toPause: [],
+      toResume: [],
     } as any;
     await activities.applyScheduleChanges('Artem private agents', 'est1908/agents', plan);
     expect(getHandle).toHaveBeenCalledWith('agent:Artem private agents:gdebenz-watch');
@@ -857,13 +1084,26 @@ describe('createActivities — resolveRepoConfig', () => {
       registry: [],
     } as any;
     const activities = createActivities(deps);
-    const spec = { name: 'mon', workflow: 'rollbarMonitor', schedule: 'continuous', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip', taskQueue: 'proj-acme' } as any;
+    const spec = {
+      name: 'mon',
+      workflow: 'rollbarMonitor',
+      schedule: 'continuous',
+      input: {},
+      enabled: true,
+      timezone: 'UTC',
+      overlap: 'skip',
+      taskQueue: 'proj-acme',
+    } as any;
     await activities.startContinuousAgent('acme', 'acme/web', spec);
     const [wf, opts] = start.mock.calls[0];
     expect(wf).toBe('rollbarMonitor');
     expect(opts.workflowId).toBe('agent:acme:mon');
     expect(opts.taskQueue).toBe('proj-acme');
-    expect(opts.memo).toMatchObject({ project: 'acme', agentName: 'mon', workflowType: 'rollbarMonitor' });
+    expect(opts.memo).toMatchObject({
+      project: 'acme',
+      agentName: 'mon',
+      workflowType: 'rollbarMonitor',
+    });
     expect(opts.searchAttributes).toMatchObject({ project: ['acme'] });
     expect(opts.args[0]).toMatchObject({ repo: 'acme/web', project: 'acme' });
   });

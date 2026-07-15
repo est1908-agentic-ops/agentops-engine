@@ -38,6 +38,8 @@ const stateQuery = defineQuery<DevCycleState>('state');
 const DEFAULT_BABYSIT_POLL_MS = 5000;
 const MAX_BABYSIT_WAITS = 240; // ~20min
 
+// Deprecated for new starts: gateway enrollment routes to prLanding instead.
+// Kept replayable for in-flight Temporal histories — do not rewrite this body.
 export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<DevCycleState> {
   const state: DevCycleState = {
     taskId: input.taskId,
@@ -51,6 +53,7 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
     implementAttempts: 0,
     iterations: 0,
     cumulativeTokens: 0,
+    landingOutcome: null,
   };
 
   let cancelled = false;

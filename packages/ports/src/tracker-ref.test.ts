@@ -3,11 +3,18 @@ import { linearRef, parseTrackerRef } from './tracker-ref';
 
 describe('parseTrackerRef', () => {
   it('parses a GitHub-shaped ref', () => {
-    expect(parseTrackerRef('octocat/hello-world#42')).toEqual({ kind: 'github', repo: 'octocat/hello-world' });
+    expect(parseTrackerRef('octocat/hello-world#42')).toEqual({
+      kind: 'github',
+      repo: 'octocat/hello-world',
+    });
   });
 
   it('parses a Linear-shaped ref', () => {
-    expect(parseTrackerRef('linear:ENG-123')).toEqual({ kind: 'linear', teamKey: 'ENG', identifier: 'ENG-123' });
+    expect(parseTrackerRef('linear:ENG-123')).toEqual({
+      kind: 'linear',
+      teamKey: 'ENG',
+      identifier: 'ENG-123',
+    });
   });
 
   it('throws on a malformed linear ref with no team key', () => {

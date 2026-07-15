@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { nextRepairAction, type RepairState } from './next-repair-action';
 
-const brakes = { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 };
+const brakes = {
+  maxImplementAttempts: 3,
+  maxIterations: 6,
+  maxTokens: 200_000,
+  maxBabysitRounds: 5,
+};
 
 const baseState: RepairState = {
   implementAttempts: 1,
@@ -31,12 +36,20 @@ describe('nextRepairAction', () => {
   });
 
   it('uses the escalation model on the final attempt when one is configured', () => {
-    const action = nextRepairAction({ ...baseState, implementAttempts: 2, hasEscalationModel: true });
+    const action = nextRepairAction({
+      ...baseState,
+      implementAttempts: 2,
+      hasEscalationModel: true,
+    });
     expect(action).toEqual({ kind: 'fix', useEscalationModel: true });
   });
 
   it('does not escalate on the final attempt when no escalation model is configured', () => {
-    const action = nextRepairAction({ ...baseState, implementAttempts: 2, hasEscalationModel: false });
+    const action = nextRepairAction({
+      ...baseState,
+      implementAttempts: 2,
+      hasEscalationModel: false,
+    });
     expect(action).toEqual({ kind: 'fix', useEscalationModel: false });
   });
 

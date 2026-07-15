@@ -9,7 +9,10 @@ export interface ManagedProjectRegistryDeps {
   privateKey: string;
 }
 
-async function resolveOne(deps: ManagedProjectRegistryDeps, repo: string): Promise<ResolvedProjectEntry | null> {
+async function resolveOne(
+  deps: ManagedProjectRegistryDeps,
+  repo: string,
+): Promise<ResolvedProjectEntry | null> {
   const managedProject = await deps.store.get(repo);
   if (!managedProject) {
     return null;
@@ -22,7 +25,10 @@ async function resolveOne(deps: ManagedProjectRegistryDeps, repo: string): Promi
   try {
     token = decryptForManagedProject(deps.privateKey, encryptedToken);
   } catch (err) {
-    console.warn(`resolveManagedProjects: failed to decrypt credential for repo "${repo}" — skipping`, err);
+    console.warn(
+      `resolveManagedProjects: failed to decrypt credential for repo "${repo}" — skipping`,
+      err,
+    );
     return null;
   }
 
@@ -39,14 +45,19 @@ async function resolveOne(deps: ManagedProjectRegistryDeps, repo: string): Promi
 
   const encryptedLinearToken = await deps.store.getEncryptedLinearToken(repo);
   if (!encryptedLinearToken) {
-    console.warn(`resolveManagedProjects: linear-tracked repo "${repo}" has no Linear credential set — skipping`);
+    console.warn(
+      `resolveManagedProjects: linear-tracked repo "${repo}" has no Linear credential set — skipping`,
+    );
     return null;
   }
   let linearToken: string;
   try {
     linearToken = decryptForManagedProject(deps.privateKey, encryptedLinearToken);
   } catch (err) {
-    console.warn(`resolveManagedProjects: failed to decrypt Linear credential for repo "${repo}" — skipping`, err);
+    console.warn(
+      `resolveManagedProjects: failed to decrypt Linear credential for repo "${repo}" — skipping`,
+      err,
+    );
     return null;
   }
   return {
@@ -67,7 +78,10 @@ async function resolveOne(deps: ManagedProjectRegistryDeps, repo: string): Promi
  * static PROJECT_REGISTRY_JSON mechanism was removed; see
  * docs/superpowers/specs/2026-07-09-linear-trigger-design.md's DB-only addendum).
  */
-export async function resolveManagedProjectEntry(deps: ManagedProjectRegistryDeps | undefined, repo: string): Promise<ResolvedProjectEntry | null> {
+export async function resolveManagedProjectEntry(
+  deps: ManagedProjectRegistryDeps | undefined,
+  repo: string,
+): Promise<ResolvedProjectEntry | null> {
   if (!deps) {
     return null;
   }
@@ -80,7 +94,10 @@ function isLinearEntry(entry: ResolvedProjectEntry | null): entry is ResolvedLin
   return entry !== null && entry.trackerType === 'linear';
 }
 
-async function resolveOneByLinearTeamKey(deps: ManagedProjectRegistryDeps, teamKey: string): Promise<ResolvedLinearProjectEntry | null> {
+async function resolveOneByLinearTeamKey(
+  deps: ManagedProjectRegistryDeps,
+  teamKey: string,
+): Promise<ResolvedLinearProjectEntry | null> {
   const managedProject = await deps.store.getByLinearTeamKey(teamKey);
   if (!managedProject || managedProject.trackerType !== 'linear') {
     return null;
@@ -111,7 +128,9 @@ export async function resolveManagedProjectEntryByLinearTeamKey(
  * registered repo at startup rather than per request; see the data-layer
  * plan's Task 6 for why this is boot-time rather than fully dynamic).
  */
-export async function loadManagedProjectRegistry(deps: ManagedProjectRegistryDeps): Promise<ResolvedProjectEntry[]> {
+export async function loadManagedProjectRegistry(
+  deps: ManagedProjectRegistryDeps,
+): Promise<ResolvedProjectEntry[]> {
   const managedProjects = await deps.store.list();
   const entries: ResolvedProjectEntry[] = [];
   for (const project of managedProjects) {

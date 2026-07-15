@@ -75,7 +75,10 @@ export async function loadAgentsManifest(
   scm: { readFile: (repo: string, path: string) => Promise<string | null> },
   project: string,
   repo: string,
-  parse: (raw: unknown, opts: { workflowInputs: Record<string, unknown> }) => { agents: AgentSpec[] },
+  parse: (
+    raw: unknown,
+    opts: { workflowInputs: Record<string, unknown> },
+  ) => { agents: AgentSpec[] },
   workflowInputs: Record<string, unknown>,
 ): Promise<AgentSpec[]> {
   const raw = await scm.readFile(repo, 'agents.json');
@@ -91,7 +94,10 @@ export async function loadAgentsManifest(
   return manifest.agents;
 }
 
-export async function listAgentSchedules(project: string, client?: ScheduleClientLike): Promise<ExistingSchedule[]> {
+export async function listAgentSchedules(
+  project: string,
+  client?: ScheduleClientLike,
+): Promise<ExistingSchedule[]> {
   if (!client) return [];
   const out: ExistingSchedule[] = [];
   // list() yields schedule summaries
@@ -102,7 +108,10 @@ export async function listAgentSchedules(project: string, client?: ScheduleClien
       if (!id || !id.startsWith(`agent:${project}:`)) continue;
       // Best-effort extraction; real objects have more structure.
       const spec = (s as any)?.schedule?.spec;
-      const scheduleSpec = typeof spec === 'string' ? spec : (spec?.cronExpressions?.[0] ?? spec?.cron?.cronString ?? 'continuous');
+      const scheduleSpec =
+        typeof spec === 'string'
+          ? spec
+          : (spec?.cronExpressions?.[0] ?? spec?.cron?.cronString ?? 'continuous');
       const workflow = (s as any)?.action?.type ?? 'whiteboxBugHunt';
       const taskQueue = (s as any)?.action?.taskQueue as string | undefined;
       // paused not directly on list item in all SDK versions; default false and rely on apply
@@ -127,7 +136,11 @@ export async function applyScheduleChanges(
     const id = scheduleId(project, spec.name);
     const args = [{ repo, project, ...spec.input }];
     const memo = { project, agentName: spec.name, workflowType: spec.workflow };
-    const searchAttributes = { project: [project], agentName: [spec.name], workflowType: [spec.workflow] };
+    const searchAttributes = {
+      project: [project],
+      agentName: [spec.name],
+      workflowType: [spec.workflow],
+    };
     if (client.create) {
       await client.create({
         scheduleId: id,
@@ -152,7 +165,11 @@ export async function applyScheduleChanges(
     const h = client.getHandle(id);
     const args = [{ repo, project, ...spec.input }];
     const memo = { project, agentName: spec.name, workflowType: spec.workflow };
-    const searchAttributes = { project: [project], agentName: [spec.name], workflowType: [spec.workflow] };
+    const searchAttributes = {
+      project: [project],
+      agentName: [spec.name],
+      workflowType: [spec.workflow],
+    };
     await h.update?.(() => ({
       action: {
         type: 'startWorkflow',

@@ -1,5 +1,10 @@
 import { Client, Connection } from '@temporalio/client';
-import { loadEnv, PostgresManagedProjectStore, SpawnGitCommandRunner, type ManagedProjectRegistryDeps } from '@agentops/activities';
+import {
+  loadEnv,
+  PostgresManagedProjectStore,
+  SpawnGitCommandRunner,
+  type ManagedProjectRegistryDeps,
+} from '@agentops/activities';
 import type { ResolvedProjectEntry } from '@agentops/contracts';
 import { DEFAULT_TRIGGER_LABEL } from '@agentops/contracts';
 import { createGithubPorts } from '@agentops/ports';
@@ -48,7 +53,9 @@ async function main(): Promise<void> {
     );
   }
 
-  const connection = await Connection.connect({ address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233' });
+  const connection = await Connection.connect({
+    address: process.env.TEMPORAL_ADDRESS ?? 'localhost:7233',
+  });
   const client = new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE });
 
   const linearWebhookSecret = process.env.LINEAR_WEBHOOK_SECRET;

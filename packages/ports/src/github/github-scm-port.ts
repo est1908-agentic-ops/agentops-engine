@@ -1,4 +1,4 @@
-import type { PrFeedback } from '@agentops/contracts';
+import type { MergePrRequest, MergePrResult, PrFeedback, PrSnapshot } from '@agentops/contracts';
 import type { GitCommandRunner } from '../git/git-command-runner';
 import type { OpenPrRequest, OpenPrResult, ScmPort } from '../scm-port';
 import type { GithubClient } from './github-client';
@@ -8,7 +8,10 @@ interface GraphqlReviewThreadsResult {
   repository: {
     pullRequest: {
       reviewThreads: {
-        nodes: Array<{ isResolved: boolean; comments: { nodes: Array<{ id: string; body: string }> } }>;
+        nodes: Array<{
+          isResolved: boolean;
+          comments: { nodes: Array<{ id: string; body: string }> };
+        }>;
       };
     };
   };
@@ -58,12 +61,20 @@ function isNotAccessible(err: unknown): boolean {
 // path-filtered job that didn't need to run) and 'neutral' are explicitly
 // non-blocking per GitHub's own semantics -- only these represent a real,
 // merge-blocking CI failure.
-const FAILING_CHECK_CONCLUSIONS = new Set(['failure', 'cancelled', 'timed_out', 'action_required', 'stale']);
+const FAILING_CHECK_CONCLUSIONS = new Set([
+  'failure',
+  'cancelled',
+  'timed_out',
+  'action_required',
+  'stale',
+]);
 
 function mapCheckRuns(checkRuns: Array<{ status: string; conclusion: string | null }>): CiSignal {
   if (checkRuns.length === 0) return 'none'; // confirmed: no check runs exist for this ref
   if (checkRuns.some((run) => run.status !== 'completed')) return 'pending';
-  const hasFailure = checkRuns.some((run) => run.conclusion !== null && FAILING_CHECK_CONCLUSIONS.has(run.conclusion));
+  const hasFailure = checkRuns.some(
+    (run) => run.conclusion !== null && FAILING_CHECK_CONCLUSIONS.has(run.conclusion),
+  );
   return hasFailure ? 'failed' : 'green';
 }
 
@@ -86,7 +97,10 @@ function mapCombinedStatus(state: string, total: number): CiSignal {
 // (2026-07-13)) -- retrying won't change it, so surface it distinctly as
 // `unreadable` instead of defaulting to `pending`, which would babysit-poll
 // forever on a permission problem no amount of waiting will fix.
-export function mergeCiSignals(a: CiSignal, b: CiSignal): 'green' | 'failed' | 'pending' | 'unreadable' {
+export function mergeCiSignals(
+  a: CiSignal,
+  b: CiSignal,
+): 'green' | 'failed' | 'pending' | 'unreadable' {
   if (a === 'failed' || b === 'failed') return 'failed';
   if (a === 'pending' || b === 'pending') return 'pending';
   if (a === 'green' || b === 'green') return 'green';
@@ -143,16 +157,19 @@ export class GithubScmPort implements ScmPort {
     }
   }
 
-  async getPrFeedback(prRef: string): Promise<PrFeedback> {
+  async getPrSnapshot(prRef: string): Promise<PrSnapshot> {
     const { owner, repo, number } = parseRef(prRef);
     const { data: pr } = await this.client.rest.pulls.get({ owner, repo, pull_number: number });
     const ciStatus = await this.readCiStatus(owner, repo, pr.head.sha);
 
-    const graphqlResult = await this.client.graphql<GraphqlReviewThreadsResult>(REVIEW_THREADS_QUERY, {
-      owner,
-      repo,
-      number,
-    });
+    const graphqlResult = await this.client.graphql<GraphqlReviewThreadsResult>(
+      REVIEW_THREADS_QUERY,
+      {
+        owner,
+        repo,
+        number,
+      },
+    );
     const threads = graphqlResult.repository.pullRequest.reviewThreads.nodes;
     const unresolvedThreads = threads.filter((thread) => !thread.isResolved).length;
     const comments = threads.map((thread) => ({
@@ -161,14 +178,72 @@ export class GithubScmPort implements ScmPort {
       resolved: thread.isResolved,
     }));
 
-    return { ciStatus, unresolvedThreads, comments };
+    return {
+      prRef,
+      headSha: pr.head.sha,
+      headRepo: pr.head.repo.full_name,
+      headBranch: pr.head.ref,
+      checkoutRef: `refs/pull/${number}/head`,
+      labels: pr.labels.map((label) => label.name),
+      state: pr.merged ? 'merged' : pr.state,
+      draft: pr.draft,
+      mergeable: pr.mergeable,
+      mergedHeadSha: pr.merge_commit_sha,
+      ciStatus,
+      unresolvedThreads,
+      comments,
+    };
+  }
+
+  async getPrFeedback(prRef: string): Promise<PrFeedback> {
+    const snapshot = await this.getPrSnapshot(prRef);
+    return {
+      ciStatus: snapshot.ciStatus,
+      unresolvedThreads: snapshot.unresolvedThreads,
+      comments: snapshot.comments,
+    };
+  }
+
+  async mergePr(req: MergePrRequest): Promise<MergePrResult> {
+    const { owner, repo, number } = parseRef(req.prRef);
+    try {
+      const { data } = await this.client.rest.pulls.merge({
+        owner,
+        repo,
+        pull_number: number,
+        sha: req.expectedHeadSha,
+      });
+      if (!data.merged)
+        return { kind: 'not-mergeable', reason: data.message || 'GitHub refused merge' };
+      return { kind: 'merged', headSha: req.expectedHeadSha, mergeCommitSha: data.sha };
+    } catch (err) {
+      const status = (err as { status?: number }).status;
+      if (status === 409) return { kind: 'head-changed' };
+      if (status === 403)
+        return { kind: 'forbidden', reason: err instanceof Error ? err.message : 'forbidden' };
+      if (status === 405) {
+        const snapshot = await this.getPrSnapshot(req.prRef);
+        if (snapshot.state === 'merged' && snapshot.headSha === req.expectedHeadSha) {
+          return { kind: 'already-merged', headSha: req.expectedHeadSha };
+        }
+        return {
+          kind: 'not-mergeable',
+          reason: err instanceof Error ? err.message : 'not mergeable',
+        };
+      }
+      throw err;
+    }
   }
 
   // Read CI from the Checks API and the Statuses API in parallel and merge. A
   // 403/404 on either (e.g. a PAT that can't read check runs) degrades that
   // source to `unknown` instead of failing the whole activity; other errors
   // (5xx/network) still propagate so Temporal's retry can absorb them.
-  private async readCiStatus(owner: string, repo: string, ref: string): Promise<'green' | 'failed' | 'pending' | 'unreadable'> {
+  private async readCiStatus(
+    owner: string,
+    repo: string,
+    ref: string,
+  ): Promise<'green' | 'failed' | 'pending' | 'unreadable'> {
     const [checks, status] = await Promise.all([
       this.readCheckRuns(owner, repo, ref),
       this.readCombinedStatus(owner, repo, ref),
@@ -197,7 +272,12 @@ export class GithubScmPort implements ScmPort {
     }
   }
 
-  async push(_repo: string, workspaceRef: string, branch: string, _contentHash: string): Promise<void> {
+  async push(
+    _repo: string,
+    workspaceRef: string,
+    branch: string,
+    _contentHash: string,
+  ): Promise<void> {
     // --force: this branch is task-owned and disposable (ARCHITECTURE.md §1 -- only
     // pushed commits count, worktrees aren't). prepareWorkspace always rebuilds it
     // fresh off origin/<base> (see reclaimStaleWorktree), so a rerun of the same

@@ -1,12 +1,22 @@
 import { proxyActivities } from '@temporalio/workflow';
-import { reconcileAgents, reconcileContinuous, workerWarnings, type ReconcilePlan, type ContinuousPlan } from '@agentops/policies';
+import {
+  reconcileAgents,
+  reconcileContinuous,
+  workerWarnings,
+  type ReconcilePlan,
+  type ContinuousPlan,
+} from '@agentops/policies';
 import type { ConfigSyncActivities } from './activities-api';
 
-const acts = proxyActivities<ConfigSyncActivities>({ startToCloseTimeout: '2 minutes', retry: { maximumAttempts: 5 } });
+const acts = proxyActivities<ConfigSyncActivities>({
+  startToCloseTimeout: '2 minutes',
+  retry: { maximumAttempts: 5 },
+});
 
-export async function configSync(
-  input: { project: string; repo: string },
-): Promise<ReconcilePlan & { continuous?: ContinuousPlan; warnings?: string[] }> {
+export async function configSync(input: {
+  project: string;
+  repo: string;
+}): Promise<ReconcilePlan & { continuous?: ContinuousPlan; warnings?: string[] }> {
   const manifest = await acts.loadAgentsManifest(input.project, input.repo);
   const declared = manifest.agents;
   // No-silent-misconfig surface (spec §7): a custom workflow scheduled without a
@@ -18,7 +28,8 @@ export async function configSync(
 
   const runningContinuous = await acts.listContinuousAgents(input.project);
   const contPlan = reconcileContinuous(declared, runningContinuous, input.project);
-  for (const spec of contPlan.toStart) await acts.startContinuousAgent(input.project, input.repo, spec);
+  for (const spec of contPlan.toStart)
+    await acts.startContinuousAgent(input.project, input.repo, spec);
   for (const id of contPlan.toTerminate) await acts.terminateContinuousAgent(id);
   return { ...plan, continuous: contPlan, warnings };
 }

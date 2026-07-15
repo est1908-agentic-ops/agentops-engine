@@ -47,13 +47,23 @@ function deriveAesKey(sharedSecret: Buffer): Buffer {
 
 // Self-describing blob so we never depend on the ephemeral public key's DER
 // length being some assumed constant: [2-byte BE length][ephemeral pubkey DER][iv][authTag][ciphertext].
-function packBlob(ephemeralPublicKeyDer: Buffer, iv: Buffer, authTag: Buffer, ciphertext: Buffer): Buffer {
+function packBlob(
+  ephemeralPublicKeyDer: Buffer,
+  iv: Buffer,
+  authTag: Buffer,
+  ciphertext: Buffer,
+): Buffer {
   const lengthPrefix = Buffer.alloc(2);
   lengthPrefix.writeUInt16BE(ephemeralPublicKeyDer.length, 0);
   return Buffer.concat([lengthPrefix, ephemeralPublicKeyDer, iv, authTag, ciphertext]);
 }
 
-function unpackBlob(blob: Buffer): { ephemeralPublicKeyDer: Buffer; iv: Buffer; authTag: Buffer; ciphertext: Buffer } {
+function unpackBlob(blob: Buffer): {
+  ephemeralPublicKeyDer: Buffer;
+  iv: Buffer;
+  authTag: Buffer;
+  ciphertext: Buffer;
+} {
   const ephemeralPublicKeyLength = blob.readUInt16BE(0);
   let offset = 2;
   const ephemeralPublicKeyDer = blob.subarray(offset, offset + ephemeralPublicKeyLength);
@@ -71,14 +81,24 @@ function unpackBlob(blob: Buffer): { ephemeralPublicKeyDer: Buffer; iv: Buffer; 
  * `packages/control` is meant to hold only `recipientPublicKeyBase64` --
  * by construction, this function's caller cannot decrypt what it just wrote.
  */
-export function encryptForManagedProject(recipientPublicKeyBase64: string, plaintext: string): string {
+export function encryptForManagedProject(
+  recipientPublicKeyBase64: string,
+  plaintext: string,
+): string {
   const recipientPublicKey = importPublicKey(recipientPublicKeyBase64);
   const ephemeral = generateKeyPairSync('x25519', {
     publicKeyEncoding: { type: 'spki', format: 'der' },
     privateKeyEncoding: { type: 'pkcs8', format: 'der' },
   });
-  const ephemeralPrivateKey = createPrivateKey({ key: ephemeral.privateKey, format: 'der', type: 'pkcs8' });
-  const sharedSecret = diffieHellman({ privateKey: ephemeralPrivateKey, publicKey: recipientPublicKey });
+  const ephemeralPrivateKey = createPrivateKey({
+    key: ephemeral.privateKey,
+    format: 'der',
+    type: 'pkcs8',
+  });
+  const sharedSecret = diffieHellman({
+    privateKey: ephemeralPrivateKey,
+    publicKey: recipientPublicKey,
+  });
   const aesKey = deriveAesKey(sharedSecret);
 
   const iv = randomBytes(IV_LENGTH);
@@ -94,11 +114,23 @@ export function encryptForManagedProject(recipientPublicKeyBase64: string, plain
  * recipient's private key -- only `cli`/`gateway`/`worker` are ever given
  * it; `packages/control` never imports this function.
  */
-export function decryptForManagedProject(recipientPrivateKeyBase64: string, blobBase64: string): string {
-  const { ephemeralPublicKeyDer, iv, authTag, ciphertext } = unpackBlob(Buffer.from(blobBase64, 'base64'));
-  const ephemeralPublicKey = createPublicKey({ key: ephemeralPublicKeyDer, format: 'der', type: 'spki' });
+export function decryptForManagedProject(
+  recipientPrivateKeyBase64: string,
+  blobBase64: string,
+): string {
+  const { ephemeralPublicKeyDer, iv, authTag, ciphertext } = unpackBlob(
+    Buffer.from(blobBase64, 'base64'),
+  );
+  const ephemeralPublicKey = createPublicKey({
+    key: ephemeralPublicKeyDer,
+    format: 'der',
+    type: 'spki',
+  });
   const recipientPrivateKey = importPrivateKey(recipientPrivateKeyBase64);
-  const sharedSecret = diffieHellman({ privateKey: recipientPrivateKey, publicKey: ephemeralPublicKey });
+  const sharedSecret = diffieHellman({
+    privateKey: recipientPrivateKey,
+    publicKey: ephemeralPublicKey,
+  });
   const aesKey = deriveAesKey(sharedSecret);
 
   const decipher = createDecipheriv('aes-256-gcm', aesKey, iv);

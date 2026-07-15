@@ -2,7 +2,10 @@ import { describe, it, expect } from 'vitest';
 import { ApplicationFailure } from '@temporalio/common';
 import { projectContext, getCallerProject, assertProjectOwnsRepo } from './project-context';
 
-const registry = [{ project: 'acme', repo: 'acme/web' }, { project: 'globex', repo: 'globex/api' }];
+const registry = [
+  { project: 'acme', repo: 'acme/web' },
+  { project: 'globex', repo: 'globex/api' },
+];
 
 describe('project authorization guard', () => {
   it('allows when the caller project owns the repo', () => {

@@ -16,7 +16,12 @@ describe('DevCycle e2e: exhausted repair rounds open the PR anyway', () => {
     testEnv = await buildTestEnv();
     const { env, worker, stub, tracker, scm, taskQueue } = testEnv;
 
-    tracker.seedIssue({ ref: 'issue-9', title: 'Hard bug', body: 'Never quite passes review', labels: [] });
+    tracker.seedIssue({
+      ref: 'issue-9',
+      title: 'Hard bug',
+      body: 'Never quite passes review',
+      labels: [],
+    });
 
     for (const attempt of [1, 2, 3]) {
       stub.scriptResponse('implement', attempt, { output: `diff attempt ${attempt}` });
@@ -39,7 +44,12 @@ describe('DevCycle e2e: exhausted repair rounds open the PR anyway', () => {
         fullVerifyCommands: [],
         stages: {},
         routing: {},
-        brakes: { maxImplementAttempts: 3, maxIterations: 10, maxTokens: 1_000_000, maxBabysitRounds: 5 },
+        brakes: {
+          maxImplementAttempts: 3,
+          maxIterations: 10,
+          maxTokens: 1_000_000,
+          maxBabysitRounds: 5,
+        },
       },
     };
 

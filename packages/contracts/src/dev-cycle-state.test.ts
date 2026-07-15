@@ -13,6 +13,7 @@ const VALID = {
   prRef: null,
   workspaceRef: '',
   branch: '',
+  landingOutcome: null,
 };
 
 describe('DevCycleStateSchema', () => {
@@ -31,7 +32,12 @@ describe('DevCycleStateSchema', () => {
   });
 
   it('accepts a done state with a PR ref', () => {
-    const parsed = DevCycleStateSchema.parse({ ...VALID, stage: 'done', status: 'done', prRef: 'pr-1' });
+    const parsed = DevCycleStateSchema.parse({
+      ...VALID,
+      stage: 'done',
+      status: 'done',
+      prRef: 'pr-1',
+    });
     expect(parsed.prRef).toBe('pr-1');
   });
 

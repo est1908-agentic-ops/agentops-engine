@@ -7,7 +7,7 @@ export const DevCyclePrRepairInputSchema = z.object({
   repo: z.string().min(1),
   prRef: z.string().min(1), // "owner/repo#123"
   prReviewFeedback: z.string().optional(),
-  headBranch: z.string().optional(),  // PR head branch name for repair workspace
+  headBranch: z.string().optional(), // PR head branch name for repair workspace
   // Optional; resolved on worker if absent (same as TaskInput)
   config: ProjectConfigSchema.optional(),
 });

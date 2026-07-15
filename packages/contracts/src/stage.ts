@@ -32,5 +32,6 @@ export const BlockReasonSchema = z.enum([
   // the worker's merged static+managed registry -- set together with
   // status 'failed' as a fail-fast, not a resumable block.
   'unregistered-repo',
+  'pr-landing-blocked',
 ]);
 export type BlockReason = z.infer<typeof BlockReasonSchema>;

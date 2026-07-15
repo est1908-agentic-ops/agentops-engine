@@ -1,5 +1,9 @@
 import { loadManagedProjectRegistry, type ManagedProjectRegistryDeps } from '@agentops/activities';
-import { parseAgentsManifest, BUILTIN_WORKFLOW_INPUTS, type ResolvedProjectEntry } from '@agentops/contracts';
+import {
+  parseAgentsManifest,
+  BUILTIN_WORKFLOW_INPUTS,
+  type ResolvedProjectEntry,
+} from '@agentops/contracts';
 import type { ScmPort } from '@agentops/ports';
 import { projectQueue, slugifyProject } from '@agentops/policies';
 
@@ -38,7 +42,9 @@ export interface ProjectWorkerParamsProvider {
 // each managed project's agents.json; this reads it via the per-project token the
 // registry already holds. It lives on the gateway (which already decrypts tokens
 // and reads repos) so `control` stays encrypt-only (spec §6, Option A).
-export function createProjectWorkerParamsProvider(deps: ProjectWorkerParamsDeps): ProjectWorkerParamsProvider {
+export function createProjectWorkerParamsProvider(
+  deps: ProjectWorkerParamsDeps,
+): ProjectWorkerParamsProvider {
   // Last-good cache (spec §6.4): a transient repo-read (or registry) failure
   // serves the prior value and never yields an empty/partial list that would make
   // ArgoCD prune a live worker. A *successful* read with no `worker` block is a
@@ -53,7 +59,10 @@ export function createProjectWorkerParamsProvider(deps: ProjectWorkerParamsDeps)
       try {
         entries = await loadManagedProjectRegistry(deps.managedProjectDeps);
       } catch (err) {
-        console.warn('gateway: failed to list managed projects for ArgoCD params — serving last-good', err);
+        console.warn(
+          'gateway: failed to list managed projects for ArgoCD params — serving last-good',
+          err,
+        );
         return [...lastGood.values()];
       }
 
@@ -65,7 +74,9 @@ export function createProjectWorkerParamsProvider(deps: ProjectWorkerParamsDeps)
             lastGood.delete(entry.project);
             continue;
           }
-          const manifest = parseAgentsManifest(JSON.parse(raw), { workflowInputs: BUILTIN_WORKFLOW_INPUTS });
+          const manifest = parseAgentsManifest(JSON.parse(raw), {
+            workflowInputs: BUILTIN_WORKFLOW_INPUTS,
+          });
           if (!manifest.worker) {
             lastGood.delete(entry.project);
             continue;
@@ -81,7 +92,10 @@ export function createProjectWorkerParamsProvider(deps: ProjectWorkerParamsDeps)
             externalSecretRefs: JSON.stringify(manifest.worker.externalSecrets),
           });
         } catch (err) {
-          console.warn(`gateway: failed to read worker block for project "${entry.project}" — serving last-good`, err);
+          console.warn(
+            `gateway: failed to read worker block for project "${entry.project}" — serving last-good`,
+            err,
+          );
         }
       }
 

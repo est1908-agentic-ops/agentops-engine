@@ -17,7 +17,13 @@ import { startDevCycleForIssue } from '../packages/gateway/src/start-dev-cycle';
 import type { IssueLabeledEvent } from '../packages/gateway/src/parse-issue-labeled';
 import { configSync, devCycle } from '@agentops/workflows';
 import { createWorker } from '@agentops/worker';
-import { buildTestEnv, nextTaskQueue, teardownTestEnv, waitForStatus, type TestEnv } from './helpers';
+import {
+  buildTestEnv,
+  nextTaskQueue,
+  teardownTestEnv,
+  waitForStatus,
+  type TestEnv,
+} from './helpers';
 
 const baseConfig: ProjectConfig = {
   fastVerifyCommands: [],
@@ -121,7 +127,12 @@ describe('SP3 triggers e2e', () => {
     expect((listRes.body as { agents: unknown[] }).agents).toHaveLength(1);
 
     const triggerRes = await handleTriggerAgent(
-      { client: { schedule: scheduleClient } as never, taskQueue: ENGINE_QUEUE, namespace: 'default', temporalUiBaseUrl: 'https://temporal.example' },
+      {
+        client: { schedule: scheduleClient } as never,
+        taskQueue: ENGINE_QUEUE,
+        namespace: 'default',
+        temporalUiBaseUrl: 'https://temporal.example',
+      },
       'agent:acme:nb',
     );
     expect(triggerRes.status).toBe(202);

@@ -24,7 +24,16 @@ describe('ManagedProjectSchema', () => {
       repo: 'acme/web',
       trackerType: 'github',
       credentialSet: true,
-      config: { stages: {}, routing: {}, brakes: { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 } },
+      config: {
+        stages: {},
+        routing: {},
+        brakes: {
+          maxImplementAttempts: 3,
+          maxIterations: 6,
+          maxTokens: 200_000,
+          maxBabysitRounds: 5,
+        },
+      },
       createdAt: '2026-07-08T12:00:00.000Z',
       updatedAt: '2026-07-08T12:00:00.000Z',
     });
@@ -85,23 +94,35 @@ describe('ManagedProjectSchema', () => {
 
 describe('UpsertManagedProjectRequestSchema', () => {
   it('allows omitting token and config for an update', () => {
-    const parsed = UpsertManagedProjectRequestSchema.parse({ project: 'acme-web', repo: 'acme/web' });
+    const parsed = UpsertManagedProjectRequestSchema.parse({
+      project: 'acme-web',
+      repo: 'acme/web',
+    });
     expect(parsed.token).toBeUndefined();
     expect(parsed.config).toBeUndefined();
   });
 
   it('defaults trackerType to github when omitted', () => {
-    const parsed = UpsertManagedProjectRequestSchema.parse({ project: 'acme-web', repo: 'acme/web' });
+    const parsed = UpsertManagedProjectRequestSchema.parse({
+      project: 'acme-web',
+      repo: 'acme/web',
+    });
     expect(parsed.trackerType).toBe('github');
   });
 
   it('accepts an explicit null config to clear it back to file-based', () => {
-    const parsed = UpsertManagedProjectRequestSchema.parse({ project: 'acme-web', repo: 'acme/web', config: null });
+    const parsed = UpsertManagedProjectRequestSchema.parse({
+      project: 'acme-web',
+      repo: 'acme/web',
+      config: null,
+    });
     expect(parsed.config).toBeNull();
   });
 
   it('rejects an empty token string', () => {
-    expect(() => UpsertManagedProjectRequestSchema.parse({ project: 'acme-web', repo: 'acme/web', token: '' })).toThrow();
+    expect(() =>
+      UpsertManagedProjectRequestSchema.parse({ project: 'acme-web', repo: 'acme/web', token: '' }),
+    ).toThrow();
   });
 
   it('accepts linear fields alongside trackerType: linear', () => {

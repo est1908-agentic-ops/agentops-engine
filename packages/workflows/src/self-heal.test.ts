@@ -23,7 +23,8 @@ function stubActivities(captured: { prompt?: string }): PlatformActivities {
     async runAgent(req: AgentRunRequest) {
       captured.prompt = (req.promptContext as { prompt?: string }).prompt;
       return {
-        output: 'PLATFORM_RESULT: {"summary":"self-heal sweep: nothing actionable","actionsTaken":[],"proposedFixes":[]}',
+        output:
+          'PLATFORM_RESULT: {"summary":"self-heal sweep: nothing actionable","actionsTaken":[],"proposedFixes":[]}',
         tokensIn: 1,
         tokensOut: 1,
         wallMs: 1,
@@ -46,7 +47,10 @@ describe('selfHeal', () => {
     });
     try {
       const result = await worker.runUntil(
-        env.client.workflow.execute(selfHeal, { taskQueue: 'test-self-heal', workflowId: 'self-heal-1' }),
+        env.client.workflow.execute(selfHeal, {
+          taskQueue: 'test-self-heal',
+          workflowId: 'self-heal-1',
+        }),
       );
       expect(captured.prompt).toBe(SELF_HEAL_PROMPT);
       expect(result.summary).toContain('nothing actionable');

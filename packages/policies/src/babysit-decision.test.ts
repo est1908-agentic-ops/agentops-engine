@@ -10,7 +10,11 @@ const failedFeedback: PrFeedback = {
   comments: [],
 };
 const pendingFeedback: PrFeedback = { ciStatus: 'pending', unresolvedThreads: 0, comments: [] };
-const unreadableFeedback: PrFeedback = { ciStatus: 'unreadable', unresolvedThreads: 0, comments: [] };
+const unreadableFeedback: PrFeedback = {
+  ciStatus: 'unreadable',
+  unresolvedThreads: 0,
+  comments: [],
+};
 
 describe('babysitDecision', () => {
   it('is merge_ready when CI is green and there are zero unresolved threads', () => {

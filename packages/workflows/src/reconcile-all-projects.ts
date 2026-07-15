@@ -3,7 +3,10 @@ import { ENGINE_QUEUE } from '@agentops/contracts';
 import type { ConfigSyncActivities } from './activities-api';
 
 const acts = proxyActivities<
-  Pick<ConfigSyncActivities, 'listManagedProjects' | 'pruneOrphanAgentSchedules' | 'pruneOrphanWorkspaces'>
+  Pick<
+    ConfigSyncActivities,
+    'listManagedProjects' | 'pruneOrphanAgentSchedules' | 'pruneOrphanWorkspaces'
+  >
 >({
   startToCloseTimeout: '1 minute',
   retry: { maximumAttempts: 3 },
