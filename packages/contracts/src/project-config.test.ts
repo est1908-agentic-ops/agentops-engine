@@ -176,4 +176,10 @@ describe('parseProjectConfig', () => {
     const configured = parseProjectConfig({ timeouts: { context: { idleTimeoutMs: 600_000 } } });
     expect(configured.timeouts).toEqual({ context: { idleTimeoutMs: 600_000 } });
   });
+
+  it('defaults autoMerge to disabled and rejects unknown modes', () => {
+    expect(parseProjectConfig({}).autoMerge).toBe('disabled');
+    expect(parseProjectConfig({ autoMerge: 'label' }).autoMerge).toBe('label');
+    expect(() => parseProjectConfig({ autoMerge: 'sometimes' })).toThrow(InvalidProjectConfigError);
+  });
 });

@@ -56,6 +56,7 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
     implementAttempts: 0,
     iterations: 0,
     cumulativeTokens: 0,
+    landingOutcome: null,
   };
 
   let cancelled = false;

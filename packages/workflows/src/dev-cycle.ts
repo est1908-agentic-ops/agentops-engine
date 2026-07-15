@@ -90,6 +90,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     prRef: null,
     workspaceRef: '',
     branch: '',
+    landingOutcome: null,
   };
 
   let cancelled = false;

@@ -52,6 +52,7 @@ describe('BlockReasonSchema', () => {
       'max-attempts',
       'hook-required-failed',
       'budget-exceeded',
+      'pr-landing-blocked',
     ];
     for (const reason of reasons) {
       expect(BlockReasonSchema.parse(reason)).toBe(reason);

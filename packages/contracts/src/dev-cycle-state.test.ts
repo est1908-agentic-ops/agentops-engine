@@ -13,6 +13,7 @@ const VALID = {
   prRef: null,
   workspaceRef: '',
   branch: '',
+  landingOutcome: null,
 };
 
 describe('DevCycleStateSchema', () => {

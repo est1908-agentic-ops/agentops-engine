@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { BlockReasonSchema, StageSchema, TaskStatusSchema } from './stage';
+import { PrLandingOutcomeSchema } from './pr-landing';
 
 // The state the devCycle workflow maintains, exposes via its 'state' query,
 // and returns as its result. Lives in contracts (not packages/workflows)
@@ -17,5 +18,6 @@ export const DevCycleStateSchema = z.object({
   prRef: z.string().nullable(),
   workspaceRef: z.string(),
   branch: z.string(),
+  landingOutcome: PrLandingOutcomeSchema.nullable(),
 });
 export type DevCycleState = z.infer<typeof DevCycleStateSchema>;
