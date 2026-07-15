@@ -240,7 +240,7 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
       if (waiting >= MAX_BABYSIT_WAITS) {
         state.status = 'blocked';
         state.blockReason = 'babysit-brake';
-        await waitForResumeOrCancel();
+        if (await waitForResumeOrCancel()) throw new RepairCancelledError();
         waiting = 0;
       }
     }
