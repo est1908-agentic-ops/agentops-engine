@@ -133,24 +133,33 @@ describe('devCyclePrRepair', () => {
           workflowId: 'repair-unreadable-test',
         });
 
-        // Poll for the blocked state
-        let blocked = false;
-        for (let i = 0; i < 100; i++) {
-          const state = await env.client.workflow.getHandle('repair-unreadable-test').query(stateQuery);
-          if (state.status === 'blocked' && state.blockReason === 'babysit-brake') {
-            blocked = true;
-            break;
-          }
-          // eslint-disable-next-line no-restricted-globals
-          await new Promise(r => setTimeout(r, 10));
-        }
-        expect(blocked).toBe(true);
+        // Run worker and polling in parallel
+        const [result] = await Promise.all([
+          worker.runUntil(promise),
+          (async () => {
+            const handle = env.client.workflow.getHandle('repair-unreadable-test');
 
-        // Send resume signal
-        await env.client.workflow.getHandle('repair-unreadable-test').signal(resumeSignal);
+            // Poll for the blocked state
+            let blocked = false;
+            for (let i = 0; i < 100; i++) {
+              try {
+                const state = await handle.query(stateQuery);
+                if (state.status === 'blocked' && state.blockReason === 'babysit-brake') {
+                  blocked = true;
+                  break;
+                }
+              } catch {
+                // Workflow not ready yet, keep polling
+              }
+              // eslint-disable-next-line no-restricted-globals
+              await new Promise(r => setTimeout(r, 10));
+            }
+            expect(blocked).toBe(true);
 
-        // Wait for completion
-        const result = await worker.runUntil(promise);
+            // Send resume signal
+            await handle.signal(resumeSignal);
+          })(),
+        ]);
 
         expect(result.status).toBe('done');
         expect(result.blockReason).toBeNull();
@@ -185,15 +194,20 @@ describe('devCyclePrRepair', () => {
           workflowId: 'repair-stop-test',
         });
 
-        // Give the workflow time to enter the babysit loop and poll once
-        // eslint-disable-next-line no-restricted-globals
-        await new Promise(r => setTimeout(r, 100));
+        // Run worker and signaling in parallel
+        const [result] = await Promise.all([
+          worker.runUntil(promise),
+          (async () => {
+            const handle = env.client.workflow.getHandle('repair-stop-test');
 
-        // Send stop signal
-        await env.client.workflow.getHandle('repair-stop-test').signal(stopSignal);
+            // Give the workflow time to enter the babysit loop and poll once
+            // eslint-disable-next-line no-restricted-globals
+            await new Promise(r => setTimeout(r, 100));
 
-        // Wait for completion
-        const result = await worker.runUntil(promise);
+            // Send stop signal
+            await handle.signal(stopSignal);
+          })(),
+        ]);
 
         expect(result.status).toBe('pending');
         // Workspace should NOT be cleaned up on stop (pause, not terminate)
