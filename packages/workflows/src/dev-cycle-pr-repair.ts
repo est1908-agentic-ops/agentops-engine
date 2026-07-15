@@ -255,7 +255,16 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
     if (waiting >= MAX_BABYSIT_WAITS) {
       state.status = 'blocked';
       state.blockReason = 'babysit-brake';
-      await waitForResumeOrCancel();
+      // A cancel signal while blocked must terminate the workflow, not be
+      // discarded (see #120). The litellm removal dropped the try/catch that
+      // used to translate a RepairCancelledError throw into this teardown, so
+      // do the teardown inline instead.
+      if (await waitForResumeOrCancel()) {
+        state.stage = 'failed';
+        state.status = 'failed';
+        await activities.cleanupWorkspace(state.workspaceRef, input.repo);
+        return state;
+      }
       waiting = 0;
     }
   }
