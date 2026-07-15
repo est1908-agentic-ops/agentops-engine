@@ -6,7 +6,6 @@ import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import type { AgentBackend } from '@agentops/backends';
 import type { BackendRunRequest, ResolvedProjectEntry } from '@agentops/contracts';
 import {
-  LiteLlmBudgetExceededError,
   ProcessCliAuthError,
   RateLimitError,
   RateWindowExceededError,
@@ -505,24 +504,6 @@ function runAgentReq(backend: string) {
 }
 
 describe('createActivities — backend error translation', () => {
-  it('converts a LiteLlmBudgetExceededError into a non-retryable ApplicationFailure', async () => {
-    const deps = buildDeps();
-    deps.backends.litellm = {
-      run: async () => {
-        throw new LiteLlmBudgetExceededError(
-          'Budget has been exceeded! Current cost: 1.20, Max budget: 1.00',
-        );
-      },
-    };
-    const activities = createActivities(deps);
-
-    const err: unknown = await activities.runAgent(runAgentReq('litellm')).catch((e) => e);
-
-    expect(err).toBeInstanceOf(ApplicationFailure);
-    expect((err as ApplicationFailure).type).toBe('LiteLlmBudgetExceededError');
-    expect((err as ApplicationFailure).nonRetryable).toBe(true);
-  });
-
   it('converts a ProcessCliAuthError into a non-retryable ApplicationFailure typed AuthError', async () => {
     const deps = buildDeps();
     deps.backends.claude = {

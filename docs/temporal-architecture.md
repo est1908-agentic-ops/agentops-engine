@@ -138,7 +138,7 @@ flows through them:
 | Task queue     | `ENGINE_QUEUE = 'agentops-engine'`                            | + `LEGACY_ENGINE_QUEUE = 'agentops-devcycle'` — `packages/contracts/src/engine-queue.ts`                                                                               |
 | Worker process | `packages/worker`                                             | `createWorker()` in `create-worker.ts`, started from `main.ts`                                                                                                         |
 | Workflow code  | `packages/workflows`                                          | `devCycle`, `platform`, `self-heal`, `reconcileAllProjects`, `configSync`, `whiteboxBugHunt`, `platformChat`                                                           |
-| Activity code  | `packages/activities` → `packages/backends`, `packages/ports` | agent CLIs, LiteLLM, GitHub/Linear — never imported directly by a workflow, only proxied                                                                               |
+| Activity code  | `packages/activities` → `packages/backends`, `packages/ports` | agent CLIs, GitHub/Linear — never imported directly by a workflow, only proxied                                                                                        |
 | Query / signal | `stateQuery`, `conversationQuery` (`defineQuery`)             | `control`'s `handleGetDevCycleRun` calls `handle.query('state')` for a live snapshot; `stop`/`cancel`/`resume`/`clarify` signals push the other way, no queue involved |
 
 ## Bursting into k3s

@@ -40,8 +40,6 @@ brakes; and dogfooded — this system is built and maintained by the agents it h
 
 ## Architecture
 
-![System overview](docs/system-overview.svg)
-
 - [docs/temporal-architecture.md](docs/temporal-architecture.md) — how Temporal
   workflows, task queues, and workers map onto this repo's packages, and how the
   worker bursts agent runs out into disposable k8s Jobs.
@@ -95,4 +93,4 @@ helm template engine charts/engine --namespace <namespace>
 | [docs/project-worker-deployment.md](docs/project-worker-deployment.md)     | Deploying a Tier-2 project worker                                          |
 | [docs/runbooks/](docs/runbooks/)                                           | Operational runbooks                                                       |
 | [docs/superpowers/specs/](docs/superpowers/specs/)                         | Historical feature design notes                                            |
-| [docs/project-worker/](docs/project-worker/)                             | Reference Tier-2 project worker (Rollbar monitor)                          |
+| [docs/project-worker/](docs/project-worker/)                               | Reference Tier-2 project worker (Rollbar monitor)                          |

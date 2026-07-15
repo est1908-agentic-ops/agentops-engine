@@ -133,17 +133,6 @@ piAuthSecretName: pi-credentials
 # rather than a guessed value.
 piRateLimitFallbackModel: ""
 
-# The worker's LiteLLM backend (packages/worker/src/main.ts) calls the
-# in-cluster LiteLLM proxy directly over HTTP using its master key as a
-# bearer token -- unlike claude/pi above, this is the secret's *value*, not
-# just its name, so it's wired via secretKeyRef (see templates/deployment.yaml)
-# rather than passed through as a plain env var. Defaults match the Secret
-# agentops-platform's litellm app already produces (masterkeySecretName /
-# masterkeySecretKey in its own values.yaml) and engine-secrets retargets into
-# this namespace the same way it does for postgres-credentials.
-litellmApiKeySecretName: litellm-credentials
-litellmApiKeySecretKey: masterkey
-
 # The platform role
 # needs credentials devCycle's claude/pi Jobs don't: Temporal REST/action creds
 # and Grafana basic auth, bundled by agentops-platform into one Secret with

@@ -2,7 +2,7 @@
 # Source: engine/templates/platform-agent-networkpolicy.yaml
 # Standard Kubernetes NetworkPolicy can't match by hostname/FQDN, only by
 # port and podSelector/namespaceSelector/ipBlock -- and Temporal, Grafana,
-# forge, and LiteLLM/provider endpoints are all reached over HTTPS from this
+# forge and provider endpoints are all reached over HTTPS from this
 # role's Job today, some through
 # the same public-style ingress hostnames debug-devcycle-issue already uses.
 # Port-scoping to DNS + HTTPS is the practical equivalent of "only these
@@ -221,11 +221,6 @@ spec:
               value: "claude-credentials"
             - name: PI_AUTH_SECRET_NAME
               value: "pi-credentials"
-            - name: LITELLM_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: litellm-credentials
-                  key: masterkey
             - name: PLATFORM_AGENT_SERVICE_ACCOUNT
               value: "engine-platform-agent"
             - name: IMAGE_PULL_SECRET_NAME

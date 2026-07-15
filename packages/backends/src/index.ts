@@ -4,7 +4,6 @@ export * from './stub/stub-backend';
 export * from './process-cli-runner';
 export * from './claude/claude-backend';
 export * from './pi/pi-backend';
-export * from './litellm/litellm-backend';
 export * from './provider-rate-limit';
 export * from './tier-fallback/tier-fallback-backend';
 export * from './rate-window/rate-window-limiter';

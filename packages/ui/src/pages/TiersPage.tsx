@@ -23,7 +23,7 @@ import {
 } from '@/components/ui/alert-dialog';
 
 const EMPTY_ENTRY: ModelRef = { backend: 'claude', model: '' };
-const ALLOWED_BACKENDS = ['claude', 'cursor', 'pi', 'codex', 'stub', 'litellm', 'platform'] as const;
+const ALLOWED_BACKENDS = ['claude', 'cursor', 'pi', 'codex', 'stub', 'platform'] as const;
 const ALLOWED_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 // Radix's Select forbids an empty-string item value, so "(default)" is a
 // sentinel mapped back to undefined on read/write instead of ModelRef['effort'] itself.

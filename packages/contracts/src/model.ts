@@ -1,11 +1,7 @@
 import { z } from 'zod';
 
 export const ModelRefSchema = z.object({
-  // 'litellm' is a transport kind (an HTTP call through the LiteLLM gateway),
-  // not a provider -- `model` is the LiteLLM-side model_list alias (e.g.
-  // "zai-glm-4.6"), never a raw provider string. See agentops-platform's
-  // litellm-deploy-design.md for why that indirection matters.
-  backend: z.enum(['claude', 'cursor', 'pi', 'codex', 'stub', 'litellm', 'platform']),
+  backend: z.enum(['claude', 'cursor', 'pi', 'codex', 'stub', 'platform']),
   model: z.string().min(1),
   effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
 });
