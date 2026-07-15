@@ -1,12 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { evaluateBrakes } from './evaluate-brakes';
 
-const brakes = { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 };
+const brakes = {
+  maxImplementAttempts: 3,
+  maxIterations: 6,
+  maxTokens: 200_000,
+  maxBabysitRounds: 5,
+};
 
 describe('evaluateBrakes', () => {
   it('returns null when nothing has tripped', () => {
     expect(
-      evaluateBrakes({ implementAttempts: 1, iterations: 1, cumulativeTokens: 10, babysitRounds: 0 }, brakes),
+      evaluateBrakes(
+        { implementAttempts: 1, iterations: 1, cumulativeTokens: 10, babysitRounds: 0 },
+        brakes,
+      ),
     ).toBeNull();
   });
 
@@ -21,13 +29,19 @@ describe('evaluateBrakes', () => {
 
   it('trips iteration-brake when iterations reach the ceiling', () => {
     expect(
-      evaluateBrakes({ implementAttempts: 1, iterations: 6, cumulativeTokens: 10, babysitRounds: 0 }, brakes),
+      evaluateBrakes(
+        { implementAttempts: 1, iterations: 6, cumulativeTokens: 10, babysitRounds: 0 },
+        brakes,
+      ),
     ).toBe('iteration-brake');
   });
 
   it('trips babysit-brake when babysit rounds reach the cap', () => {
     expect(
-      evaluateBrakes({ implementAttempts: 1, iterations: 1, cumulativeTokens: 10, babysitRounds: 5 }, brakes),
+      evaluateBrakes(
+        { implementAttempts: 1, iterations: 1, cumulativeTokens: 10, babysitRounds: 5 },
+        brakes,
+      ),
     ).toBe('babysit-brake');
   });
 
@@ -42,7 +56,10 @@ describe('evaluateBrakes', () => {
 
   it('is deterministic: iteration-brake takes precedence over babysit-brake', () => {
     expect(
-      evaluateBrakes({ implementAttempts: 1, iterations: 6, cumulativeTokens: 10, babysitRounds: 5 }, brakes),
+      evaluateBrakes(
+        { implementAttempts: 1, iterations: 6, cumulativeTokens: 10, babysitRounds: 5 },
+        brakes,
+      ),
     ).toBe('iteration-brake');
   });
 });

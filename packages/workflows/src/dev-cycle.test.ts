@@ -26,20 +26,41 @@ const {
       full_verify: 'FULL: PASS',
       review: 'VERDICT: PASS',
     };
-    return { output: outputs[req.stage] ?? 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1, promptHash: 'h', promptSource: 's' };
+    return {
+      output: outputs[req.stage] ?? 'ok',
+      tokensIn: 1,
+      tokensOut: 1,
+      wallMs: 1,
+      promptHash: 'h',
+      promptSource: 's',
+    };
   });
   return {
     labelIssue: vi.fn().mockResolvedValue(undefined),
     unlabelIssue: vi.fn().mockResolvedValue(undefined),
     getIssue: vi.fn().mockResolvedValue({ ref: 'o/r#5', title: 'fix', body: '', labels: [] }),
-    prepareWorkspace: vi.fn().mockResolvedValue({ workspaceRef: 'ws', branch: 'br', baseBranch: 'main' }),
+    prepareWorkspace: vi
+      .fn()
+      .mockResolvedValue({ workspaceRef: 'ws', branch: 'br', baseBranch: 'main' }),
     openPr: vi.fn().mockResolvedValue({ prRef: 'pr-1', url: 'http://pr' }),
     pushBranch: vi.fn().mockResolvedValue(undefined),
-    getPrFeedback: vi.fn().mockResolvedValue({ ciStatus: 'green', unresolvedThreads: 0, comments: [] }),
+    getPrFeedback: vi
+      .fn()
+      .mockResolvedValue({ ciStatus: 'green', unresolvedThreads: 0, comments: [] }),
     getPrSnapshot: vi.fn().mockResolvedValue({
-      prRef: 'pr-1', headSha: 'abc', headRepo: 'o/r', headBranch: 'br', checkoutRef: 'refs/pull/1/head',
-      labels: ['agentops:managed'], state: 'open', draft: false, mergeable: true, mergedHeadSha: null,
-      ciStatus: 'green', unresolvedThreads: 0, comments: [],
+      prRef: 'pr-1',
+      headSha: 'abc',
+      headRepo: 'o/r',
+      headBranch: 'br',
+      checkoutRef: 'refs/pull/1/head',
+      labels: ['agentops:managed'],
+      state: 'open',
+      draft: false,
+      mergeable: true,
+      mergedHeadSha: null,
+      ciStatus: 'green',
+      unresolvedThreads: 0,
+      comments: [],
     }),
     cleanupWorkspace: vi.fn().mockResolvedValue(undefined),
     patched: vi.fn().mockReturnValue(false),
@@ -113,7 +134,12 @@ describe('devCycle agent:working label lifecycle', () => {
   });
 
   it('passes issue labels to openPr', async () => {
-    vi.mocked(getIssue).mockResolvedValueOnce({ ref: 'o/r#5', title: 'fix', body: '', labels: ['agentops', 'bug'] });
+    vi.mocked(getIssue).mockResolvedValueOnce({
+      ref: 'o/r#5',
+      title: 'fix',
+      body: '',
+      labels: ['agentops', 'bug'],
+    });
     await devCycle({
       taskId: 't',
       project: 'p',
@@ -197,13 +223,18 @@ describe('devCycle shared prLanding handoff', () => {
       goal: 'fix',
       config,
     });
-    expect(startChild).toHaveBeenCalledWith(expect.any(Function), expect.objectContaining({
-      workflowId: 'pr-landing-pr-1',
-      args: [expect.objectContaining({
-        agentCreated: true,
-        workspace: { workspaceRef: 'ws', branch: 'br', validatedHeadSha: 'abc' },
-      })],
-    }));
+    expect(startChild).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.objectContaining({
+        workflowId: 'pr-landing-pr-1',
+        args: [
+          expect.objectContaining({
+            agentCreated: true,
+            workspace: { workspaceRef: 'ws', branch: 'br', validatedHeadSha: 'abc' },
+          }),
+        ],
+      }),
+    );
     expect(cleanupWorkspace).not.toHaveBeenCalled();
     expect(result.landingOutcome).toBe('merged');
     expect(result.status).toBe('done');

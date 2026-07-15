@@ -19,7 +19,13 @@ function defaultPrData(overrides: Record<string, unknown> = {}) {
 function fakeClient(): GithubClient {
   return {
     rest: {
-      issues: { get: vi.fn(), create: vi.fn(), createComment: vi.fn(), addLabels: vi.fn(), removeLabel: vi.fn() },
+      issues: {
+        get: vi.fn(),
+        create: vi.fn(),
+        createComment: vi.fn(),
+        addLabels: vi.fn(),
+        removeLabel: vi.fn(),
+      },
       pulls: { create: vi.fn(), get: vi.fn(), list: vi.fn(), merge: vi.fn() },
       repos: { get: vi.fn(), getContent: vi.fn(), getCombinedStatusForRef: vi.fn() },
       checks: { listForRef: vi.fn() },
@@ -44,14 +50,21 @@ function fakeGit(): { git: GitCommandRunner; calls: Array<{ args: string[]; cwd:
 describe('GithubScmPort — openPr', () => {
   it('fetches the default branch and opens a PR against it', async () => {
     const client = fakeClient();
-    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { default_branch: 'main' } });
+    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { default_branch: 'main' },
+    });
     (client.rest.pulls.create as ReturnType<typeof vi.fn>).mockResolvedValue({
       data: { number: 7, html_url: 'https://github.com/octocat/hello-world/pull/7' },
     });
     const { git } = fakeGit();
     const scm = new GithubScmPort(client, git);
 
-    const result = await scm.openPr({ repo: 'octocat/hello-world', branch: 'agentops/t1', title: 'T', body: 'B' });
+    const result = await scm.openPr({
+      repo: 'octocat/hello-world',
+      branch: 'agentops/t1',
+      title: 'T',
+      body: 'B',
+    });
 
     expect(client.rest.repos.get).toHaveBeenCalledWith({ owner: 'octocat', repo: 'hello-world' });
     expect(client.rest.pulls.create).toHaveBeenCalledWith({
@@ -62,12 +75,17 @@ describe('GithubScmPort — openPr', () => {
       title: 'T',
       body: 'B',
     });
-    expect(result).toEqual({ prRef: 'octocat/hello-world#7', url: 'https://github.com/octocat/hello-world/pull/7' });
+    expect(result).toEqual({
+      prRef: 'octocat/hello-world#7',
+      url: 'https://github.com/octocat/hello-world/pull/7',
+    });
   });
 
   it('reuses the existing open PR when create 422s because one already exists for the branch (idempotent retry)', async () => {
     const client = fakeClient();
-    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { default_branch: 'main' } });
+    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { default_branch: 'main' },
+    });
     (client.rest.pulls.create as ReturnType<typeof vi.fn>).mockRejectedValue({
       status: 422,
       message: 'A pull request already exists for octocat:agentops/t1.',
@@ -78,7 +96,12 @@ describe('GithubScmPort — openPr', () => {
     const { git } = fakeGit();
     const scm = new GithubScmPort(client, git);
 
-    const result = await scm.openPr({ repo: 'octocat/hello-world', branch: 'agentops/t1', title: 'T', body: 'B' });
+    const result = await scm.openPr({
+      repo: 'octocat/hello-world',
+      branch: 'agentops/t1',
+      title: 'T',
+      body: 'B',
+    });
 
     expect(client.rest.pulls.list).toHaveBeenCalledWith({
       owner: 'octocat',
@@ -86,12 +109,17 @@ describe('GithubScmPort — openPr', () => {
       head: 'octocat:agentops/t1',
       state: 'open',
     });
-    expect(result).toEqual({ prRef: 'octocat/hello-world#7', url: 'https://github.com/octocat/hello-world/pull/7' });
+    expect(result).toEqual({
+      prRef: 'octocat/hello-world#7',
+      url: 'https://github.com/octocat/hello-world/pull/7',
+    });
   });
 
   it('rethrows the 422 if create conflicts but no matching open PR is found', async () => {
     const client = fakeClient();
-    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { default_branch: 'main' } });
+    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { default_branch: 'main' },
+    });
     const conflict = { status: 422, message: 'Validation failed' };
     (client.rest.pulls.create as ReturnType<typeof vi.fn>).mockRejectedValue(conflict);
     (client.rest.pulls.list as ReturnType<typeof vi.fn>).mockResolvedValue({ data: [] });
@@ -105,7 +133,9 @@ describe('GithubScmPort — openPr', () => {
 
   it('rethrows non-422 errors from create without attempting a PR lookup', async () => {
     const client = fakeClient();
-    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { default_branch: 'main' } });
+    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { default_branch: 'main' },
+    });
     const serverError = { status: 500 };
     (client.rest.pulls.create as ReturnType<typeof vi.fn>).mockRejectedValue(serverError);
     const { git } = fakeGit();
@@ -119,7 +149,9 @@ describe('GithubScmPort — openPr', () => {
 
   it('applies labels to the PR after creating it', async () => {
     const client = fakeClient();
-    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { default_branch: 'main' } });
+    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { default_branch: 'main' },
+    });
     (client.rest.pulls.create as ReturnType<typeof vi.fn>).mockResolvedValue({
       data: { number: 7, html_url: 'https://github.com/octocat/hello-world/pull/7' },
     });
@@ -141,12 +173,17 @@ describe('GithubScmPort — openPr', () => {
       issue_number: 7,
       labels: ['agentops', 'bug'],
     });
-    expect(result).toEqual({ prRef: 'octocat/hello-world#7', url: 'https://github.com/octocat/hello-world/pull/7' });
+    expect(result).toEqual({
+      prRef: 'octocat/hello-world#7',
+      url: 'https://github.com/octocat/hello-world/pull/7',
+    });
   });
 
   it('does not apply labels if no labels are provided', async () => {
     const client = fakeClient();
-    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { default_branch: 'main' } });
+    (client.rest.repos.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { default_branch: 'main' },
+    });
     (client.rest.pulls.create as ReturnType<typeof vi.fn>).mockResolvedValue({
       data: { number: 7, html_url: 'https://github.com/octocat/hello-world/pull/7' },
     });
@@ -161,7 +198,10 @@ describe('GithubScmPort — openPr', () => {
     });
 
     expect(client.rest.issues.addLabels).not.toHaveBeenCalled();
-    expect(result).toEqual({ prRef: 'octocat/hello-world#7', url: 'https://github.com/octocat/hello-world/pull/7' });
+    expect(result).toEqual({
+      prRef: 'octocat/hello-world#7',
+      url: 'https://github.com/octocat/hello-world/pull/7',
+    });
   });
 });
 
@@ -199,7 +239,9 @@ describe('GithubScmPort — readFile', () => {
     const { git } = fakeGit();
     const scm = new GithubScmPort(client, git);
 
-    await expect(scm.readFile('octocat/hello-world', 'x.json')).rejects.toMatchObject({ status: 500 });
+    await expect(scm.readFile('octocat/hello-world', 'x.json')).rejects.toMatchObject({
+      status: 500,
+    });
   });
 });
 
@@ -211,27 +253,41 @@ describe('GithubScmPort — push', () => {
 
     await scm.push('octocat/hello-world', '/tmp/workspace', 'agentops/t1', 'hash-1');
 
-    expect(calls).toEqual([{ args: ['push', '--force', 'origin', 'agentops/t1'], cwd: '/tmp/workspace' }]);
+    expect(calls).toEqual([
+      { args: ['push', '--force', 'origin', 'agentops/t1'], cwd: '/tmp/workspace' },
+    ]);
   });
 
   it('throws if the push fails', async () => {
     const client = fakeClient();
-    const git: GitCommandRunner = { run: vi.fn().mockResolvedValue({ stdout: '', stderr: 'rejected', exitCode: 1 }) };
+    const git: GitCommandRunner = {
+      run: vi.fn().mockResolvedValue({ stdout: '', stderr: 'rejected', exitCode: 1 }),
+    };
     const scm = new GithubScmPort(client, git);
 
-    await expect(scm.push('octocat/hello-world', '/tmp/workspace', 'agentops/t1', 'hash-1')).rejects.toThrow(/rejected/);
+    await expect(
+      scm.push('octocat/hello-world', '/tmp/workspace', 'agentops/t1', 'hash-1'),
+    ).rejects.toThrow(/rejected/);
   });
 });
 
 describe('GithubScmPort — getPrFeedback', () => {
   function setupPrFeedback(overrides: {
     checkRuns?: Array<{ status: string; conclusion: string | null }>;
-    reviewThreads?: Array<{ isResolved: boolean; comments: { nodes: Array<{ id: string; body: string }> } }>;
+    reviewThreads?: Array<{
+      isResolved: boolean;
+      comments: { nodes: Array<{ id: string; body: string }> };
+    }>;
   }) {
     const client = fakeClient();
-    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: defaultPrData() });
+    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: defaultPrData(),
+    });
     (client.rest.checks.listForRef as ReturnType<typeof vi.fn>).mockResolvedValue({
-      data: { total_count: (overrides.checkRuns ?? []).length, check_runs: overrides.checkRuns ?? [] },
+      data: {
+        total_count: (overrides.checkRuns ?? []).length,
+        check_runs: overrides.checkRuns ?? [],
+      },
     });
     // Default: no legacy commit statuses -> `unknown`, so these cases are driven
     // by the check-runs signal alone (preserving the original assertions).
@@ -321,7 +377,9 @@ describe('GithubScmPort — getPrFeedback', () => {
     status?: { data: unknown } | Error;
   }) {
     const client = fakeClient();
-    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: defaultPrData() });
+    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: defaultPrData(),
+    });
     const wire = (fn: ReturnType<typeof vi.fn>, v?: { data: unknown } | Error) => {
       if (v instanceof Error) fn.mockRejectedValue(v);
       else if (v) fn.mockResolvedValue(v);
@@ -334,7 +392,9 @@ describe('GithubScmPort — getPrFeedback', () => {
     const { git } = fakeGit();
     return new GithubScmPort(client, git);
   }
-  const forbidden = Object.assign(new Error('Resource not accessible by personal access token'), { status: 403 });
+  const forbidden = Object.assign(new Error('Resource not accessible by personal access token'), {
+    status: 403,
+  });
 
   it('degrades to unreadable (never throws) when BOTH check-runs and statuses are inaccessible (403)', async () => {
     const scm = setupCi({ checks: forbidden, status: forbidden });
@@ -360,7 +420,9 @@ describe('GithubScmPort — getPrFeedback', () => {
 
   it('a failure in either source dominates a green in the other', async () => {
     const scm = setupCi({
-      checks: { data: { total_count: 1, check_runs: [{ status: 'completed', conclusion: 'success' }] } },
+      checks: {
+        data: { total_count: 1, check_runs: [{ status: 'completed', conclusion: 'success' }] },
+      },
       status: { data: { state: 'failure', total_count: 1 } },
     });
     expect((await scm.getPrFeedback('octocat/hello-world#7')).ciStatus).toBe('failed');
@@ -432,9 +494,17 @@ describe('GithubScmPort — getPrFeedback', () => {
 
   it('fetches the PR head SHA before querying checks', async () => {
     const client = fakeClient();
-    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: defaultPrData({ head: { sha: 'sha-xyz', ref: 'feature/x', repo: { full_name: 'octocat/hello-world-fork' } } }) });
-    (client.rest.checks.listForRef as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { total_count: 0, check_runs: [] } });
-    (client.rest.repos.getCombinedStatusForRef as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { state: 'pending', total_count: 0 } });
+    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: defaultPrData({
+        head: { sha: 'sha-xyz', ref: 'feature/x', repo: { full_name: 'octocat/hello-world-fork' } },
+      }),
+    });
+    (client.rest.checks.listForRef as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { total_count: 0, check_runs: [] },
+    });
+    (client.rest.repos.getCombinedStatusForRef as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { state: 'pending', total_count: 0 },
+    });
     (client.graphql as ReturnType<typeof vi.fn>).mockResolvedValue({
       repository: { pullRequest: { reviewThreads: { nodes: [] } } },
     });
@@ -443,7 +513,11 @@ describe('GithubScmPort — getPrFeedback', () => {
 
     await scm.getPrFeedback('octocat/hello-world#7');
 
-    expect(client.rest.pulls.get).toHaveBeenCalledWith({ owner: 'octocat', repo: 'hello-world', pull_number: 7 });
+    expect(client.rest.pulls.get).toHaveBeenCalledWith({
+      owner: 'octocat',
+      repo: 'hello-world',
+      pull_number: 7,
+    });
     expect(client.rest.checks.listForRef).toHaveBeenCalledWith({
       owner: 'octocat',
       repo: 'hello-world',
@@ -455,11 +529,17 @@ describe('GithubScmPort — getPrFeedback', () => {
 describe('GithubScmPort — getPrSnapshot', () => {
   it('aggregates PR metadata, labels, and CI into a typed snapshot', async () => {
     const client = fakeClient();
-    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: defaultPrData({ head: { sha: 'abc123', ref: 'feature/x', repo: { full_name: 'octocat/hello-world-fork' } } }) });
+    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: defaultPrData({
+        head: { sha: 'abc123', ref: 'feature/x', repo: { full_name: 'octocat/hello-world-fork' } },
+      }),
+    });
     (client.rest.checks.listForRef as ReturnType<typeof vi.fn>).mockResolvedValue({
       data: { total_count: 1, check_runs: [{ status: 'completed', conclusion: 'success' }] },
     });
-    (client.rest.repos.getCombinedStatusForRef as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { state: 'pending', total_count: 0 } });
+    (client.rest.repos.getCombinedStatusForRef as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { state: 'pending', total_count: 0 },
+    });
     (client.graphql as ReturnType<typeof vi.fn>).mockResolvedValue({
       repository: { pullRequest: { reviewThreads: { nodes: [] } } },
     });
@@ -483,9 +563,15 @@ describe('GithubScmPort — getPrSnapshot', () => {
 
 describe('GithubScmPort — mergePr', () => {
   function setupMerge(client: GithubClient) {
-    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({ data: defaultPrData() });
-    (client.rest.checks.listForRef as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { total_count: 0, check_runs: [] } });
-    (client.rest.repos.getCombinedStatusForRef as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { state: 'pending', total_count: 0 } });
+    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: defaultPrData(),
+    });
+    (client.rest.checks.listForRef as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { total_count: 0, check_runs: [] },
+    });
+    (client.rest.repos.getCombinedStatusForRef as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { state: 'pending', total_count: 0 },
+    });
     (client.graphql as ReturnType<typeof vi.fn>).mockResolvedValue({
       repository: { pullRequest: { reviewThreads: { nodes: [] } } },
     });
@@ -500,20 +586,31 @@ describe('GithubScmPort — mergePr', () => {
     const { git } = fakeGit();
     const scm = new GithubScmPort(client, git);
 
-    await expect(scm.mergePr({ prRef: 'octocat/hello-world#7', expectedHeadSha: 'abc123' }))
-      .resolves.toEqual({ kind: 'merged', headSha: 'abc123', mergeCommitSha: 'merge456' });
+    await expect(
+      scm.mergePr({ prRef: 'octocat/hello-world#7', expectedHeadSha: 'abc123' }),
+    ).resolves.toEqual({ kind: 'merged', headSha: 'abc123', mergeCommitSha: 'merge456' });
     expect(client.rest.pulls.merge).toHaveBeenCalledWith({
-      owner: 'octocat', repo: 'hello-world', pull_number: 7, sha: 'abc123',
+      owner: 'octocat',
+      repo: 'hello-world',
+      pull_number: 7,
+      sha: 'abc123',
     });
-    expect((client.rest.pulls.merge as ReturnType<typeof vi.fn>).mock.calls[0][0]).not.toHaveProperty('merge_method');
+    expect(
+      (client.rest.pulls.merge as ReturnType<typeof vi.fn>).mock.calls[0][0],
+    ).not.toHaveProperty('merge_method');
   });
 
   it('maps 409 to head-changed', async () => {
     const client = fakeClient();
-    (client.rest.pulls.merge as ReturnType<typeof vi.fn>).mockRejectedValue({ status: 409, message: 'head changed' });
-    const scm = new GithubScmPort(client, fakeGit());
-    await expect(scm.mergePr({ prRef: 'octocat/hello-world#7', expectedHeadSha: 'abc123' }))
-      .resolves.toEqual({ kind: 'head-changed' });
+    (client.rest.pulls.merge as ReturnType<typeof vi.fn>).mockRejectedValue({
+      status: 409,
+      message: 'head changed',
+    });
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
+    await expect(
+      scm.mergePr({ prRef: 'octocat/hello-world#7', expectedHeadSha: 'abc123' }),
+    ).resolves.toEqual({ kind: 'head-changed' });
   });
 
   it('maps 403 to forbidden', async () => {
@@ -521,9 +618,11 @@ describe('GithubScmPort — mergePr', () => {
     const err = new Error('forbidden');
     Object.assign(err, { status: 403 });
     (client.rest.pulls.merge as ReturnType<typeof vi.fn>).mockRejectedValue(err);
-    const scm = new GithubScmPort(client, fakeGit());
-    await expect(scm.mergePr({ prRef: 'octocat/hello-world#7', expectedHeadSha: 'abc123' }))
-      .resolves.toEqual({ kind: 'forbidden', reason: 'forbidden' });
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
+    await expect(
+      scm.mergePr({ prRef: 'octocat/hello-world#7', expectedHeadSha: 'abc123' }),
+    ).resolves.toEqual({ kind: 'forbidden', reason: 'forbidden' });
   });
 
   it('maps 405 to not-mergeable when still open', async () => {
@@ -532,9 +631,11 @@ describe('GithubScmPort — mergePr', () => {
     const err = new Error('not mergeable');
     Object.assign(err, { status: 405 });
     (client.rest.pulls.merge as ReturnType<typeof vi.fn>).mockRejectedValue(err);
-    const scm = new GithubScmPort(client, fakeGit());
-    await expect(scm.mergePr({ prRef: 'octocat/hello-world#7', expectedHeadSha: 'abc123' }))
-      .resolves.toEqual({ kind: 'not-mergeable', reason: 'not mergeable' });
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
+    await expect(
+      scm.mergePr({ prRef: 'octocat/hello-world#7', expectedHeadSha: 'abc123' }),
+    ).resolves.toEqual({ kind: 'not-mergeable', reason: 'not mergeable' });
   });
 
   it('maps 405 to already-merged when snapshot shows the expected head landed', async () => {
@@ -542,25 +643,33 @@ describe('GithubScmPort — mergePr', () => {
     (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({
       data: defaultPrData({ merged: true, state: 'closed', merge_commit_sha: 'abc123' }),
     });
-    (client.rest.checks.listForRef as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { total_count: 0, check_runs: [] } });
-    (client.rest.repos.getCombinedStatusForRef as ReturnType<typeof vi.fn>).mockResolvedValue({ data: { state: 'pending', total_count: 0 } });
+    (client.rest.checks.listForRef as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { total_count: 0, check_runs: [] },
+    });
+    (client.rest.repos.getCombinedStatusForRef as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { state: 'pending', total_count: 0 },
+    });
     (client.graphql as ReturnType<typeof vi.fn>).mockResolvedValue({
       repository: { pullRequest: { reviewThreads: { nodes: [] } } },
     });
     const err = new Error('already merged');
     Object.assign(err, { status: 405 });
     (client.rest.pulls.merge as ReturnType<typeof vi.fn>).mockRejectedValue(err);
-    const scm = new GithubScmPort(client, fakeGit());
-    await expect(scm.mergePr({ prRef: 'octocat/hello-world#7', expectedHeadSha: 'abc123' }))
-      .resolves.toEqual({ kind: 'already-merged', headSha: 'abc123' });
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
+    await expect(
+      scm.mergePr({ prRef: 'octocat/hello-world#7', expectedHeadSha: 'abc123' }),
+    ).resolves.toEqual({ kind: 'already-merged', headSha: 'abc123' });
   });
 
   it('rethrows 5xx errors for Temporal retry', async () => {
     const client = fakeClient();
     const err = Object.assign(new Error('server error'), { status: 500 });
     (client.rest.pulls.merge as ReturnType<typeof vi.fn>).mockRejectedValue(err);
-    const scm = new GithubScmPort(client, fakeGit());
-    await expect(scm.mergePr({ prRef: 'octocat/hello-world#7', expectedHeadSha: 'abc123' }))
-      .rejects.toMatchObject({ status: 500 });
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
+    await expect(
+      scm.mergePr({ prRef: 'octocat/hello-world#7', expectedHeadSha: 'abc123' }),
+    ).rejects.toMatchObject({ status: 500 });
   });
 });

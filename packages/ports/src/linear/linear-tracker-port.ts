@@ -40,7 +40,9 @@ export class LinearTrackerPort implements TrackerPort {
     const issue = await this.client.getIssue(identifier);
     const labelId = await this.client.findLabelId(teamKey, label);
     if (!labelId) {
-      throw new Error(`LinearTrackerPort.label: no label named "${label}" found for team "${teamKey}"`);
+      throw new Error(
+        `LinearTrackerPort.label: no label named "${label}" found for team "${teamKey}"`,
+      );
     }
     if (issue.labelIds.includes(labelId)) {
       return;
@@ -49,10 +51,14 @@ export class LinearTrackerPort implements TrackerPort {
   }
 
   async removeLabel(_ref: string, _label: string): Promise<void> {
-    throw new Error('LinearTrackerPort.removeLabel not implemented (SP1 focuses on GitHub trackers)');
+    throw new Error(
+      'LinearTrackerPort.removeLabel not implemented (SP1 focuses on GitHub trackers)',
+    );
   }
 
   async createIssue(_req: CreateIssueRequest): Promise<CreatedIssue> {
-    throw new Error('LinearTrackerPort.createIssue not implemented (SP1 focuses on GitHub trackers)');
+    throw new Error(
+      'LinearTrackerPort.createIssue not implemented (SP1 focuses on GitHub trackers)',
+    );
   }
 }

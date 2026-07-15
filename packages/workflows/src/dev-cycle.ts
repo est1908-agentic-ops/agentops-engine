@@ -11,9 +11,23 @@ import {
   sleep,
   startChild,
 } from '@temporalio/workflow';
-import type { Brakes, DevCycleState, ProjectConfig, Routing, TaskInput, VerdictKind } from '@agentops/contracts';
+import type {
+  Brakes,
+  DevCycleState,
+  ProjectConfig,
+  Routing,
+  TaskInput,
+  VerdictKind,
+} from '@agentops/contracts';
 import { AGENTOPS_MANAGED_LABEL, feedbackHash } from '@agentops/contracts';
-import { babysitDecision, nextRepairAction, parseVerdict, preImplementStages, prLandingWorkflowId, resolveStageLimits } from '@agentops/policies';
+import {
+  babysitDecision,
+  nextRepairAction,
+  parseVerdict,
+  preImplementStages,
+  prLandingWorkflowId,
+  resolveStageLimits,
+} from '@agentops/policies';
 import type { DevCycleActivities } from './activities-api';
 import { prLanding, prLandingCancelSignal, prLandingResumeSignal } from './pr-landing';
 
@@ -98,7 +112,9 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
 
   let cancelled = false;
   let stopRequested = false;
-  let landingChild: { signal: (name: typeof prLandingCancelSignal | typeof prLandingResumeSignal) => Promise<void> } | null = null;
+  let landingChild: {
+    signal: (name: typeof prLandingCancelSignal | typeof prLandingResumeSignal) => Promise<void>;
+  } | null = null;
   // Assigned right after config resolution below. Only the signal handlers
   // close over it before then, and none can meaningfully fire before the
   // first stage can possibly block.
@@ -279,7 +295,11 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
   // right after each call site are untouched; this only catches the new
   // DevCycleCancelledError path.
   try {
-    for (const stage of preImplementStages({ config, hasHumanDesign: false, hasHumanPlan: false })) {
+    for (const stage of preImplementStages({
+      config,
+      hasHumanDesign: false,
+      hasHumanPlan: false,
+    })) {
       state.stage = stage;
       const extraContext = stage === 'context' ? { issueBody } : {};
       await runStageAgent(stage as RoutableStage, 1, 1, undefined, extraContext);
@@ -308,11 +328,17 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     while (true) {
       state.stage = 'implement';
       const escalationTier = useEscalation ? config.escalation?.tier : undefined;
-      const implementOutput = await runStageAgent('implement', implementAttempt, 1, escalationTier, {
-        fullVerifyFindings: lastFullVerifyOutput,
-        reviewFindings: lastReviewOutput,
-        prReviewFeedback: '',
-      });
+      const implementOutput = await runStageAgent(
+        'implement',
+        implementAttempt,
+        1,
+        escalationTier,
+        {
+          fullVerifyFindings: lastFullVerifyOutput,
+          reviewFindings: lastReviewOutput,
+          prReviewFeedback: '',
+        },
+      );
       state.implementAttempts = implementAttempt;
       state.iterations += 1;
       const diffEmpty = implementOutput.trim().length === 0;
@@ -321,7 +347,9 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
       const verifyCommands =
         [...(config.fastVerifyCommands ?? []), ...(config.fullVerifyCommands ?? [])].join('\n') ||
         '(none configured — use your own judgment on the diff)';
-      const fullVerifyResult = await runVerdictStage('full_verify', implementAttempt, 'FULL:', { verifyCommands });
+      const fullVerifyResult = await runVerdictStage('full_verify', implementAttempt, 'FULL:', {
+        verifyCommands,
+      });
       fullVerifyVerdict = fullVerifyResult.kind;
       lastFullVerifyOutput = fullVerifyResult.output;
 
@@ -373,7 +401,12 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     }
 
     state.stage = 'pr';
-    await activities.pushBranch(input.repo, state.workspaceRef, state.branch, `${input.taskId}-${implementAttempt}`);
+    await activities.pushBranch(
+      input.repo,
+      state.workspaceRef,
+      state.branch,
+      `${input.taskId}-${implementAttempt}`,
+    );
 
     // Read the committed design/plan artifacts from the canonical superpowers locations
     // (right after the final push, before opening the PR — per design).
@@ -418,15 +451,21 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
       const snapshot = await activities.getPrSnapshot(prRef);
       const handle = await startChild(prLanding, {
         workflowId: prLandingWorkflowId(prRef),
-        args: [{
-          taskId: `landing-${input.taskId}`,
-          project: input.project,
-          repo: input.repo,
-          prRef,
-          agentCreated: true,
-          config,
-          workspace: { workspaceRef: state.workspaceRef, branch: state.branch, validatedHeadSha: snapshot.headSha },
-        }],
+        args: [
+          {
+            taskId: `landing-${input.taskId}`,
+            project: input.project,
+            repo: input.repo,
+            prRef,
+            agentCreated: true,
+            config,
+            workspace: {
+              workspaceRef: state.workspaceRef,
+              branch: state.branch,
+              validatedHeadSha: snapshot.headSha,
+            },
+          },
+        ],
       });
       landingChild = handle;
       const landing = await handle.result();
@@ -495,8 +534,8 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
         implementAttempt += 1;
         state.stage = 'implement';
         const reviewComments = feedback.comments
-          .filter(c => !c.resolved)
-          .map(c => c.body)
+          .filter((c) => !c.resolved)
+          .map((c) => c.body)
           .join('\n\n---\n\n');
         await runStageAgent('implement', implementAttempt, 1, undefined, {
           fullVerifyFindings: lastFullVerifyOutput,
@@ -505,7 +544,12 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
         });
         state.implementAttempts = implementAttempt;
         state.iterations += 1;
-        await activities.pushBranch(input.repo, state.workspaceRef, state.branch, `${input.taskId}-${implementAttempt}`);
+        await activities.pushBranch(
+          input.repo,
+          state.workspaceRef,
+          state.branch,
+          `${input.taskId}-${implementAttempt}`,
+        );
         state.stage = 'pr_babysit';
         continue;
       }
@@ -583,7 +627,19 @@ interface BuildPrBodyInput {
 }
 
 function buildRichPrBody(input: BuildPrBodyInput): string {
-  const { taskId, goal, issueRef, issueBody, designContent, planContent, exhausted, implementAttempts, iterations, cumulativeTokens, findingsSummary } = input;
+  const {
+    taskId,
+    goal,
+    issueRef,
+    issueBody,
+    designContent,
+    planContent,
+    exhausted,
+    implementAttempts,
+    iterations,
+    cumulativeTokens,
+    findingsSummary,
+  } = input;
 
   const fixesLine = issueRef ? `Fixes ${issueRef}\n\n` : '';
 
@@ -600,7 +656,9 @@ function buildRichPrBody(input: BuildPrBodyInput): string {
 
   const howWhy = planContent
     ? `Followed the plan in the committed artifact (see below). Key approach from design phase.`
-    : (designContent ? 'Implemented the chosen design.' : 'Direct implementation (no separate design/plan stage).');
+    : designContent
+      ? 'Implemented the chosen design.'
+      : 'Direct implementation (no separate design/plan stage).';
 
   const body = `${fixesLine}${problemSection}## Design Brainstorm Summary
 

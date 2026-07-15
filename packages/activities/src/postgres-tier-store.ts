@@ -84,7 +84,10 @@ export class PostgresTierStore {
     const inserts: { sql: string; params: unknown[] }[] = [];
     for (const [tierName, entries] of Object.entries(tiers)) {
       entries.forEach((entry, position) => {
-        inserts.push({ sql: insertEntrySql(), params: [tierName, position, entry.backend, entry.model, entry.effort] });
+        inserts.push({
+          sql: insertEntrySql(),
+          params: [tierName, position, entry.backend, entry.model, entry.effort],
+        });
       });
     }
     if (!this.db.connect) {

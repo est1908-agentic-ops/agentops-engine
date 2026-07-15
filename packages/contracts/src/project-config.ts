@@ -1,5 +1,11 @@
 import { z, ZodError } from 'zod';
-import { ModelRefSchema, BrakesSchema, RoutingSchema, StageToggleSchema, TimeoutsSchema } from './model';
+import {
+  ModelRefSchema,
+  BrakesSchema,
+  RoutingSchema,
+  StageToggleSchema,
+  TimeoutsSchema,
+} from './model';
 
 export const AutoMergeModeSchema = z.enum(['disabled', 'label', 'all']);
 export type AutoMergeMode = z.infer<typeof AutoMergeModeSchema>;
@@ -66,7 +72,9 @@ export class InvalidProjectConfigError extends Error {
 }
 
 function formatZodError(err: ZodError): string {
-  return err.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ');
+  return err.issues
+    .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+    .join('; ');
 }
 
 export function parseProjectConfig(raw: unknown): ProjectConfig {

@@ -23,7 +23,11 @@ describe('normalizeRepo', () => {
 
 describe('parseRef', () => {
   it('parses "owner/repo#123"', () => {
-    expect(parseRef('octocat/hello-world#42')).toEqual({ owner: 'octocat', repo: 'hello-world', number: 42 });
+    expect(parseRef('octocat/hello-world#42')).toEqual({
+      owner: 'octocat',
+      repo: 'hello-world',
+      number: 42,
+    });
   });
 
   it('throws a clear error on malformed input', () => {

@@ -6,11 +6,22 @@ import {
   defineSignal,
   proxyActivities,
   setHandler,
-  sleep,
 } from '@temporalio/workflow';
-import type { Brakes, PrLandingInput, PrLandingState, PrSnapshot, ProjectConfig } from '@agentops/contracts';
+import type {
+  Brakes,
+  PrLandingInput,
+  PrLandingState,
+  PrSnapshot,
+  ProjectConfig,
+} from '@agentops/contracts';
 import { feedbackHash } from '@agentops/contracts';
-import { babysitDecision, decideMergeAuthority, nextRepairAction, parseVerdict, resolveStageLimits } from '@agentops/policies';
+import {
+  babysitDecision,
+  decideMergeAuthority,
+  nextRepairAction,
+  parseVerdict,
+  resolveStageLimits,
+} from '@agentops/policies';
 import type { DevCycleActivities } from './activities-api';
 
 const activities = proxyActivities<DevCycleActivities>({
@@ -77,8 +88,12 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
   let woke = false;
   let effectiveBrakes: Brakes = { ...config.brakes };
 
-  setHandler(prLandingCancelSignal, () => { cancelled = true; });
-  setHandler(prLandingWakeSignal, () => { woke = true; });
+  setHandler(prLandingCancelSignal, () => {
+    cancelled = true;
+  });
+  setHandler(prLandingWakeSignal, () => {
+    woke = true;
+  });
   setHandler(prLandingResumeSignal, () => {
     if (state.blockReason === 'repair-brake') {
       effectiveBrakes = {
@@ -96,7 +111,9 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
   });
   setHandler(prLandingStateQuery, () => state);
 
-  const waitAtBrake = async (reason: 'repair-brake' | 'babysit-brake'): Promise<'resume' | 'cancelled'> => {
+  const waitAtBrake = async (
+    reason: 'repair-brake' | 'babysit-brake',
+  ): Promise<'resume' | 'cancelled'> => {
     state.phase = 'blocked';
     state.blockReason = reason;
     await condition(() => cancelled || state.blockReason === null);
@@ -128,7 +145,9 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
           stage,
           attempt,
           callIndex: 1,
-          tier: route?.tier ?? (stage === 'implement' ? 'implementation' : stage === 'review' ? 'review' : 'smart'),
+          tier:
+            route?.tier ??
+            (stage === 'implement' ? 'implementation' : stage === 'review' ? 'review' : 'smart'),
           effort: route?.effort,
           projectTiers: config.tiers,
           image: config.image,
@@ -148,25 +167,44 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
     }
     state.cumulativeTokens += result.tokensIn + result.tokensOut;
     await activities.recordRunStats({
-      taskId: input.taskId, stage, backend: result.resolvedBackend ?? 'unknown', model: result.resolvedModel ?? 'unknown',
-      tokensIn: result.tokensIn, tokensOut: result.tokensOut, wallMs: result.wallMs, outcome: 'pass',
-      promptHash: result.promptHash, promptSource: result.promptSource, project: input.project, workflowType: 'prLanding',
+      taskId: input.taskId,
+      stage,
+      backend: result.resolvedBackend ?? 'unknown',
+      model: result.resolvedModel ?? 'unknown',
+      tokensIn: result.tokensIn,
+      tokensOut: result.tokensOut,
+      wallMs: result.wallMs,
+      outcome: 'pass',
+      promptHash: result.promptHash,
+      promptSource: result.promptSource,
+      project: input.project,
+      workflowType: 'prLanding',
     });
     await activities.recordStageResult({
-      taskId: input.taskId, stage, source: 'agent', contentHash: `${stage}-${attempt}-1`,
-      tokens: result.tokensIn + result.tokensOut, outcome: 'pass',
+      taskId: input.taskId,
+      stage,
+      source: 'agent',
+      contentHash: `${stage}-${attempt}-1`,
+      tokens: result.tokensIn + result.tokensOut,
+      outcome: 'pass',
     });
     return result.output;
   }
 
-  async function validateHead(initial: PrSnapshot, reviewFeedback = ''): Promise<'pass' | 'blocked'> {
+  async function validateHead(
+    initial: PrSnapshot,
+    reviewFeedback = '',
+  ): Promise<'pass' | 'blocked'> {
     let snapshot = initial;
     let feedback = reviewFeedback;
     while (true) {
       state.phase = 'validating';
       state.currentHeadSha = snapshot.headSha;
       const fullOutput = await runStageAgent('full_verify', state.implementAttempts + 1, {
-        verifyCommands: [...(config.fastVerifyCommands ?? []), ...(config.fullVerifyCommands ?? [])].join('\n'),
+        verifyCommands: [
+          ...(config.fastVerifyCommands ?? []),
+          ...(config.fullVerifyCommands ?? []),
+        ].join('\n'),
       });
       const fullVerdict = parseVerdict(fullOutput, 'FULL:');
       let reviewVerdict: 'pass' | 'fail' = 'fail';
@@ -205,22 +243,26 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
       state.iterations += 1;
       feedback = [feedback, fullOutput, reviewOutput].filter(Boolean).join('\n\n---\n\n');
       await runStageAgent('implement', state.implementAttempts, { prReviewFeedback: feedback });
-      await activities.pushBranch(input.repo, state.workspaceRef, state.branch, `${input.taskId}-${state.implementAttempts}`);
+      await activities.pushBranch(
+        input.repo,
+        state.workspaceRef,
+        state.branch,
+        `${input.taskId}-${state.implementAttempts}`,
+      );
       snapshot = await activities.getPrSnapshot(input.prRef);
     }
   }
 
-  async function babysitAndMerge(initial: PrSnapshot): Promise<PrLandingState> {
+  async function babysitAndMerge(): Promise<PrLandingState> {
     const seen = new Set<string>();
     let waiting = 0;
     let maxBabysitWaits = MAX_BABYSIT_WAITS;
-    let snapshot = initial;
 
     while (true) {
       woke = false;
       state.phase = 'babysitting';
       await condition(() => woke, DEFAULT_BABYSIT_POLL_MS);
-      snapshot = await activities.getPrSnapshot(input.prRef);
+      const snapshot = await activities.getPrSnapshot(input.prRef);
       state.currentHeadSha = snapshot.headSha;
 
       const feedback = {
@@ -247,7 +289,7 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
         }
         if (fresh.state !== 'open' || fresh.draft || fresh.headSha !== state.validatedHeadSha) {
           state.validatedHeadSha = null;
-          if (await validateHead(fresh) === 'blocked') {
+          if ((await validateHead(fresh)) === 'blocked') {
             if (state.blockReason === 'provider-refused') {
               state.phase = 'blocked';
               state.outcome = 'blocked';
@@ -255,18 +297,26 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
             }
             if ((await waitAtBrake('repair-brake')) === 'cancelled') return state;
           }
-          snapshot = await activities.getPrSnapshot(input.prRef);
           continue;
         }
 
-        if (decideMergeAuthority({ mode: config.autoMerge ?? 'disabled', agentCreated: input.agentCreated, labels: fresh.labels }) === 'manual') {
+        if (
+          decideMergeAuthority({
+            mode: config.autoMerge ?? 'disabled',
+            agentCreated: input.agentCreated,
+            labels: fresh.labels,
+          }) === 'manual'
+        ) {
           state.phase = 'done';
           state.outcome = 'merge-ready-manual';
           return state;
         }
 
         state.phase = 'merging';
-        const merge = await activities.mergePr({ prRef: input.prRef, expectedHeadSha: fresh.headSha });
+        const merge = await activities.mergePr({
+          prRef: input.prRef,
+          expectedHeadSha: fresh.headSha,
+        });
         state.mergeResult = merge;
         if (merge.kind === 'merged' || merge.kind === 'already-merged') {
           state.phase = 'done';
@@ -275,7 +325,7 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
         }
         if (merge.kind === 'head-changed') {
           state.validatedHeadSha = null;
-          if (await validateHead(snapshot) === 'blocked') {
+          if ((await validateHead(await activities.getPrSnapshot(input.prRef))) === 'blocked') {
             if (state.blockReason === 'provider-refused') {
               state.phase = 'blocked';
               state.outcome = 'blocked';
@@ -283,7 +333,6 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
             }
             if ((await waitAtBrake('repair-brake')) === 'cancelled') return state;
           }
-          snapshot = await activities.getPrSnapshot(input.prRef);
           continue;
         }
         state.phase = 'blocked';
@@ -304,13 +353,26 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
         waiting = 0;
         seen.add(feedbackHash(feedback));
         state.babysitRounds += 1;
-        const reviewComments = feedback.comments.filter((c) => !c.resolved).map((c) => c.body).join('\n\n---\n\n');
+        const reviewComments = feedback.comments
+          .filter((c) => !c.resolved)
+          .map((c) => c.body)
+          .join('\n\n---\n\n');
         state.phase = 'repairing';
         state.implementAttempts += 1;
         state.iterations += 1;
-        await runStageAgent('implement', state.implementAttempts, { prReviewFeedback: reviewComments });
-        await activities.pushBranch(input.repo, state.workspaceRef, state.branch, `${input.taskId}-${state.implementAttempts}`);
-        if (await validateHead(await activities.getPrSnapshot(input.prRef), reviewComments) === 'blocked') {
+        await runStageAgent('implement', state.implementAttempts, {
+          prReviewFeedback: reviewComments,
+        });
+        await activities.pushBranch(
+          input.repo,
+          state.workspaceRef,
+          state.branch,
+          `${input.taskId}-${state.implementAttempts}`,
+        );
+        if (
+          (await validateHead(await activities.getPrSnapshot(input.prRef), reviewComments)) ===
+          'blocked'
+        ) {
           if (state.blockReason === 'provider-refused') {
             state.phase = 'blocked';
             state.outcome = 'blocked';
@@ -318,7 +380,6 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
           }
           if ((await waitAtBrake('repair-brake')) === 'cancelled') return state;
         }
-        snapshot = await activities.getPrSnapshot(input.prRef);
         continue;
       }
 
@@ -327,11 +388,11 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
   }
 
   async function land(): Promise<PrLandingState> {
-    let snapshot = await activities.getPrSnapshot(input.prRef);
+    const snapshot = await activities.getPrSnapshot(input.prRef);
     state.currentHeadSha = snapshot.headSha;
     if (state.validatedHeadSha !== snapshot.headSha) {
       state.validatedHeadSha = null;
-      if (await validateHead(snapshot) === 'blocked') {
+      if ((await validateHead(snapshot)) === 'blocked') {
         if (state.blockReason === 'provider-refused') {
           state.phase = 'blocked';
           state.outcome = 'blocked';
@@ -339,9 +400,8 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
         }
         if ((await waitAtBrake('repair-brake')) === 'cancelled') return state;
       }
-      snapshot = await activities.getPrSnapshot(input.prRef);
     }
-    return babysitAndMerge(snapshot);
+    return babysitAndMerge();
   }
 
   const initialSnapshot = await activities.getPrSnapshot(input.prRef);

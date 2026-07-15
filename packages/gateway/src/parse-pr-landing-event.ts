@@ -1,4 +1,8 @@
-import { AGENTOPS_MANAGED_LABEL, AUTO_MERGE_DISABLE_LABEL, AUTO_MERGE_LABEL } from '@agentops/contracts';
+import {
+  AGENTOPS_MANAGED_LABEL,
+  AUTO_MERGE_DISABLE_LABEL,
+  AUTO_MERGE_LABEL,
+} from '@agentops/contracts';
 
 export type PrLandingEvent = {
   kind: 'enroll' | 'wake';
@@ -56,7 +60,10 @@ function buildEvent(
   };
 }
 
-export function parsePrLandingEvent(githubEvent: string | undefined, payload: unknown): PrLandingEvent | null {
+export function parsePrLandingEvent(
+  githubEvent: string | undefined,
+  payload: unknown,
+): PrLandingEvent | null {
   const body = payload as GithubPullRequestPayload & GithubPrReviewPayload;
 
   if (githubEvent === 'pull_request') {
@@ -65,8 +72,9 @@ export function parsePrLandingEvent(githubEvent: string | undefined, payload: un
       return buildEvent('enroll', body);
     }
     if (
-      (body.action === 'labeled' && labelName === AUTO_MERGE_DISABLE_LABEL)
-      || (body.action === 'unlabeled' && (labelName === AUTO_MERGE_LABEL || labelName === AUTO_MERGE_DISABLE_LABEL))
+      (body.action === 'labeled' && labelName === AUTO_MERGE_DISABLE_LABEL) ||
+      (body.action === 'unlabeled' &&
+        (labelName === AUTO_MERGE_LABEL || labelName === AUTO_MERGE_DISABLE_LABEL))
     ) {
       return buildEvent('wake', body);
     }

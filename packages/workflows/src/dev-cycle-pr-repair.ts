@@ -8,7 +8,14 @@ import {
   setHandler,
   sleep,
 } from '@temporalio/workflow';
-import type { Brakes, DevCyclePrRepairInput, DevCycleState, PrFeedback, ProjectConfig, VerdictKind } from '@agentops/contracts';
+import type {
+  Brakes,
+  DevCyclePrRepairInput,
+  DevCycleState,
+  PrFeedback,
+  ProjectConfig,
+  VerdictKind,
+} from '@agentops/contracts';
 import { babysitDecision, nextRepairAction, parseVerdict } from '@agentops/policies';
 import { feedbackHash } from '@agentops/contracts';
 import type { DevCycleActivities } from './activities-api';
@@ -65,8 +72,12 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
   let _stopRequested = false;
   let effectiveBrakes: Partial<Brakes> = { maxBabysitRounds: 10, maxIterations: 20 }; // defaults; override with config
 
-  setHandler(stopSignal, () => { _stopRequested = true; });
-  setHandler(cancelSignal, () => { cancelled = true; });
+  setHandler(stopSignal, () => {
+    _stopRequested = true;
+  });
+  setHandler(cancelSignal, () => {
+    cancelled = true;
+  });
   setHandler(resumeSignal, () => {
     state.status = 'running';
     state.blockReason = null;
@@ -88,7 +99,11 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
     return cancelled;
   };
 
-  const runStageAgent = async (stage: 'implement' | 'full_verify' | 'review', attempt: number, extraContext: Record<string, unknown> = {}) => {
+  const runStageAgent = async (
+    stage: 'implement' | 'full_verify' | 'review',
+    attempt: number,
+    extraContext: Record<string, unknown> = {},
+  ) => {
     // Simplified — in full impl use the exact routing + budget handling from dev-cycle
     let result;
     const callIndex = 1;
@@ -104,7 +119,12 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
           image: config?.image,
           services: config?.services ?? [],
           promptRef: `${stage}.md`,
-          promptContext: { taskId: input.taskId, goal: 'Address PR review comments', prReviewFeedback: input.prReviewFeedback ?? '', ...extraContext },
+          promptContext: {
+            taskId: input.taskId,
+            goal: 'Address PR review comments',
+            prReviewFeedback: input.prReviewFeedback ?? '',
+            ...extraContext,
+          },
           workspaceRef: state.workspaceRef,
           limits: { maxTokens: effectiveBrakes.maxTokens ?? 100000, timeoutMs: 1_800_000 },
         });
@@ -167,7 +187,9 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
       const verifyCommands =
         [...(config?.fastVerifyCommands ?? []), ...(config?.fullVerifyCommands ?? [])].join('\n') ||
         '(none configured — use your own judgment on the diff)';
-      const fullVerifyOutput = await runStageAgent('full_verify', implementAttempt, { verifyCommands });
+      const fullVerifyOutput = await runStageAgent('full_verify', implementAttempt, {
+        verifyCommands,
+      });
       const fvParsed = parseVerdict(fullVerifyOutput, 'FULL:');
       lastFullVerify = fullVerifyOutput;
 
@@ -205,7 +227,12 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
     }
 
     // Push the changes
-    await activities.pushBranch(input.repo, state.workspaceRef, state.branch, `${input.taskId}-repair-${implementAttempt}`);
+    await activities.pushBranch(
+      input.repo,
+      state.workspaceRef,
+      state.branch,
+      `${input.taskId}-repair-${implementAttempt}`,
+    );
 
     // Full babysit (identical to devCycle)
     const seen = new Set<string>();
@@ -215,7 +242,14 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
     while (true) {
       await sleep(DEFAULT_BABYSIT_POLL_MS);
       const feedback: PrFeedback = await activities.getPrFeedback(input.prRef);
-      const decision = babysitDecision(feedback, seen, state.babysitRounds, effectiveBrakes.maxBabysitRounds ?? 10, waiting, MAX_BABYSIT_WAITS);
+      const decision = babysitDecision(
+        feedback,
+        seen,
+        state.babysitRounds,
+        effectiveBrakes.maxBabysitRounds ?? 10,
+        waiting,
+        MAX_BABYSIT_WAITS,
+      );
 
       if (decision === 'merge_ready') break;
 
@@ -225,16 +259,22 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
         state.babysitRounds += 1;
         implementAttempt += 1;
         state.stage = 'implement';
-        const reviewComments = feedback.comments
-          ?.filter((c) => !c.resolved)
-          .map((c) => c.body)
-          .join('\n\n---\n\n') || '';
+        const reviewComments =
+          feedback.comments
+            ?.filter((c) => !c.resolved)
+            .map((c) => c.body)
+            .join('\n\n---\n\n') || '';
         await runStageAgent('implement', implementAttempt, {
           fullVerifyFindings: lastFullVerify,
           reviewFindings: lastReview,
           prReviewFeedback: reviewComments,
         });
-        await activities.pushBranch(input.repo, state.workspaceRef, state.branch, `${input.taskId}-repair-${implementAttempt}`);
+        await activities.pushBranch(
+          input.repo,
+          state.workspaceRef,
+          state.branch,
+          `${input.taskId}-repair-${implementAttempt}`,
+        );
         state.stage = 'pr_babysit';
         continue;
       }
@@ -252,7 +292,6 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
     state.status = 'done';
     await activities.cleanupWorkspace(state.workspaceRef, input.repo);
     return state;
-
   } catch (err) {
     if (!(err instanceof RepairCancelledError)) throw err;
     state.stage = 'failed';

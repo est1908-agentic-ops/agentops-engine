@@ -19,7 +19,7 @@ describe('credential-crypto', () => {
     expect(blobA).not.toBe(blobB);
   });
 
-  it('cannot be decrypted with a different keypair\'s private key', () => {
+  it("cannot be decrypted with a different keypair's private key", () => {
     const pairA = generateManagedProjectKeyPair();
     const pairB = generateManagedProjectKeyPair();
     const blob = encryptForManagedProject(pairA.publicKey, 'secret');

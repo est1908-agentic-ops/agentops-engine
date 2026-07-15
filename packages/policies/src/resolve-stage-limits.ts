@@ -1,5 +1,9 @@
 import type { ProjectConfig, Timeouts } from '@agentops/contracts';
-import { DEFAULT_BACKSTOP_TIMEOUT_MS, DEFAULT_IDLE_TIMEOUT_MS, DEFAULT_VERIFY_IDLE_TIMEOUT_MS } from '@agentops/contracts';
+import {
+  DEFAULT_BACKSTOP_TIMEOUT_MS,
+  DEFAULT_IDLE_TIMEOUT_MS,
+  DEFAULT_VERIFY_IDLE_TIMEOUT_MS,
+} from '@agentops/contracts';
 
 export interface StageLimits {
   idleTimeoutMs: number;

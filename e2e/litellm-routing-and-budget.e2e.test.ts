@@ -14,7 +14,12 @@ function baseConfig(
     stages: {},
     routing: routingOverrides,
     tiers,
-    brakes: { maxImplementAttempts: 3, maxIterations: 10, maxTokens: 1_000_000, maxBabysitRounds: 5 },
+    brakes: {
+      maxImplementAttempts: 3,
+      maxIterations: 10,
+      maxTokens: 1_000_000,
+      maxBabysitRounds: 5,
+    },
   };
 }
 
@@ -32,7 +37,10 @@ const SUCCESS_BODY = {
 };
 
 const BUDGET_EXCEEDED_BODY = {
-  error: { message: 'Budget has been exceeded! Current cost: 1.20, Max budget: 1.00', error_class: 'BudgetExceededError' },
+  error: {
+    message: 'Budget has been exceeded! Current cost: 1.20, Max budget: 1.00',
+    error_class: 'BudgetExceededError',
+  },
 };
 
 describe('DevCycle e2e: LiteLLM routing and budget enforcement (M5 gate)', () => {
@@ -72,7 +80,10 @@ describe('DevCycle e2e: LiteLLM routing and budget enforcement (M5 gate)', () =>
       project: 'project-b',
       repo: 'org/project-b',
       goal: 'Route through the LiteLLM-fronted backend',
-      config: baseConfig({ context: { tier: 'litellm' } }, { litellm: [{ backend: 'litellm', model: 'zai-glm-4.6' }] }),
+      config: baseConfig(
+        { context: { tier: 'litellm' } },
+        { litellm: [{ backend: 'litellm', model: 'zai-glm-4.6' }] },
+      ),
     };
 
     const [claudeFinal, litellmFinal] = await worker.runUntil(async () => {
@@ -103,7 +114,9 @@ describe('DevCycle e2e: LiteLLM routing and budget enforcement (M5 gate)', () =>
       apiKey: 'sk-virtual-key',
       fetchFn: (async () => {
         calls += 1;
-        return calls === 1 ? fakeResponse(429, BUDGET_EXCEEDED_BODY) : fakeResponse(200, SUCCESS_BODY);
+        return calls === 1
+          ? fakeResponse(429, BUDGET_EXCEEDED_BODY)
+          : fakeResponse(200, SUCCESS_BODY);
       }) as unknown as typeof fetch,
     });
     testEnv = await buildTestEnv({ extraBackends: { litellm } });
@@ -119,7 +132,10 @@ describe('DevCycle e2e: LiteLLM routing and budget enforcement (M5 gate)', () =>
       project: 'demo',
       repo: 'demo/repo',
       goal: 'Trip a deliberately low LiteLLM virtual-key budget',
-      config: baseConfig({ context: { tier: 'litellm' } }, { litellm: [{ backend: 'litellm', model: 'zai-glm-4.6' }] }),
+      config: baseConfig(
+        { context: { tier: 'litellm' } },
+        { litellm: [{ backend: 'litellm', model: 'zai-glm-4.6' }] },
+      ),
     };
 
     const finalState = await worker.runUntil(async () => {

@@ -23,11 +23,18 @@ export const PrSnapshotSchema = z.object({
 });
 export type PrSnapshot = z.infer<typeof PrSnapshotSchema>;
 
-export const MergePrRequestSchema = z.object({ prRef: z.string().min(1), expectedHeadSha: z.string().min(1) });
+export const MergePrRequestSchema = z.object({
+  prRef: z.string().min(1),
+  expectedHeadSha: z.string().min(1),
+});
 export type MergePrRequest = z.infer<typeof MergePrRequestSchema>;
 
 export const MergePrResultSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('merged'), headSha: z.string().min(1), mergeCommitSha: z.string().min(1) }),
+  z.object({
+    kind: z.literal('merged'),
+    headSha: z.string().min(1),
+    mergeCommitSha: z.string().min(1),
+  }),
   z.object({ kind: z.literal('already-merged'), headSha: z.string().min(1) }),
   z.object({ kind: z.literal('head-changed') }),
   z.object({ kind: z.literal('not-mergeable'), reason: z.string().min(1) }),
@@ -35,27 +42,65 @@ export const MergePrResultSchema = z.discriminatedUnion('kind', [
 ]);
 export type MergePrResult = z.infer<typeof MergePrResultSchema>;
 
-export const PrLandingOutcomeSchema = z.enum(['merged', 'merge-ready-manual', 'blocked', 'failed', 'cancelled']);
+export const PrLandingOutcomeSchema = z.enum([
+  'merged',
+  'merge-ready-manual',
+  'blocked',
+  'failed',
+  'cancelled',
+]);
 export type PrLandingOutcome = z.infer<typeof PrLandingOutcomeSchema>;
-export const PrLandingPhaseSchema = z.enum(['validating', 'repairing', 'babysitting', 'merging', 'blocked', 'done']);
-export const PrLandingBlockReasonSchema = z.enum(['repair-brake', 'babysit-brake', 'provider-refused', 'permission-denied']);
+export const PrLandingPhaseSchema = z.enum([
+  'validating',
+  'repairing',
+  'babysitting',
+  'merging',
+  'blocked',
+  'done',
+]);
+export const PrLandingBlockReasonSchema = z.enum([
+  'repair-brake',
+  'babysit-brake',
+  'provider-refused',
+  'permission-denied',
+]);
 
 export const PrLandingInputSchema = z.object({
-  taskId: z.string().min(1), project: z.string().min(1), repo: z.string().min(1), prRef: z.string().min(1),
-  agentCreated: z.boolean(), headBranch: z.string().min(1).optional(),
-  workspace: z.object({ workspaceRef: z.string().min(1), branch: z.string().min(1), validatedHeadSha: z.string().min(1) }).optional(),
+  taskId: z.string().min(1),
+  project: z.string().min(1),
+  repo: z.string().min(1),
+  prRef: z.string().min(1),
+  agentCreated: z.boolean(),
+  headBranch: z.string().min(1).optional(),
+  workspace: z
+    .object({
+      workspaceRef: z.string().min(1),
+      branch: z.string().min(1),
+      validatedHeadSha: z.string().min(1),
+    })
+    .optional(),
   config: ProjectConfigSchema.optional(),
 });
 export type PrLandingInput = z.infer<typeof PrLandingInputSchema>;
 
 export const PrLandingStateSchema = z.object({
-  taskId: z.string().min(1), project: z.string().min(1), repo: z.string().min(1),
-  phase: PrLandingPhaseSchema, outcome: PrLandingOutcomeSchema.nullable(),
-  blockReason: PrLandingBlockReasonSchema.nullable(), prRef: z.string().min(1),
-  agentCreated: z.boolean(), autoMergeMode: AutoMergeModeSchema, mergeResult: MergePrResultSchema.nullable(),
-  workspaceRef: z.string(), branch: z.string(),
-  currentHeadSha: z.string().nullable(), validatedHeadSha: z.string().nullable(),
-  implementAttempts: z.number().int().nonnegative(), iterations: z.number().int().nonnegative(),
-  cumulativeTokens: z.number().int().nonnegative(), babysitRounds: z.number().int().nonnegative(),
+  taskId: z.string().min(1),
+  project: z.string().min(1),
+  repo: z.string().min(1),
+  phase: PrLandingPhaseSchema,
+  outcome: PrLandingOutcomeSchema.nullable(),
+  blockReason: PrLandingBlockReasonSchema.nullable(),
+  prRef: z.string().min(1),
+  agentCreated: z.boolean(),
+  autoMergeMode: AutoMergeModeSchema,
+  mergeResult: MergePrResultSchema.nullable(),
+  workspaceRef: z.string(),
+  branch: z.string(),
+  currentHeadSha: z.string().nullable(),
+  validatedHeadSha: z.string().nullable(),
+  implementAttempts: z.number().int().nonnegative(),
+  iterations: z.number().int().nonnegative(),
+  cumulativeTokens: z.number().int().nonnegative(),
+  babysitRounds: z.number().int().nonnegative(),
 });
 export type PrLandingState = z.infer<typeof PrLandingStateSchema>;

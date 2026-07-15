@@ -9,7 +9,11 @@ export function parseFindings(output: string): WhiteboxFinding[] {
   for (let m = re.exec(output); m !== null; m = re.exec(output)) last = m;
   if (!last) return [];
   let json: unknown;
-  try { json = JSON.parse(last[1]); } catch { return []; }
+  try {
+    json = JSON.parse(last[1]);
+  } catch {
+    return [];
+  }
   if (!Array.isArray(json)) return [];
   const out: WhiteboxFinding[] = [];
   for (const item of json) {

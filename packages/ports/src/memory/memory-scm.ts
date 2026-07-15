@@ -128,10 +128,19 @@ export class MemoryScmPort implements ScmPort {
     if (queue && queue.length > 0) {
       queue[0] = merged;
     }
-    return { kind: 'merged', headSha: req.expectedHeadSha, mergeCommitSha: `merge-${req.expectedHeadSha}` };
+    return {
+      kind: 'merged',
+      headSha: req.expectedHeadSha,
+      mergeCommitSha: `merge-${req.expectedHeadSha}`,
+    };
   }
 
-  async push(_repo: string, _workspaceRef: string, branch: string, _contentHash: string): Promise<void> {
+  async push(
+    _repo: string,
+    _workspaceRef: string,
+    branch: string,
+    _contentHash: string,
+  ): Promise<void> {
     this.operations.push({ type: 'push', branch });
   }
 

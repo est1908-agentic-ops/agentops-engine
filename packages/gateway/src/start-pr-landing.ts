@@ -33,15 +33,17 @@ export async function startOrSignalPrLanding(
       taskQueue,
       workflowId,
       workflowIdReusePolicy: WorkflowIdReusePolicy.ALLOW_DUPLICATE,
-      args: [{
-        taskId: workflowId,
-        project,
-        repo: event.repo,
-        prRef: event.prRef,
-        agentCreated: false,
-        headBranch: event.headBranch,
-        config,
-      }],
+      args: [
+        {
+          taskId: workflowId,
+          project,
+          repo: event.repo,
+          prRef: event.prRef,
+          agentCreated: false,
+          headBranch: event.headBranch,
+          config,
+        },
+      ],
     });
     return { started: true, workflowId };
   } catch (err) {

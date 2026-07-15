@@ -35,13 +35,17 @@ export function createProjectScopedPorts(entries: ProjectScopedPortsEntry[]): Pr
   // "no project registered for repo ...".
   const byRepo = new Map(entries.map((entry) => [normalizeRepo(entry.repo), entry]));
   const byLinearTeamKey = new Map(
-    entries.filter((entry) => entry.linearTeamKey).map((entry) => [entry.linearTeamKey as string, entry]),
+    entries
+      .filter((entry) => entry.linearTeamKey)
+      .map((entry) => [entry.linearTeamKey as string, entry]),
   );
 
   function resolve(repo: string): ProjectScopedPortsEntry {
     const found = byRepo.get(normalizeRepo(repo));
     if (!found) {
-      throw new Error(`createProjectScopedPorts: no project registered for repo "${repo}" — check the project registry`);
+      throw new Error(
+        `createProjectScopedPorts: no project registered for repo "${repo}" — check the project registry`,
+      );
     }
     return found;
   }

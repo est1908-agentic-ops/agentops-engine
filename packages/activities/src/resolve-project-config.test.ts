@@ -9,7 +9,15 @@ function fakeStore(rows: Array<{ project: string; repo: string; config?: unknown
     async get(repo: string) {
       const row = rows.find((r) => r.repo === repo);
       return row
-        ? { id: '1', project: row.project, repo: row.repo, credentialSet: true, config: row.config ?? null, createdAt: '', updatedAt: '' }
+        ? {
+            id: '1',
+            project: row.project,
+            repo: row.repo,
+            credentialSet: true,
+            config: row.config ?? null,
+            createdAt: '',
+            updatedAt: '',
+          }
         : null;
     },
   } as unknown as PostgresManagedProjectStore;
@@ -20,9 +28,17 @@ describe('resolveProjectConfig', () => {
     const config = {
       stages: {},
       routing: {},
-      brakes: { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 },
+      brakes: {
+        maxImplementAttempts: 3,
+        maxIterations: 6,
+        maxTokens: 200_000,
+        maxBabysitRounds: 5,
+      },
     };
-    const deps = { store: fakeStore([{ project: 'acme-web', repo: 'acme/web', config }]), privateKey: 'unused' } as ManagedProjectRegistryDeps;
+    const deps = {
+      store: fakeStore([{ project: 'acme-web', repo: 'acme/web', config }]),
+      privateKey: 'unused',
+    } as ManagedProjectRegistryDeps;
     const scm = new MemoryScmPort(); // deliberately NOT seeded -- proves the file was never read
 
     const resolved = await resolveProjectConfig(deps, scm, 'acme/web');
@@ -31,9 +47,16 @@ describe('resolveProjectConfig', () => {
   });
 
   it('falls back to loadProjectConfig when the DB config is null', async () => {
-    const deps = { store: fakeStore([{ project: 'acme-web', repo: 'acme/web' }]), privateKey: 'unused' } as ManagedProjectRegistryDeps;
+    const deps = {
+      store: fakeStore([{ project: 'acme-web', repo: 'acme/web' }]),
+      privateKey: 'unused',
+    } as ManagedProjectRegistryDeps;
     const scm = new MemoryScmPort();
-    scm.seedFile('acme/web', 'agentops.json', JSON.stringify({ fastVerifyCommands: ['pnpm lint'] }));
+    scm.seedFile(
+      'acme/web',
+      'agentops.json',
+      JSON.stringify({ fastVerifyCommands: ['pnpm lint'] }),
+    );
 
     const resolved = await resolveProjectConfig(deps, scm, 'acme/web');
 
@@ -43,7 +66,11 @@ describe('resolveProjectConfig', () => {
   it('falls back to loadProjectConfig when the repo is not DB-managed', async () => {
     const deps = { store: fakeStore([]), privateKey: 'unused' } as ManagedProjectRegistryDeps;
     const scm = new MemoryScmPort();
-    scm.seedFile('acme/legacy', 'agentops.json', JSON.stringify({ fullVerifyCommands: ['pnpm test'] }));
+    scm.seedFile(
+      'acme/legacy',
+      'agentops.json',
+      JSON.stringify({ fullVerifyCommands: ['pnpm test'] }),
+    );
 
     const resolved = await resolveProjectConfig(deps, scm, 'acme/legacy');
 
@@ -52,7 +79,11 @@ describe('resolveProjectConfig', () => {
 
   it('falls back to loadProjectConfig when no managed-project deps are configured at all', async () => {
     const scm = new MemoryScmPort();
-    scm.seedFile('acme/legacy', 'agentops.json', JSON.stringify({ fastVerifyCommands: ['make test'] }));
+    scm.seedFile(
+      'acme/legacy',
+      'agentops.json',
+      JSON.stringify({ fastVerifyCommands: ['make test'] }),
+    );
 
     const resolved = await resolveProjectConfig(undefined, scm, 'acme/legacy');
 

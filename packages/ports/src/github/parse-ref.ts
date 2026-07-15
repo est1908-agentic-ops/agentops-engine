@@ -5,9 +5,17 @@ export interface ParsedRef {
 }
 
 export function parseRef(ref: string): ParsedRef {
+  const parsed = tryParseRef(ref);
+  if (!parsed) {
+    throw new Error(`parseRef: expected "owner/repo#number", got "${ref}"`);
+  }
+  return parsed;
+}
+
+export function tryParseRef(ref: string): ParsedRef | null {
   const match = /^([^/]+)\/([^#]+)#(\d+)$/.exec(ref);
   if (!match) {
-    throw new Error(`parseRef: expected "owner/repo#number", got "${ref}"`);
+    return null;
   }
   return { owner: match[1], repo: match[2], number: Number(match[3]) };
 }

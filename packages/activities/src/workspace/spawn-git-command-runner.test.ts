@@ -60,7 +60,11 @@ describe('SpawnGitCommandRunner', () => {
 
     const result = await runner.run(['status'], { cwd: '/tmp/repo' });
 
-    expect(result).toEqual({ stdout: 'partial output', stderr: 'fatal: not a git repository', exitCode: 1 });
+    expect(result).toEqual({
+      stdout: 'partial output',
+      stderr: 'fatal: not a git repository',
+      exitCode: 1,
+    });
   });
 
   it('runs with the given cwd', async () => {
@@ -74,7 +78,10 @@ describe('SpawnGitCommandRunner', () => {
 
   it('resolves (never hangs, never throws) when the process itself fails to spawn', async () => {
     const spawnFn = vi.fn(() => {
-      const child = new EventEmitter() as EventEmitter & { stdout: PassThrough; stderr: PassThrough };
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: PassThrough;
+        stderr: PassThrough;
+      };
       child.stdout = new PassThrough();
       child.stderr = new PassThrough();
       queueMicrotask(() => {

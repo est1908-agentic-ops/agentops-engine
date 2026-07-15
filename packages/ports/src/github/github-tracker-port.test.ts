@@ -34,13 +34,24 @@ describe('GithubTrackerPort', () => {
 
     const issue = await tracker.getIssue('octocat/hello-world#42');
 
-    expect(issue).toEqual({ ref: 'octocat/hello-world#42', title: 'Bug', body: 'It is broken', labels: ['bug', 'p1'] });
-    expect(client.rest.issues.get).toHaveBeenCalledWith({ owner: 'octocat', repo: 'hello-world', issue_number: 42 });
+    expect(issue).toEqual({
+      ref: 'octocat/hello-world#42',
+      title: 'Bug',
+      body: 'It is broken',
+      labels: ['bug', 'p1'],
+    });
+    expect(client.rest.issues.get).toHaveBeenCalledWith({
+      owner: 'octocat',
+      repo: 'hello-world',
+      issue_number: 42,
+    });
   });
 
   it('getIssue defaults a null body to an empty string', async () => {
     const client = fakeClient({
-      issues: { get: vi.fn().mockResolvedValue({ data: { title: 'T', body: null, labels: [] } }) } as never,
+      issues: {
+        get: vi.fn().mockResolvedValue({ data: { title: 'T', body: null, labels: [] } }),
+      } as never,
     });
     const tracker = new GithubTrackerPort(client);
 
@@ -90,7 +101,12 @@ describe('GithubTrackerPort', () => {
     const client = fakeClient({ issues: { removeLabel } as never });
     const port = new GithubTrackerPort(client);
     await port.removeLabel('o/r#7', 'agent:working');
-    expect(removeLabel).toHaveBeenCalledWith({ owner: 'o', repo: 'r', issue_number: 7, name: 'agent:working' });
+    expect(removeLabel).toHaveBeenCalledWith({
+      owner: 'o',
+      repo: 'r',
+      issue_number: 7,
+      name: 'agent:working',
+    });
   });
 
   it('createIssue calls issues.create and returns owner/repo#number + html_url', async () => {
@@ -98,7 +114,13 @@ describe('GithubTrackerPort', () => {
     const client = fakeClient({ issues: { create } as never });
     const port = new GithubTrackerPort(client);
     const res = await port.createIssue({ repo: 'o/r', title: 'T', body: 'B', labels: ['bug'] });
-    expect(create).toHaveBeenCalledWith({ owner: 'o', repo: 'r', title: 'T', body: 'B', labels: ['bug'] });
+    expect(create).toHaveBeenCalledWith({
+      owner: 'o',
+      repo: 'r',
+      title: 'T',
+      body: 'B',
+      labels: ['bug'],
+    });
     expect(res).toEqual({ ref: 'o/r#7', url: 'https://x/7' });
   });
 });

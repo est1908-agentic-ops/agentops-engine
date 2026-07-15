@@ -32,7 +32,9 @@ describe('parsePrReviewEvent', () => {
   });
 
   it('ignores non-submitted actions', () => {
-    expect(parsePrReviewEvent('pull_request_review', { ...basePayload, action: 'edited' })).toBeNull();
+    expect(
+      parsePrReviewEvent('pull_request_review', { ...basePayload, action: 'edited' }),
+    ).toBeNull();
   });
 
   it('sets hasAgentopsLabel false when label missing', () => {

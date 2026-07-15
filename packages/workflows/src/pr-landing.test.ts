@@ -35,7 +35,14 @@ const {
       full_verify: 'FULL: PASS',
       review: 'VERDICT: PASS',
     };
-    return { output: outputs[req.stage] ?? 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1, promptHash: 'h', promptSource: 's' };
+    return {
+      output: outputs[req.stage] ?? 'ok',
+      tokensIn: 1,
+      tokensOut: 1,
+      wallMs: 1,
+      promptHash: 'h',
+      promptSource: 's',
+    };
   });
   let poll = 0;
   const getPrSnapshotFn = vi.fn().mockImplementation(async () => {
@@ -43,7 +50,9 @@ const {
     return greenSnapshot(poll === 1 ? {} : { labels: ['automerge'] });
   });
   return {
-    prepareWorkspace: vi.fn().mockResolvedValue({ workspaceRef: 'ws-ext', branch: 'feature/x', baseBranch: 'main' }),
+    prepareWorkspace: vi
+      .fn()
+      .mockResolvedValue({ workspaceRef: 'ws-ext', branch: 'feature/x', baseBranch: 'main' }),
     cleanupWorkspace: vi.fn().mockResolvedValue(undefined),
     getPrSnapshot: getPrSnapshotFn,
     mergePr: vi.fn().mockResolvedValue({ kind: 'merged', headSha: 'abc', mergeCommitSha: 'def' }),
@@ -97,14 +106,23 @@ const baseConfig: NonNullable<PrLandingInput['config']> = {
 describe('prLanding', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    vi.mocked(getPrSnapshot).mockImplementation(async () => greenSnapshot({ labels: ['automerge'] }));
+    vi.mocked(getPrSnapshot).mockImplementation(async () =>
+      greenSnapshot({ labels: ['automerge'] }),
+    );
     vi.mocked(runAgent).mockImplementation(async (req: { stage: string }) => {
       const outputs: Record<string, string> = {
         implement: 'diff',
         full_verify: 'FULL: PASS',
         review: 'VERDICT: PASS',
       };
-      return { output: outputs[req.stage] ?? 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1, promptHash: 'h', promptSource: 's' };
+      return {
+        output: outputs[req.stage] ?? 'ok',
+        tokensIn: 1,
+        tokensOut: 1,
+        wallMs: 1,
+        promptHash: 'h',
+        promptSource: 's',
+      };
     });
     vi.mocked(mergePr).mockResolvedValue({ kind: 'merged', headSha: 'abc', mergeCommitSha: 'def' });
     vi.mocked(condition).mockImplementation(async () => undefined);
@@ -112,7 +130,11 @@ describe('prLanding', () => {
 
   it('adopts but does not prepare the parent workspace, then cleans it once', async () => {
     const result = await prLanding({
-      taskId: 'landing-o-r-7', project: 'p', repo: 'o/r', prRef: 'o/r#7', agentCreated: true,
+      taskId: 'landing-o-r-7',
+      project: 'p',
+      repo: 'o/r',
+      prRef: 'o/r#7',
+      agentCreated: true,
       workspace: { workspaceRef: '/ws/t', branch: 'agentops/t', validatedHeadSha: 'abc' },
       config: { ...baseConfig, autoMerge: 'disabled' },
     });
@@ -123,18 +145,31 @@ describe('prLanding', () => {
 
   it('prepares an external PR workspace and runs verify plus review before merging', async () => {
     const result = await prLanding({
-      taskId: 'landing-o-r-8', project: 'p', repo: 'o/r', prRef: 'o/r#8', agentCreated: false,
-      headBranch: 'feature/x', config: { ...baseConfig, autoMerge: 'label' },
+      taskId: 'landing-o-r-8',
+      project: 'p',
+      repo: 'o/r',
+      prRef: 'o/r#8',
+      agentCreated: false,
+      headBranch: 'feature/x',
+      config: { ...baseConfig, autoMerge: 'label' },
     });
-    expect(prepareWorkspace).toHaveBeenCalledWith(expect.objectContaining({ headBranch: 'feature/x' }));
+    expect(prepareWorkspace).toHaveBeenCalledWith(
+      expect.objectContaining({ headBranch: 'feature/x' }),
+    );
     expect(runAgent.mock.calls.map(([req]) => req.stage)).toEqual(['full_verify', 'review']);
     expect(result.outcome).toBe('merged');
   });
 
   it('returns manual when automerge:disable wins immediately before merge', async () => {
-    vi.mocked(getPrSnapshot).mockResolvedValue(greenSnapshot({ labels: ['automerge', 'automerge:disable'] }));
+    vi.mocked(getPrSnapshot).mockResolvedValue(
+      greenSnapshot({ labels: ['automerge', 'automerge:disable'] }),
+    );
     const result = await prLanding({
-      taskId: 'landing-o-r-9', project: 'p', repo: 'o/r', prRef: 'o/r#9', agentCreated: true,
+      taskId: 'landing-o-r-9',
+      project: 'p',
+      repo: 'o/r',
+      prRef: 'o/r#9',
+      agentCreated: true,
       workspace: { workspaceRef: '/ws/t', branch: 'agentops/t', validatedHeadSha: 'abc' },
       config: { ...baseConfig, autoMerge: 'all' },
     });
@@ -145,8 +180,13 @@ describe('prLanding', () => {
   it('blocks on forbidden merge and still cleans up once', async () => {
     vi.mocked(mergePr).mockResolvedValue({ kind: 'forbidden', reason: 'nope' });
     const result = await prLanding({
-      taskId: 'landing-o-r-10', project: 'p', repo: 'o/r', prRef: 'o/r#10', agentCreated: false,
-      headBranch: 'feature/x', config: { ...baseConfig, autoMerge: 'label' },
+      taskId: 'landing-o-r-10',
+      project: 'p',
+      repo: 'o/r',
+      prRef: 'o/r#10',
+      agentCreated: false,
+      headBranch: 'feature/x',
+      config: { ...baseConfig, autoMerge: 'label' },
     });
     expect(cleanupWorkspace).toHaveBeenCalledTimes(1);
     expect(result.outcome).toBe('blocked');

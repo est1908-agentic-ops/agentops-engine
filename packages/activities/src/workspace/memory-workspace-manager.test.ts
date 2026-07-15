@@ -28,7 +28,9 @@ describe('MemoryWorkspaceManager', () => {
 
   it('throws if cleanup is called on a workspaceRef that was never prepared', async () => {
     const manager = new MemoryWorkspaceManager();
-    await expect(manager.cleanup('memory://never/prepared', 'owner/repo')).rejects.toThrow(/never prepared/);
+    await expect(manager.cleanup('memory://never/prepared', 'owner/repo')).rejects.toThrow(
+      /never prepared/,
+    );
   });
 
   it('records the initCommands it was asked to prepare with, without executing anything', async () => {
@@ -67,6 +69,8 @@ describe('MemoryWorkspaceManager — scratch workspaces', () => {
   it('throws when cleanupScratch is called on a workspaceRef that was never prepared', async () => {
     const manager = new MemoryWorkspaceManager();
 
-    await expect(manager.cleanupScratch('memory://scratch/never-prepared')).rejects.toThrow(/never prepared/);
+    await expect(manager.cleanupScratch('memory://scratch/never-prepared')).rejects.toThrow(
+      /never prepared/,
+    );
   });
 });

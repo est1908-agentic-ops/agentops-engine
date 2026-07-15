@@ -20,6 +20,8 @@ describe('control-agents-api', () => {
 
   it('parses list + trigger responses', () => {
     expect(ListAgentSchedulesResponseSchema.parse({ agents: [] }).agents).toEqual([]);
-    expect(TriggerAgentResponseSchema.parse({ scheduleId: 'agent:acme:nb', triggered: true }).triggered).toBe(true);
+    expect(
+      TriggerAgentResponseSchema.parse({ scheduleId: 'agent:acme:nb', triggered: true }).triggered,
+    ).toBe(true);
   });
 });

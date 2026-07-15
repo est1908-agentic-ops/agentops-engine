@@ -7,17 +7,30 @@ import {
 
 describe('CreateManagedProjectRequestSchema', () => {
   it('requires project, repo, and a non-empty token', () => {
-    expect(() => CreateManagedProjectRequestSchema.parse({ project: 'acme-web', repo: 'acme/web', token: '' })).toThrow();
-    expect(() => CreateManagedProjectRequestSchema.parse({ project: 'acme-web', repo: 'acme/web' })).toThrow();
+    expect(() =>
+      CreateManagedProjectRequestSchema.parse({ project: 'acme-web', repo: 'acme/web', token: '' }),
+    ).toThrow();
+    expect(() =>
+      CreateManagedProjectRequestSchema.parse({ project: 'acme-web', repo: 'acme/web' }),
+    ).toThrow();
   });
 
   it('accepts a minimal create body', () => {
-    const parsed = CreateManagedProjectRequestSchema.parse({ project: 'acme-web', repo: 'acme/web', token: 'ghp_abc' });
+    const parsed = CreateManagedProjectRequestSchema.parse({
+      project: 'acme-web',
+      repo: 'acme/web',
+      token: 'ghp_abc',
+    });
     expect(parsed.config).toBeUndefined();
   });
 
   it('accepts an explicit null config to register file-based on create', () => {
-    const parsed = CreateManagedProjectRequestSchema.parse({ project: 'acme-web', repo: 'acme/web', token: 'ghp_abc', config: null });
+    const parsed = CreateManagedProjectRequestSchema.parse({
+      project: 'acme-web',
+      repo: 'acme/web',
+      token: 'ghp_abc',
+      config: null,
+    });
     expect(parsed.config).toBeNull();
   });
 
@@ -25,14 +38,28 @@ describe('CreateManagedProjectRequestSchema', () => {
     const config = {
       stages: {},
       routing: {},
-      brakes: { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 },
+      brakes: {
+        maxImplementAttempts: 3,
+        maxIterations: 6,
+        maxTokens: 200_000,
+        maxBabysitRounds: 5,
+      },
     };
-    const parsed = CreateManagedProjectRequestSchema.parse({ project: 'acme-web', repo: 'acme/web', token: 'ghp_abc', config });
+    const parsed = CreateManagedProjectRequestSchema.parse({
+      project: 'acme-web',
+      repo: 'acme/web',
+      token: 'ghp_abc',
+      config,
+    });
     expect(parsed.config?.brakes.maxTokens).toBe(200_000);
   });
 
   it('defaults trackerType to github when omitted', () => {
-    const parsed = CreateManagedProjectRequestSchema.parse({ project: 'acme-web', repo: 'acme/web', token: 'ghp_abc' });
+    const parsed = CreateManagedProjectRequestSchema.parse({
+      project: 'acme-web',
+      repo: 'acme/web',
+      token: 'ghp_abc',
+    });
     expect(parsed.trackerType).toBe('github');
   });
 
@@ -50,10 +77,29 @@ describe('CreateManagedProjectRequestSchema', () => {
   });
 
   it('rejects a linear-tracked create missing any linear field', () => {
-    const base = { project: 'acme-web', repo: 'acme/web', token: 'ghp_abc', trackerType: 'linear' as const };
-    expect(() => CreateManagedProjectRequestSchema.parse({ ...base, linearTriggerLabelId: 'x', linearToken: 'y' })).toThrow();
-    expect(() => CreateManagedProjectRequestSchema.parse({ ...base, linearTeamKey: 'ENG', linearToken: 'y' })).toThrow();
-    expect(() => CreateManagedProjectRequestSchema.parse({ ...base, linearTeamKey: 'ENG', linearTriggerLabelId: 'x' })).toThrow();
+    const base = {
+      project: 'acme-web',
+      repo: 'acme/web',
+      token: 'ghp_abc',
+      trackerType: 'linear' as const,
+    };
+    expect(() =>
+      CreateManagedProjectRequestSchema.parse({
+        ...base,
+        linearTriggerLabelId: 'x',
+        linearToken: 'y',
+      }),
+    ).toThrow();
+    expect(() =>
+      CreateManagedProjectRequestSchema.parse({ ...base, linearTeamKey: 'ENG', linearToken: 'y' }),
+    ).toThrow();
+    expect(() =>
+      CreateManagedProjectRequestSchema.parse({
+        ...base,
+        linearTeamKey: 'ENG',
+        linearTriggerLabelId: 'x',
+      }),
+    ).toThrow();
   });
 });
 

@@ -43,7 +43,15 @@ interface FakeManagedRow {
 // through the real gateway HTTP handlers rather than calling them directly.
 function fakeManagedProjectDeps(privateKey: string, rows: FakeManagedRow[]) {
   function toManagedProject(row: FakeManagedRow) {
-    const base = { id: '1', project: row.project, repo: row.repo, credentialSet: true, config: row.config ?? null, createdAt: '', updatedAt: '' };
+    const base = {
+      id: '1',
+      project: row.project,
+      repo: row.repo,
+      credentialSet: true,
+      config: row.config ?? null,
+      createdAt: '',
+      updatedAt: '',
+    };
     if (row.trackerType === 'linear') {
       return {
         ...base,
@@ -87,7 +95,11 @@ describe('createGatewayServer GitHub route', () => {
     registeredScm = new MemoryScmPort();
     const { publicKey, privateKey } = generateManagedProjectKeyPair();
     const managedProjectDeps = fakeManagedProjectDeps(privateKey, [
-      { project: 'my-project', repo: 'octocat/hello-world', encryptedToken: encryptForManagedProject(publicKey, 't') },
+      {
+        project: 'my-project',
+        repo: 'octocat/hello-world',
+        encryptedToken: encryptForManagedProject(publicKey, 't'),
+      },
     ]);
     const deps: GatewayDeps = {
       client: { workflow: { start } } as never,
@@ -151,11 +163,19 @@ describe('createGatewayServer GitHub route', () => {
     expect(res.status).toBe(202);
     expect(start).toHaveBeenCalledTimes(1);
     const [, options] = start.mock.calls[0];
-    expect(options.args[0]).toMatchObject({ project: 'my-project', repo: 'octocat/hello-world', goal: 'Add a widget' });
+    expect(options.args[0]).toMatchObject({
+      project: 'my-project',
+      repo: 'octocat/hello-world',
+      goal: 'Add a widget',
+    });
   });
 
   it('finds a project config stored at .agentops/agentops.json, not just repo-root agentops.json', async () => {
-    registeredScm.seedFile('octocat/hello-world', '.agentops/agentops.json', JSON.stringify({ fastVerifyCommands: ['pnpm test'] }));
+    registeredScm.seedFile(
+      'octocat/hello-world',
+      '.agentops/agentops.json',
+      JSON.stringify({ fastVerifyCommands: ['pnpm test'] }),
+    );
     const body = JSON.stringify(labeledPayload());
     const res = await post(port, '/webhooks/github', body, {
       'content-type': 'application/json',
@@ -179,7 +199,9 @@ describe('createGatewayServer GitHub route', () => {
   });
 
   it('acknowledges (202) but does not start a task for a repo with no registered project', async () => {
-    const body = JSON.stringify(labeledPayload({ repository: { full_name: 'octocat/unregistered' } }));
+    const body = JSON.stringify(
+      labeledPayload({ repository: { full_name: 'octocat/unregistered' } }),
+    );
     const res = await post(port, '/webhooks/github', body, {
       'content-type': 'application/json',
       'x-github-event': 'issues',
@@ -294,7 +316,10 @@ describe('createGatewayServer Linear route', () => {
 
   it('rejects a webhook with an invalid signature', async () => {
     const body = JSON.stringify(linearIssuePayload());
-    const res = await post(port, '/webhooks/linear', body, { 'content-type': 'application/json', 'linear-signature': 'deadbeef' });
+    const res = await post(port, '/webhooks/linear', body, {
+      'content-type': 'application/json',
+      'linear-signature': 'deadbeef',
+    });
     expect(res.status).toBe(401);
     expect(start).not.toHaveBeenCalled();
   });
@@ -317,7 +342,9 @@ describe('createGatewayServer Linear route', () => {
   });
 
   it('ignores (204) an issue event whose labelIds do not include the trigger label', async () => {
-    const body = JSON.stringify(linearIssuePayload({ data: { identifier: 'ENG-123', title: 't', labelIds: ['other'] } }));
+    const body = JSON.stringify(
+      linearIssuePayload({ data: { identifier: 'ENG-123', title: 't', labelIds: ['other'] } }),
+    );
     const res = await post(port, '/webhooks/linear', body, {
       'content-type': 'application/json',
       'linear-signature': signLinear(body),
@@ -327,7 +354,11 @@ describe('createGatewayServer Linear route', () => {
   });
 
   it('acknowledges (202) but does not start a task for a team with no registered project', async () => {
-    const body = JSON.stringify(linearIssuePayload({ data: { identifier: 'OTHER-1', title: 't', labelIds: [LINEAR_TRIGGER_LABEL_ID] } }));
+    const body = JSON.stringify(
+      linearIssuePayload({
+        data: { identifier: 'OTHER-1', title: 't', labelIds: [LINEAR_TRIGGER_LABEL_ID] },
+      }),
+    );
     const res = await post(port, '/webhooks/linear', body, {
       'content-type': 'application/json',
       'linear-signature': signLinear(body),
@@ -358,7 +389,10 @@ describe('createGatewayServer Linear route', () => {
       webhookSecret: SECRET,
       triggerLabel: TRIGGER_LABEL,
       buildScm: () => new MemoryScmPort(),
-      managedProjectDeps: { store: { getByLinearTeamKey: () => Promise.reject(new Error('db down')) } as never, privateKey: 'unused' },
+      managedProjectDeps: {
+        store: { getByLinearTeamKey: () => Promise.reject(new Error('db down')) } as never,
+        privateKey: 'unused',
+      },
       linearWebhookSecret: LINEAR_SECRET,
     };
     const brokenServer = createGatewayServer(brokenDeps);
@@ -405,13 +439,23 @@ describe('createGatewayServer config branch (DB config vs file fallback)', () =>
     const dbConfig = {
       stages: {},
       routing: {},
-      brakes: { maxImplementAttempts: 9, maxIterations: 9, maxTokens: 999_999, maxBabysitRounds: 9 },
+      brakes: {
+        maxImplementAttempts: 9,
+        maxIterations: 9,
+        maxTokens: 999_999,
+        maxBabysitRounds: 9,
+      },
     };
     // A MemoryScmPort that is NOT seeded -- if loadProjectConfig were called
     // it would return defaults (maxTokens 200_000), not 999_999.
     const scm = new MemoryScmPort();
     const managedProjectDeps = fakeManagedProjectDeps(privateKey, [
-      { project: 'my-project', repo: 'octocat/hello-world', config: dbConfig, encryptedToken: encryptForManagedProject(publicKey, 'db-token') },
+      {
+        project: 'my-project',
+        repo: 'octocat/hello-world',
+        config: dbConfig,
+        encryptedToken: encryptForManagedProject(publicKey, 'db-token'),
+      },
     ]);
     await listen({
       client: { workflow: { start } } as never,
@@ -439,9 +483,17 @@ describe('createGatewayServer config branch (DB config vs file fallback)', () =>
     start = vi.fn().mockResolvedValue(undefined);
     const { publicKey, privateKey } = generateManagedProjectKeyPair();
     const scm = new MemoryScmPort();
-    scm.seedFile('octocat/hello-world', 'agentops.json', JSON.stringify({ fastVerifyCommands: ['pnpm lint'] }));
+    scm.seedFile(
+      'octocat/hello-world',
+      'agentops.json',
+      JSON.stringify({ fastVerifyCommands: ['pnpm lint'] }),
+    );
     const managedProjectDeps = fakeManagedProjectDeps(privateKey, [
-      { project: 'my-project', repo: 'octocat/hello-world', encryptedToken: encryptForManagedProject(publicKey, 'db-token') },
+      {
+        project: 'my-project',
+        repo: 'octocat/hello-world',
+        encryptedToken: encryptForManagedProject(publicKey, 'db-token'),
+      },
     ]);
     await listen({
       client: { workflow: { start } } as never,
@@ -470,7 +522,12 @@ describe('createGatewayServer config branch (DB config vs file fallback)', () =>
       {
         project: 'my-project',
         repo: 'octocat/hello-world',
-        config: { stages: {}, routing: {}, brakes: { maxImplementAttempts: 1, maxIterations: 1, maxTokens: 1, maxBabysitRounds: 1 }, autoMerge: 'label' },
+        config: {
+          stages: {},
+          routing: {},
+          brakes: { maxImplementAttempts: 1, maxIterations: 1, maxTokens: 1, maxBabysitRounds: 1 },
+          autoMerge: 'label',
+        },
         encryptedToken: encryptForManagedProject(publicKey, 't'),
       },
     ]);
@@ -496,14 +553,21 @@ describe('createGatewayServer config branch (DB config vs file fallback)', () =>
     });
     expect(res.status).toBe(202);
     expect(start).toHaveBeenCalledOnce();
-    expect(start.mock.calls[0][1].args[0]).toMatchObject({ agentCreated: false, prRef: 'octocat/hello-world#7' });
+    expect(start.mock.calls[0][1].args[0]).toMatchObject({
+      agentCreated: false,
+      prRef: 'octocat/hello-world#7',
+    });
   });
 
   it('returns 204 for external automerge enrollment when autoMerge is disabled', async () => {
     start = vi.fn().mockResolvedValue(undefined);
     const { publicKey, privateKey } = generateManagedProjectKeyPair();
     const managedProjectDeps = fakeManagedProjectDeps(privateKey, [
-      { project: 'my-project', repo: 'octocat/hello-world', encryptedToken: encryptForManagedProject(publicKey, 't') },
+      {
+        project: 'my-project',
+        repo: 'octocat/hello-world',
+        encryptedToken: encryptForManagedProject(publicKey, 't'),
+      },
     ]);
     await listen({
       client: { workflow: { start } } as never,

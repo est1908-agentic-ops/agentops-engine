@@ -8,11 +8,27 @@ import { createProjectScopedPorts, type ProjectScopedPortsEntry } from './projec
 function fakeScm(): ScmPort {
   return {
     openPr: vi.fn().mockResolvedValue({ prRef: 'r#1', url: 'https://x' }),
-    getPrFeedback: vi.fn().mockResolvedValue({ ciStatus: 'green', unresolvedThreads: 0, comments: [] } satisfies PrFeedback),
+    getPrFeedback: vi
+      .fn()
+      .mockResolvedValue({
+        ciStatus: 'green',
+        unresolvedThreads: 0,
+        comments: [],
+      } satisfies PrFeedback),
     getPrSnapshot: vi.fn().mockResolvedValue({
-      prRef: 'owner/repo-b#7', headSha: 'abc', headRepo: 'owner/repo-b', headBranch: 'feature/x',
-      checkoutRef: 'refs/pull/7/head', labels: [], state: 'open', draft: false, mergeable: true,
-      mergedHeadSha: null, ciStatus: 'green', unresolvedThreads: 0, comments: [],
+      prRef: 'owner/repo-b#7',
+      headSha: 'abc',
+      headRepo: 'owner/repo-b',
+      headBranch: 'feature/x',
+      checkoutRef: 'refs/pull/7/head',
+      labels: [],
+      state: 'open',
+      draft: false,
+      mergeable: true,
+      mergedHeadSha: null,
+      ciStatus: 'green',
+      unresolvedThreads: 0,
+      comments: [],
     }),
     mergePr: vi.fn().mockResolvedValue({ kind: 'merged', headSha: 'abc', mergeCommitSha: 'def' }),
     push: vi.fn().mockResolvedValue(undefined),
@@ -86,7 +102,10 @@ describe('createProjectScopedPorts', () => {
     await scm.mergePr({ prRef: 'owner/repo-b#7', expectedHeadSha: 'abc' });
 
     expect(entryB.scm.getPrSnapshot).toHaveBeenCalledWith('owner/repo-b#7');
-    expect(entryB.scm.mergePr).toHaveBeenCalledWith({ prRef: 'owner/repo-b#7', expectedHeadSha: 'abc' });
+    expect(entryB.scm.mergePr).toHaveBeenCalledWith({
+      prRef: 'owner/repo-b#7',
+      expectedHeadSha: 'abc',
+    });
     expect(entryA.scm.getPrSnapshot).not.toHaveBeenCalled();
     expect(entryA.scm.mergePr).not.toHaveBeenCalled();
   });

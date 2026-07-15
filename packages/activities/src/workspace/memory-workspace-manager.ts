@@ -14,7 +14,13 @@ export class MemoryWorkspaceManager implements Workspaces {
     this.files.get(workspaceRef)!.set(relativePath, content);
   }
 
-  async prepare(taskId: string, repo: string, initCommands?: string[], headBranch?: string, headRef?: string): Promise<PreparedWorkspace> {
+  async prepare(
+    taskId: string,
+    repo: string,
+    initCommands?: string[],
+    headBranch?: string,
+    headRef?: string,
+  ): Promise<PreparedWorkspace> {
     const workspaceRef = `memory://${repo}/${taskId}`;
     this.prepared.add(workspaceRef);
     this.initCommands.set(workspaceRef, initCommands);
@@ -33,7 +39,9 @@ export class MemoryWorkspaceManager implements Workspaces {
 
   async cleanup(workspaceRef: string, _repo: string): Promise<void> {
     if (!this.prepared.has(workspaceRef)) {
-      throw new Error(`MemoryWorkspaceManager: cleanup called on a workspaceRef that was never prepared: "${workspaceRef}"`);
+      throw new Error(
+        `MemoryWorkspaceManager: cleanup called on a workspaceRef that was never prepared: "${workspaceRef}"`,
+      );
     }
     this.cleanedUp.add(workspaceRef);
   }

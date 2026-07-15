@@ -47,13 +47,13 @@ the worker re-runs workflow code and uses the log to skip finished steps — it 
 
 **In history:**
 
-| Event kind | What gets serialized |
-| ---------- | -------------------- |
-| Workflow start | Workflow type, **input args** (`TaskInput` for `devCycle`), task queue, memo, search attributes |
-| Each activity | **Input** on schedule, **return value** (or failure) on completion — e.g. `prepareWorkspace` → `{ workspaceRef, branch }`, `runAgent` → `{ output, tokensIn, tokensOut, … }` |
-| Timers | `sleep()` in `pr_babysit` — fire time is fixed at schedule time |
-| Signals | `stop`, `cancel`, `resume`, `clarify` — name + payload, replayed in order |
-| Workflow end | Final **result** (`DevCycleState`) or failure |
+| Event kind     | What gets serialized                                                                                                                                                         |
+| -------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Workflow start | Workflow type, **input args** (`TaskInput` for `devCycle`), task queue, memo, search attributes                                                                              |
+| Each activity  | **Input** on schedule, **return value** (or failure) on completion — e.g. `prepareWorkspace` → `{ workspaceRef, branch }`, `runAgent` → `{ output, tokensIn, tokensOut, … }` |
+| Timers         | `sleep()` in `pr_babysit` — fire time is fixed at schedule time                                                                                                              |
+| Signals        | `stop`, `cancel`, `resume`, `clarify` — name + payload, replayed in order                                                                                                    |
+| Workflow end   | Final **result** (`DevCycleState`) or failure                                                                                                                                |
 
 Activity **heartbeats** (K8s Job poll progress during `runAgent`) are kept on the
 activity attempt for timeout/debugging; they are not replayed like completions.
@@ -132,14 +132,14 @@ old and new callers are served by the same pods.
 Every generic term above maps onto a specific package, in the same order a task
 flows through them:
 
-| Concept        | Package / identifier                                          | Detail                                                                                                                                                                 |
-| -------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Client         | `packages/control`, `packages/cli`                            | calls `client.workflow.start(devCycle, { taskQueue: ENGINE_QUEUE })`                                                                                                   |
-| Task queue     | `ENGINE_QUEUE = 'agentops-engine'`                            | + `LEGACY_ENGINE_QUEUE = 'agentops-devcycle'` — `packages/contracts/src/engine-queue.ts`                                                                               |
-| Worker process | `packages/worker`                                             | `createWorker()` in `create-worker.ts`, started from `main.ts`                                                                                                         |
-| Workflow code  | `packages/workflows`                                          | `devCycle`, `platform`, `self-heal`, `reconcileAllProjects`, `configSync`, `whiteboxBugHunt`, `platformChat`                                                           |
-| Activity code  | `packages/activities` → `packages/backends`, `packages/ports` | agent CLIs, LiteLLM, GitHub/Linear — never imported directly by a workflow, only proxied                                                                               |
-| Query / signal | `stateQuery`, `conversationQuery` (`defineQuery`)             | `control`'s `handleGetDevCycleRun` calls `handle.query('state')` for a live snapshot; `stop`/`cancel`/`resume`/`clarify` signals push the other way, no queue involved |
+| Concept        | Package / identifier                                          | Detail                                                                                                                                                                                                                                                                                               |
+| -------------- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Client         | `packages/control`, `packages/cli`                            | calls `client.workflow.start(devCycle, { taskQueue: ENGINE_QUEUE })`                                                                                                                                                                                                                                 |
+| Task queue     | `ENGINE_QUEUE = 'agentops-engine'`                            | + `LEGACY_ENGINE_QUEUE = 'agentops-devcycle'` — `packages/contracts/src/engine-queue.ts`                                                                                                                                                                                                             |
+| Worker process | `packages/worker`                                             | `createWorker()` in `create-worker.ts`, started from `main.ts`                                                                                                                                                                                                                                       |
+| Workflow code  | `packages/workflows`                                          | `devCycle`, `prLanding`, `platform`, `self-heal`, `reconcileAllProjects`, `configSync`, `whiteboxBugHunt`, `platformChat` — after `devCycle` opens a PR it hands the shared PVC worktree to a child `prLanding` run (`patched('shared-pr-landing-v1')`); only the landing child cleans that worktree |
+| Activity code  | `packages/activities` → `packages/backends`, `packages/ports` | agent CLIs, LiteLLM, GitHub/Linear — never imported directly by a workflow, only proxied                                                                                                                                                                                                             |
+| Query / signal | `stateQuery`, `conversationQuery` (`defineQuery`)             | `control`'s `handleGetDevCycleRun` calls `handle.query('state')` for a live snapshot; `stop`/`cancel`/`resume`/`clarify` signals push the other way, no queue involved                                                                                                                               |
 
 ## Bursting into k3s
 

@@ -34,7 +34,8 @@ export function babysitDecision(
   }
 
   const isActionable =
-    (feedback.ciStatus === 'failed' || feedback.unresolvedThreads > 0) && !seenHashes.has(feedbackHash(feedback));
+    (feedback.ciStatus === 'failed' || feedback.unresolvedThreads > 0) &&
+    !seenHashes.has(feedbackHash(feedback));
   if (isActionable) {
     return 'actionable';
   }

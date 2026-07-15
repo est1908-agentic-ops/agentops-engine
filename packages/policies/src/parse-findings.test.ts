@@ -3,7 +3,8 @@ import { parseFindings, findingFingerprint } from './parse-findings';
 
 describe('parseFindings', () => {
   it('parses a FINDINGS: json array', () => {
-    const out = 'blah\nFINDINGS: [{"title":"X","detail":"d","severity":"high","location":"src/a.ts:1"}]\n';
+    const out =
+      'blah\nFINDINGS: [{"title":"X","detail":"d","severity":"high","location":"src/a.ts:1"}]\n';
     expect(parseFindings(out)).toHaveLength(1);
   });
   it('returns [] on unparseable / missing / bad json (never throws)', () => {

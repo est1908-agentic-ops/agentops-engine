@@ -1,4 +1,9 @@
-import { ManagedProjectSchema, UpsertManagedProjectRequestSchema, type ManagedProject, type UpsertManagedProjectRequest } from '@agentops/contracts';
+import {
+  ManagedProjectSchema,
+  UpsertManagedProjectRequestSchema,
+  type ManagedProject,
+  type UpsertManagedProjectRequest,
+} from '@agentops/contracts';
 import { normalizeRepo } from '@agentops/ports';
 import { encryptForManagedProject } from './credential-crypto';
 import type { Queryable } from './postgres-stats-store';
@@ -104,14 +109,19 @@ export class PostgresManagedProjectStore {
 
   /** Lookup by the unique `project` slug -- used by control's POST to 409 on a duplicate project name. */
   async getByProject(project: string): Promise<ManagedProject | null> {
-    const { rows } = await this.db.query('SELECT * FROM managed_projects WHERE project = $1', [project]);
+    const { rows } = await this.db.query('SELECT * FROM managed_projects WHERE project = $1', [
+      project,
+    ]);
     const row = rows[0] as ManagedProjectRow | undefined;
     return row ? rowToManagedProject(row) : null;
   }
 
   /** Lookup by the unique `linear_team_key` -- how the gateway routes a Linear webhook to a project. */
   async getByLinearTeamKey(teamKey: string): Promise<ManagedProject | null> {
-    const { rows } = await this.db.query('SELECT * FROM managed_projects WHERE linear_team_key = $1', [teamKey]);
+    const { rows } = await this.db.query(
+      'SELECT * FROM managed_projects WHERE linear_team_key = $1',
+      [teamKey],
+    );
     const row = rows[0] as ManagedProjectRow | undefined;
     return row ? rowToManagedProject(row) : null;
   }
@@ -148,26 +158,46 @@ export class PostgresManagedProjectStore {
     const trackerType = existingRow?.tracker_type ?? parsed.trackerType;
 
     if (!existingRow && !parsed.token) {
-      throw new Error(`PostgresManagedProjectStore.upsert: a token is required to create a new project ("${parsed.repo}")`);
+      throw new Error(
+        `PostgresManagedProjectStore.upsert: a token is required to create a new project ("${parsed.repo}")`,
+      );
     }
-    if (!existingRow && trackerType === 'linear' && (!parsed.linearTeamKey || !parsed.linearTriggerLabelId || !parsed.linearToken)) {
+    if (
+      !existingRow &&
+      trackerType === 'linear' &&
+      (!parsed.linearTeamKey || !parsed.linearTriggerLabelId || !parsed.linearToken)
+    ) {
       throw new Error(
         `PostgresManagedProjectStore.upsert: linearTeamKey, linearTriggerLabelId, and linearToken are all required to create a new linear-tracked project ("${parsed.repo}")`,
       );
     }
-    if (existingRow && trackerType !== 'linear' && (parsed.linearTeamKey || parsed.linearTriggerLabelId || parsed.linearToken)) {
-      throw new Error(`PostgresManagedProjectStore.upsert: project "${parsed.repo}" is not linear-tracked -- cannot set linear fields on it`);
+    if (
+      existingRow &&
+      trackerType !== 'linear' &&
+      (parsed.linearTeamKey || parsed.linearTriggerLabelId || parsed.linearToken)
+    ) {
+      throw new Error(
+        `PostgresManagedProjectStore.upsert: project "${parsed.repo}" is not linear-tracked -- cannot set linear fields on it`,
+      );
     }
 
-    const encryptedToken = parsed.token ? encryptForManagedProject(publicKey, parsed.token) : existingRow!.encrypted_token;
+    const encryptedToken = parsed.token
+      ? encryptForManagedProject(publicKey, parsed.token)
+      : existingRow!.encrypted_token;
     const config = parsed.config === undefined ? (existingRow?.config ?? null) : parsed.config;
-    const linearTeamKey = trackerType === 'linear' ? parsed.linearTeamKey ?? existingRow?.linear_team_key ?? null : null;
-    const linearTriggerLabelId = trackerType === 'linear' ? parsed.linearTriggerLabelId ?? existingRow?.linear_trigger_label_id ?? null : null;
+    const linearTeamKey =
+      trackerType === 'linear'
+        ? (parsed.linearTeamKey ?? existingRow?.linear_team_key ?? null)
+        : null;
+    const linearTriggerLabelId =
+      trackerType === 'linear'
+        ? (parsed.linearTriggerLabelId ?? existingRow?.linear_trigger_label_id ?? null)
+        : null;
     const encryptedLinearToken =
       trackerType === 'linear'
         ? parsed.linearToken
           ? encryptForManagedProject(publicKey, parsed.linearToken)
-          : existingRow?.encrypted_linear_token ?? null
+          : (existingRow?.encrypted_linear_token ?? null)
         : null;
 
     const { rows } = await this.db.query(
@@ -182,7 +212,16 @@ export class PostgresManagedProjectStore {
          linear_trigger_label_id = EXCLUDED.linear_trigger_label_id,
          updated_at = now()
        RETURNING *`,
-      [parsed.project, parsed.repo, encryptedToken, config, trackerType, encryptedLinearToken, linearTeamKey, linearTriggerLabelId],
+      [
+        parsed.project,
+        parsed.repo,
+        encryptedToken,
+        config,
+        trackerType,
+        encryptedLinearToken,
+        linearTeamKey,
+        linearTriggerLabelId,
+      ],
     );
     return rowToManagedProject(rows[0] as ManagedProjectRow);
   }

@@ -20,9 +20,7 @@ export const DEFAULT_TIERS: Record<string, ModelRef[]> = {
     { backend: 'claude', model: 'opus', effort: 'high' },
     { backend: 'pi', model: 'zai/glm-5.2' },
   ],
-  escalation: [
-    { backend: 'claude', model: 'opus', effort: 'max' },
-  ],
+  escalation: [{ backend: 'claude', model: 'opus', effort: 'max' }],
   // The 'platform' role uses a distinct worker backend entry ('platform', not
   // 'claude') carrying its own ServiceAccount/secrets/pod-label -- see
   // platform.ts.
@@ -37,9 +35,7 @@ export const DEFAULT_TIERS: Record<string, ModelRef[]> = {
   // Zero-cost demo/test tier: routes every stage to the stub backend (always
   // present in buildBackends) so devCycle runs end-to-end without spending
   // tokens. The CLI's seedDemoAgentopsConfig points each stage here.
-  stub: [
-    { backend: 'stub', model: 'stub-v1' },
-  ],
+  stub: [{ backend: 'stub', model: 'stub-v1' }],
 };
 
 // Resolve a tier name to its ordered ModelRef[], applying an optional effort

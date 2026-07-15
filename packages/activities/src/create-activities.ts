@@ -10,7 +10,7 @@ import {
 } from '@agentops/backends';
 import {
   normalizeRepo,
-  parseRef,
+  tryParseRef,
   type Issue,
   type OpenPrRequest,
   type OpenPrResult,
@@ -31,7 +31,14 @@ import type {
   ResolvedProjectEntry,
   RunStats,
 } from '@agentops/contracts';
-import { MergePrResultSchema, parseProjectConfig, PrSnapshotSchema, sha256, type AgentSpec, type AgentsManifest } from '@agentops/contracts';
+import {
+  MergePrResultSchema,
+  parseProjectConfig,
+  PrSnapshotSchema,
+  sha256,
+  type AgentSpec,
+  type AgentsManifest,
+} from '@agentops/contracts';
 import { parseAgentsManifest, BUILTIN_WORKFLOW_INPUTS } from '@agentops/contracts';
 import type { FiledFindingStore } from './filed-finding-store';
 import { cronScheduleSpec, type ScheduleClientLike } from './schedule-ops';
@@ -98,7 +105,9 @@ const RATE_LIMIT_RETRY_DELAY_MS = 60_000;
 export function createActivities(deps: ActivityDependencies) {
   const heartbeat = deps.heartbeat ?? ((details: unknown) => Context.current().heartbeat(details));
   return {
-    async runAgent(req: AgentRunRequest): Promise<AgentRunResult & { promptHash: string; promptSource: string }> {
+    async runAgent(
+      req: AgentRunRequest,
+    ): Promise<AgentRunResult & { promptHash: string; promptSource: string }> {
       // Resolve the model: either via a tier ref (the normal path -- the
       // workflow sends a tier name, the activity resolves it to an ordered
       // ModelRef[] whose [0] is the primary and the rest is the
@@ -126,7 +135,11 @@ export function createActivities(deps: ActivityDependencies) {
         // ModelRef.backend is a fixed enum, but the workflow's concrete-model
         // path may pass a backend name outside it (e.g. 'platform'). The cast
         // is safe: req.backend was set by a workflow that knows its registry.
-        primaryModelRef = { backend: req.backend! as ModelRef['backend'], model: req.model!, effort: req.effort };
+        primaryModelRef = {
+          backend: req.backend! as ModelRef['backend'],
+          model: req.model!,
+          effort: req.effort,
+        };
         chain = [];
       }
 
@@ -295,19 +308,39 @@ export function createActivities(deps: ActivityDependencies) {
     async unlabelIssue(ref: string, label: string): Promise<void> {
       await deps.tracker.removeLabel(ref, label);
     },
-    async createIssue(req: { repo: string; project: string; title: string; body: string; labels: string[]; dedupeFingerprint?: string }): Promise<{ ref: string; url: string; deduped: boolean }> {
+    async createIssue(req: {
+      repo: string;
+      project: string;
+      title: string;
+      body: string;
+      labels: string[];
+      dedupeFingerprint?: string;
+    }): Promise<{ ref: string; url: string; deduped: boolean }> {
       assertProjectOwnsRepo(req.repo, deps.registry);
       const filedFindings = deps.filedFindings;
       if (req.dedupeFingerprint && filedFindings) {
         const existing = await filedFindings.find(req.project, req.dedupeFingerprint);
         if (existing) {
-          await filedFindings.record({ project: req.project, fingerprint: req.dedupeFingerprint, issueRef: existing.issueRef });
+          await filedFindings.record({
+            project: req.project,
+            fingerprint: req.dedupeFingerprint,
+            issueRef: existing.issueRef,
+          });
           return { ref: existing.issueRef, url: '', deduped: true };
         }
       }
-      const created = await deps.tracker.createIssue({ repo: req.repo, title: req.title, body: req.body, labels: req.labels });
+      const created = await deps.tracker.createIssue({
+        repo: req.repo,
+        title: req.title,
+        body: req.body,
+        labels: req.labels,
+      });
       if (req.dedupeFingerprint && filedFindings) {
-        await filedFindings.record({ project: req.project, fingerprint: req.dedupeFingerprint, issueRef: created.ref });
+        await filedFindings.record({
+          project: req.project,
+          fingerprint: req.dedupeFingerprint,
+          issueRef: created.ref,
+        });
       }
       return { ref: created.ref, url: created.url, deduped: false };
     },
@@ -319,14 +352,14 @@ export function createActivities(deps: ActivityDependencies) {
       return deps.scm.getPrFeedback(prRef);
     },
     async getPrSnapshot(prRef: string): Promise<PrSnapshot> {
-      const { owner, repo } = parseRef(prRef);
-      assertProjectOwnsRepo(`${owner}/${repo}`, deps.registry);
+      const parsed = tryParseRef(prRef);
+      if (parsed) assertProjectOwnsRepo(`${parsed.owner}/${parsed.repo}`, deps.registry);
       const snapshot = await deps.scm.getPrSnapshot(prRef);
       return PrSnapshotSchema.parse(snapshot);
     },
     async mergePr(req: MergePrRequest): Promise<MergePrResult> {
-      const { owner, repo } = parseRef(req.prRef);
-      assertProjectOwnsRepo(`${owner}/${repo}`, deps.registry);
+      const parsed = tryParseRef(req.prRef);
+      if (parsed) assertProjectOwnsRepo(`${parsed.owner}/${parsed.repo}`, deps.registry);
       const result = await deps.scm.mergePr(req);
       return MergePrResultSchema.parse(result);
     },
@@ -354,7 +387,13 @@ export function createActivities(deps: ActivityDependencies) {
     }): Promise<PreparedWorkspace> {
       assertProjectOwnsRepo(req.repo, deps.registry);
       try {
-        return await deps.workspaces.prepare(req.taskId, req.repo, req.initCommands, req.headBranch, req.headRef);
+        return await deps.workspaces.prepare(
+          req.taskId,
+          req.repo,
+          req.initCommands,
+          req.headBranch,
+          req.headRef,
+        );
       } catch (err) {
         rethrowWorkspaceError(err);
       }
@@ -407,10 +446,26 @@ export function createActivities(deps: ActivityDependencies) {
       return parseAgentsManifest(parsed, { workflowInputs: BUILTIN_WORKFLOW_INPUTS });
     },
 
-    async listAgentSchedules(project: string): Promise<Array<{ id: string; scheduleSpec: string; workflow: string; paused: boolean; taskQueue?: string }>> {
+    async listAgentSchedules(
+      project: string,
+    ): Promise<
+      Array<{
+        id: string;
+        scheduleSpec: string;
+        workflow: string;
+        paused: boolean;
+        taskQueue?: string;
+      }>
+    > {
       const client = deps.scheduleClient;
       if (!client || !client.list) return [];
-      const out: Array<{ id: string; scheduleSpec: string; workflow: string; paused: boolean; taskQueue?: string }> = [];
+      const out: Array<{
+        id: string;
+        scheduleSpec: string;
+        workflow: string;
+        paused: boolean;
+        taskQueue?: string;
+      }> = [];
       try {
         /* eslint-disable @typescript-eslint/no-explicit-any */
         for await (const s of client.list!()) {
@@ -418,7 +473,12 @@ export function createActivities(deps: ActivityDependencies) {
           const sid = rec.scheduleId as string | undefined;
           if (!sid || !sid.startsWith(`agent:${project}:`)) continue;
           const spec = (rec.schedule as any)?.spec;
-          const scheduleSpec = typeof spec === 'string' ? spec : ((spec as any)?.cronExpressions?.[0] ?? (spec as any)?.cron?.cronString ?? String(spec ?? ''));
+          const scheduleSpec =
+            typeof spec === 'string'
+              ? spec
+              : ((spec as any)?.cronExpressions?.[0] ??
+                (spec as any)?.cron?.cronString ??
+                String(spec ?? ''));
           const workflow = (rec.action as any)?.workflowType ?? 'whiteboxBugHunt';
           const taskQueue = (rec.action as any)?.taskQueue as string | undefined;
           out.push({ id: sid, scheduleSpec, workflow, paused: false, taskQueue });
@@ -466,12 +526,23 @@ export function createActivities(deps: ActivityDependencies) {
         const id = scheduleId(project, spec.name);
         const args = [{ repo, project, ...spec.input }];
         const memo = { project, agentName: spec.name, workflowType: spec.workflow };
-        const searchAttributes = { project: [project], agentName: [spec.name], workflowType: [spec.workflow] };
+        const searchAttributes = {
+          project: [project],
+          agentName: [spec.name],
+          workflowType: [spec.workflow],
+        };
         if (plan.toCreate.some((c) => c.name === spec.name) && client.create) {
           await client.create({
             scheduleId: id,
             spec: cronScheduleSpec(spec.schedule, spec.timezone),
-            action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: actionQueue, memo, searchAttributes },
+            action: {
+              type: 'startWorkflow',
+              workflowType: spec.workflow,
+              args,
+              taskQueue: actionQueue,
+              memo,
+              searchAttributes,
+            },
             memo,
             searchAttributes,
           });
@@ -484,22 +555,40 @@ export function createActivities(deps: ActivityDependencies) {
           // ScheduleUpdateOpts object (action, spec, memo, searchAttributes — no
           // nested schedule wrapper). The updater is best-effort; a single schedule's
           // update failure is caught and doesn't abort the reconcile sweep.
-          await h.update?.(() => ({
-            action: { type: 'startWorkflow', workflowType: spec.workflow, args, taskQueue: actionQueue, memo, searchAttributes },
-            spec: cronScheduleSpec(spec.schedule, spec.timezone),
-            memo,
-            searchAttributes,
-          }))?.catch(() => {});
+          await h
+            .update?.(() => ({
+              action: {
+                type: 'startWorkflow',
+                workflowType: spec.workflow,
+                args,
+                taskQueue: actionQueue,
+                memo,
+                searchAttributes,
+              },
+              spec: cronScheduleSpec(spec.schedule, spec.timezone),
+              memo,
+              searchAttributes,
+            }))
+            ?.catch(() => {});
         }
       }
       for (const id of plan.toPause) {
-        await client.getHandle(id).pause?.().catch(() => {});
+        await client
+          .getHandle(id)
+          .pause?.()
+          .catch(() => {});
       }
       for (const id of plan.toResume) {
-        await client.getHandle(id).unpause?.().catch(() => {});
+        await client
+          .getHandle(id)
+          .unpause?.()
+          .catch(() => {});
       }
       for (const id of plan.toDelete) {
-        await client.getHandle(id).delete?.().catch(() => {});
+        await client
+          .getHandle(id)
+          .delete?.()
+          .catch(() => {});
       }
     },
     /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -519,7 +608,9 @@ export function createActivities(deps: ActivityDependencies) {
           // against the deterministic singleton id instead.
           if (id && agentName && id === scheduleId(project, agentName)) ids.push(id);
         }
-      } catch { /* best effort */ }
+      } catch {
+        /* best effort */
+      }
       return ids;
     },
     async startContinuousAgent(project: string, repo: string, spec: AgentSpec): Promise<void> {
@@ -533,14 +624,22 @@ export function createActivities(deps: ActivityDependencies) {
           taskQueue: resolveAgentQueue(spec, project),
           args: [{ repo, project, ...spec.input }],
           memo,
-          searchAttributes: { project: [project], agentName: [spec.name], workflowType: [spec.workflow] },
+          searchAttributes: {
+            project: [project],
+            agentName: [spec.name],
+            workflowType: [spec.workflow],
+          },
         });
       } catch (err) {
-        if (!(err instanceof Error && err.name === 'WorkflowExecutionAlreadyStartedError')) throw err;
+        if (!(err instanceof Error && err.name === 'WorkflowExecutionAlreadyStartedError'))
+          throw err;
       }
     },
     async terminateContinuousAgent(id: string): Promise<void> {
-      await deps.workflowClient?.getHandle?.(id)?.terminate?.('agent removed from manifest').catch(() => {});
+      await deps.workflowClient
+        ?.getHandle?.(id)
+        ?.terminate?.('agent removed from manifest')
+        .catch(() => {});
     },
     /* eslint-enable @typescript-eslint/no-explicit-any */
 

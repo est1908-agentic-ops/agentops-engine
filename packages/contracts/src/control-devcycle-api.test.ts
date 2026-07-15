@@ -18,7 +18,9 @@ describe('StartDevCycleRequestSchema', () => {
   });
 
   it('rejects an empty prompt and a missing repo', () => {
-    expect(StartDevCycleRequestSchema.safeParse({ repo: 'acme/app', prompt: '' }).success).toBe(false);
+    expect(StartDevCycleRequestSchema.safeParse({ repo: 'acme/app', prompt: '' }).success).toBe(
+      false,
+    );
     expect(StartDevCycleRequestSchema.safeParse({ prompt: 'x' }).success).toBe(false);
   });
 });
@@ -26,9 +28,12 @@ describe('StartDevCycleRequestSchema', () => {
 describe('StartDevCycleResponseSchema', () => {
   it('requires workflowId, runId, and taskId', () => {
     expect(
-      StartDevCycleResponseSchema.parse({ workflowId: 'prompt-demo-t1', runId: 'r1', taskId: 't1' }).taskId,
+      StartDevCycleResponseSchema.parse({ workflowId: 'prompt-demo-t1', runId: 'r1', taskId: 't1' })
+        .taskId,
     ).toBe('t1');
-    expect(StartDevCycleResponseSchema.safeParse({ workflowId: 'w', runId: 'r' }).success).toBe(false);
+    expect(StartDevCycleResponseSchema.safeParse({ workflowId: 'w', runId: 'r' }).success).toBe(
+      false,
+    );
   });
 });
 
@@ -81,6 +86,8 @@ describe('DevCycleTargetsResponseSchema', () => {
   });
 
   it('rejects a target missing its project slug', () => {
-    expect(DevCycleTargetsResponseSchema.safeParse({ targets: [{ repo: 'acme/app' }] }).success).toBe(false);
+    expect(
+      DevCycleTargetsResponseSchema.safeParse({ targets: [{ repo: 'acme/app' }] }).success,
+    ).toBe(false);
   });
 });

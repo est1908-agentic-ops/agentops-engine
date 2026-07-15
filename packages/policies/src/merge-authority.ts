@@ -1,4 +1,8 @@
-import { AUTO_MERGE_DISABLE_LABEL, AUTO_MERGE_LABEL, type AutoMergeMode } from '@agentops/contracts';
+import {
+  AUTO_MERGE_DISABLE_LABEL,
+  AUTO_MERGE_LABEL,
+  type AutoMergeMode,
+} from '@agentops/contracts';
 
 export function decideMergeAuthority(input: {
   mode: AutoMergeMode;

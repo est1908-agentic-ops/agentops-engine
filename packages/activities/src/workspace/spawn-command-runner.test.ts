@@ -47,7 +47,10 @@ describe('SpawnCommandRunner', () => {
 
   it('resolves (never hangs, never throws) when the process itself fails to spawn', async () => {
     const spawnFn = vi.fn(() => {
-      const child = new EventEmitter() as EventEmitter & { stdout: PassThrough; stderr: PassThrough };
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: PassThrough;
+        stderr: PassThrough;
+      };
       child.stdout = new PassThrough();
       child.stderr = new PassThrough();
       queueMicrotask(() => {

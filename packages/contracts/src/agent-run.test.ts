@@ -63,7 +63,9 @@ describe('AgentRunRequestSchema', () => {
       backend: 'claude',
       model: 'claude-sonnet-5',
       image: 'ghcr.io/example/agentops:latest',
-      services: [{ name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } }],
+      services: [
+        { name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } },
+      ],
       promptRef: 'full_verify.md',
       workspaceRef: '/tmp/ws',
       limits: { maxTokens: 1000, timeoutMs: 60_000 },
@@ -102,7 +104,9 @@ describe('BackendRunRequestSchema', () => {
       backend: 'claude',
       model: 'claude-sonnet-5',
       image: 'ghcr.io/example/agentops:latest',
-      services: [{ name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } }],
+      services: [
+        { name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } },
+      ],
       workspaceRef: '/tmp/ws',
       limits: { maxTokens: 1000, timeoutMs: 60_000 },
       prompt: 'run verify',
@@ -130,12 +134,18 @@ describe('AgentRunLimitsSchema', () => {
   });
 
   it('accepts limits with an explicit idleTimeoutMs', () => {
-    const parsed = AgentRunLimitsSchema.parse({ maxTokens: 1000, idleTimeoutMs: 300_000, timeoutMs: 1_800_000 });
+    const parsed = AgentRunLimitsSchema.parse({
+      maxTokens: 1000,
+      idleTimeoutMs: 300_000,
+      timeoutMs: 1_800_000,
+    });
     expect(parsed.idleTimeoutMs).toBe(300_000);
   });
 
   it('rejects a negative idleTimeoutMs', () => {
-    expect(() => AgentRunLimitsSchema.parse({ maxTokens: 1000, idleTimeoutMs: -1, timeoutMs: 60_000 })).toThrow();
+    expect(() =>
+      AgentRunLimitsSchema.parse({ maxTokens: 1000, idleTimeoutMs: -1, timeoutMs: 60_000 }),
+    ).toThrow();
   });
 });
 

@@ -12,7 +12,9 @@ import type { Issue, CreateIssueInput, CreateIssueResult } from './tracker-types
 // expose directly — this is what lets a Tier-2 workflow call `runAgent` with
 // the generic `agent` stage/prompt at all (see docs/authoring-project-workflows.md).
 export interface EngineActivities {
-  runAgent(req: AgentRunRequest): Promise<AgentRunResult & { promptHash: string; promptSource: string }>;
+  runAgent(
+    req: AgentRunRequest,
+  ): Promise<AgentRunResult & { promptHash: string; promptSource: string }>;
   createIssue(req: CreateIssueInput): Promise<CreateIssueResult>;
   getIssue(ref: string): Promise<Issue>;
   commentOnIssue(ref: string, body: string): Promise<void>;

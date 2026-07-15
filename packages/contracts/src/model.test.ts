@@ -14,15 +14,21 @@ describe('ModelRefSchema', () => {
   });
 
   it('accepts an optional effort level', () => {
-    expect(() => ModelRefSchema.parse({ backend: 'claude', model: 'claude-sonnet-5', effort: 'high' })).not.toThrow();
+    expect(() =>
+      ModelRefSchema.parse({ backend: 'claude', model: 'claude-sonnet-5', effort: 'high' }),
+    ).not.toThrow();
   });
 
   it('accepts a ModelRef with no effort at all', () => {
-    expect(() => ModelRefSchema.parse({ backend: 'claude', model: 'claude-sonnet-5' })).not.toThrow();
+    expect(() =>
+      ModelRefSchema.parse({ backend: 'claude', model: 'claude-sonnet-5' }),
+    ).not.toThrow();
   });
 
   it('rejects an invalid effort level', () => {
-    expect(() => ModelRefSchema.parse({ backend: 'claude', model: 'claude-sonnet-5', effort: 'extreme' })).toThrow();
+    expect(() =>
+      ModelRefSchema.parse({ backend: 'claude', model: 'claude-sonnet-5', effort: 'extreme' }),
+    ).toThrow();
   });
 });
 
@@ -58,7 +64,9 @@ describe('TimeoutsSchema', () => {
   });
 
   it('allows a stage entry with both idleTimeoutMs and timeoutMs', () => {
-    const timeouts = TimeoutsSchema.parse({ implement: { idleTimeoutMs: 300_000, timeoutMs: 3_600_000 } });
+    const timeouts = TimeoutsSchema.parse({
+      implement: { idleTimeoutMs: 300_000, timeoutMs: 3_600_000 },
+    });
     expect(timeouts.implement).toEqual({ idleTimeoutMs: 300_000, timeoutMs: 3_600_000 });
   });
 

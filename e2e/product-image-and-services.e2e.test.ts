@@ -16,16 +16,28 @@ describe('DevCycle e2e: project image and services reach every stage agent call'
     const recording: AgentBackend = {
       async run(req) {
         captured.push(req);
-        if (req.stage === 'full_verify') return { output: 'FULL: PASS', tokensIn: 1, tokensOut: 1, wallMs: 10 };
-        if (req.stage === 'review') return { output: 'VERDICT: PASS', tokensIn: 1, tokensOut: 1, wallMs: 10 };
-        return { output: 'diff --git a/widget.ts b/widget.ts', tokensIn: 1, tokensOut: 1, wallMs: 10 };
+        if (req.stage === 'full_verify')
+          return { output: 'FULL: PASS', tokensIn: 1, tokensOut: 1, wallMs: 10 };
+        if (req.stage === 'review')
+          return { output: 'VERDICT: PASS', tokensIn: 1, tokensOut: 1, wallMs: 10 };
+        return {
+          output: 'diff --git a/widget.ts b/widget.ts',
+          tokensIn: 1,
+          tokensOut: 1,
+          wallMs: 10,
+        };
       },
     };
 
     testEnv = await buildTestEnv({ extraBackends: { recording } });
     const { env, worker, tracker, scm, taskQueue } = testEnv;
 
-    tracker.seedIssue({ ref: 'issue-1', title: 'Add widget', body: 'Please add a widget', labels: [] });
+    tracker.seedIssue({
+      ref: 'issue-1',
+      title: 'Add widget',
+      body: 'Please add a widget',
+      labels: [],
+    });
     scm.scriptFeedback('pr-1', [{ ciStatus: 'green', unresolvedThreads: 0, comments: [] }]);
 
     const recordingTier = [{ backend: 'recording', model: 'recording-v1' }];
@@ -37,7 +49,9 @@ describe('DevCycle e2e: project image and services reach every stage agent call'
       goal: 'Add a widget',
       config: {
         image: 'ghcr.io/example/agentops:latest',
-        services: [{ name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } }],
+        services: [
+          { name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } },
+        ],
         fastVerifyCommands: [],
         fullVerifyCommands: [],
         stages: {},
@@ -47,7 +61,12 @@ describe('DevCycle e2e: project image and services reach every stage agent call'
           full_verify: { tier: 'recording' },
           review: { tier: 'recording' },
         },
-        brakes: { maxImplementAttempts: 3, maxIterations: 10, maxTokens: 1_000_000, maxBabysitRounds: 5 },
+        brakes: {
+          maxImplementAttempts: 3,
+          maxIterations: 10,
+          maxTokens: 1_000_000,
+          maxBabysitRounds: 5,
+        },
       },
     };
 

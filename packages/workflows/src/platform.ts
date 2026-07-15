@@ -50,7 +50,11 @@ export async function platform(input: PlatformAgentInput): Promise<PlatformAgent
           hintRepos: (input.hintRepos ?? []).join(', ') || '(none provided)',
         },
         workspaceRef,
-        limits: { maxTokens: PLATFORM_MAX_TOKENS, idleTimeoutMs: PLATFORM_IDLE_TIMEOUT_MS, timeoutMs: PLATFORM_TIMEOUT_MS },
+        limits: {
+          maxTokens: PLATFORM_MAX_TOKENS,
+          idleTimeoutMs: PLATFORM_IDLE_TIMEOUT_MS,
+          timeoutMs: PLATFORM_TIMEOUT_MS,
+        },
       });
       await activities.recordRunStats({
         taskId,

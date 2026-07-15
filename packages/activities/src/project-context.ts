@@ -2,7 +2,9 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { ApplicationFailure } from '@temporalio/common';
 import { normalizeRepo } from '@agentops/ports';
 
-export interface ProjectCallContext { project?: string }
+export interface ProjectCallContext {
+  project?: string;
+}
 
 // Populated by the engine worker's activity-inbound interceptor from the
 // PROJECT_HEADER_KEY header for the duration of each activity execution.
@@ -18,7 +20,10 @@ export function getCallerProject(): string | undefined {
 // it, so downstream fails naturally; no need to reject here. Only a *mismatch*
 // between a stamped project and a registered repo's owner is an authz failure
 // (this catches accidental cross-project action). SP2 design §7.2/§7.3.
-export function assertProjectOwnsRepo(repo: string, registry: { project: string; repo: string }[]): void {
+export function assertProjectOwnsRepo(
+  repo: string,
+  registry: { project: string; repo: string }[],
+): void {
   const claimed = getCallerProject();
   if (!claimed) return;
   const target = normalizeRepo(repo);

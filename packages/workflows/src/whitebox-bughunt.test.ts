@@ -1,29 +1,38 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { TaskInput } from '@agentops/contracts';
 
-const { resolveRepoConfig, prepareWorkspace, cleanupWorkspace, recordRunStats, createIssue, runAgent } = vi.hoisted(
-  () => ({
-    resolveRepoConfig: vi.fn(),
-    prepareWorkspace: vi.fn().mockResolvedValue({ workspaceRef: 'ws', branch: 'br', baseBranch: 'main' }),
-    cleanupWorkspace: vi.fn().mockResolvedValue(undefined),
-    recordRunStats: vi.fn().mockResolvedValue(undefined),
-    createIssue: vi.fn().mockResolvedValue({ ref: 'o/r#1', url: 'http://issue', deduped: false }),
-    runAgent: vi.fn().mockResolvedValue({
-      output: 'no findings',
-      tokensIn: 1,
-      tokensOut: 1,
-      wallMs: 1,
-      promptHash: 'h',
-      promptSource: 's',
-    }),
+const {
+  resolveRepoConfig,
+  prepareWorkspace,
+  cleanupWorkspace,
+  recordRunStats,
+  createIssue,
+  runAgent,
+} = vi.hoisted(() => ({
+  resolveRepoConfig: vi.fn(),
+  prepareWorkspace: vi
+    .fn()
+    .mockResolvedValue({ workspaceRef: 'ws', branch: 'br', baseBranch: 'main' }),
+  cleanupWorkspace: vi.fn().mockResolvedValue(undefined),
+  recordRunStats: vi.fn().mockResolvedValue(undefined),
+  createIssue: vi.fn().mockResolvedValue({ ref: 'o/r#1', url: 'http://issue', deduped: false }),
+  runAgent: vi.fn().mockResolvedValue({
+    output: 'no findings',
+    tokensIn: 1,
+    tokensOut: 1,
+    wallMs: 1,
+    promptHash: 'h',
+    promptSource: 's',
   }),
-);
+}));
 
 const workflowId = 'agent:Artem private agents:bughunt-test-workflow-2026-07-13T12:00:00Z';
 
 vi.mock('@temporalio/workflow', () => ({
   proxyActivities: (opts: { heartbeatTimeout?: string }) =>
-    opts.heartbeatTimeout ? { runAgent } : { resolveRepoConfig, prepareWorkspace, cleanupWorkspace, recordRunStats, createIssue },
+    opts.heartbeatTimeout
+      ? { runAgent }
+      : { resolveRepoConfig, prepareWorkspace, cleanupWorkspace, recordRunStats, createIssue },
   workflowInfo: () => ({ workflowId, workflowType: 'whiteboxBugHunt' }),
 }));
 
@@ -53,7 +62,11 @@ describe('whiteboxBugHunt', () => {
   });
 
   it('slugifies the schedule-derived workflowId before using it as taskId (git branch / workspace dir safety)', async () => {
-    resolveRepoConfig.mockResolvedValue({ registered: true, project: 'Artem private agents', config });
+    resolveRepoConfig.mockResolvedValue({
+      registered: true,
+      project: 'Artem private agents',
+      config,
+    });
 
     await whiteboxBugHunt({ repo: 'est1908/agents' });
 
@@ -68,7 +81,11 @@ describe('whiteboxBugHunt', () => {
   });
 
   it('runs the bughunt agent and files a finding', async () => {
-    resolveRepoConfig.mockResolvedValue({ registered: true, project: 'Artem private agents', config });
+    resolveRepoConfig.mockResolvedValue({
+      registered: true,
+      project: 'Artem private agents',
+      config,
+    });
     runAgent.mockResolvedValueOnce({
       output: 'FINDINGS: [{"title":"t","detail":"d","severity":"low","location":"x"}]',
       tokensIn: 1,
@@ -81,7 +98,9 @@ describe('whiteboxBugHunt', () => {
     const result = await whiteboxBugHunt({ repo: 'est1908/agents' });
 
     expect(createIssue).toHaveBeenCalledTimes(1);
-    expect(createIssue.mock.calls[0][0].labels).toEqual(expect.arrayContaining(['agentops', 'bug', 'whitebox']));
+    expect(createIssue.mock.calls[0][0].labels).toEqual(
+      expect.arrayContaining(['agentops', 'bug', 'whitebox']),
+    );
     expect(cleanupWorkspace).toHaveBeenCalledWith('ws', 'est1908/agents');
     expect(result.filed).toBe(1);
     expect(result.deduped).toBe(0);

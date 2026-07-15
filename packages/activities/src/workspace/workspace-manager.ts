@@ -21,7 +21,13 @@ export interface PreparedWorkspace {
 }
 
 export interface Workspaces {
-  prepare(taskId: string, repo: string, initCommands?: string[], headBranch?: string, headRef?: string): Promise<PreparedWorkspace>;
+  prepare(
+    taskId: string,
+    repo: string,
+    initCommands?: string[],
+    headBranch?: string,
+    headRef?: string,
+  ): Promise<PreparedWorkspace>;
   cleanup(workspaceRef: string, repo: string): Promise<void>;
   prepareScratch(taskId: string): Promise<{ workspaceRef: string }>;
   cleanupScratch(workspaceRef: string): Promise<void>;
@@ -66,7 +72,13 @@ export class WorkspaceManager implements Workspaces {
     this.commandRunner = opts.commandRunner ?? new SpawnCommandRunner();
   }
 
-  async prepare(taskId: string, repo: string, initCommands?: string[], headBranch?: string, headRef?: string): Promise<PreparedWorkspace> {
+  async prepare(
+    taskId: string,
+    repo: string,
+    initCommands?: string[],
+    headBranch?: string,
+    headRef?: string,
+  ): Promise<PreparedWorkspace> {
     const git = this.resolveGit(repo);
     await mkdir(this.cacheDir, { recursive: true });
     await mkdir(this.workspacesDir, { recursive: true });
@@ -83,12 +95,14 @@ export class WorkspaceManager implements Workspaces {
     if (headRef) {
       const fetchResult = await git.run(['fetch', 'origin', headRef], { cwd: cachePath });
       if (fetchResult.exitCode !== 0) {
-        throw new WorkspaceError(`git fetch origin ${headRef} failed for ${repo}: ${fetchResult.stderr}`, fetchResult.spawnFailed === true);
+        throw new WorkspaceError(
+          `git fetch origin ${headRef} failed for ${repo}: ${fetchResult.stderr}`,
+          fetchResult.spawnFailed === true,
+        );
       }
-      addResult = await git.run(
-        ['worktree', 'add', workspacePath, '-B', branch, 'FETCH_HEAD'],
-        { cwd: cachePath },
-      );
+      addResult = await git.run(['worktree', 'add', workspacePath, '-B', branch, 'FETCH_HEAD'], {
+        cwd: cachePath,
+      });
     } else if (headBranch) {
       await git.run(['fetch', 'origin', branch], { cwd: cachePath });
       addResult = await git.run(
@@ -108,7 +122,10 @@ export class WorkspaceManager implements Workspaces {
       );
     }
     if (addResult.exitCode !== 0) {
-      throw new WorkspaceError(`git worktree add failed for ${repo}: ${addResult.stderr}`, addResult.spawnFailed === true);
+      throw new WorkspaceError(
+        `git worktree add failed for ${repo}: ${addResult.stderr}`,
+        addResult.spawnFailed === true,
+      );
     }
 
     for (const command of initCommands ?? []) {
@@ -155,7 +172,10 @@ export class WorkspaceManager implements Workspaces {
     // Must be a genuine subdirectory of scratchRoot, not scratchRoot itself
     // (which would wipe every project's scratch workspaces in one call).
     if (!target.startsWith(scratchRoot) || target === scratchRoot) {
-      throw new WorkspaceError(`cleanupScratch: refusing to remove path outside scratch root: ${workspaceRef}`, true);
+      throw new WorkspaceError(
+        `cleanupScratch: refusing to remove path outside scratch root: ${workspaceRef}`,
+        true,
+      );
     }
     await rm(resolve(workspaceRef), { recursive: true, force: true });
   }
@@ -170,7 +190,10 @@ export class WorkspaceManager implements Workspaces {
       cwd: cachePath,
     });
     if (result.exitCode !== 0) {
-      throw new WorkspaceError(`git worktree remove failed for ${workspaceRef}: ${result.stderr}`, result.spawnFailed === true);
+      throw new WorkspaceError(
+        `git worktree remove failed for ${workspaceRef}: ${result.stderr}`,
+        result.spawnFailed === true,
+      );
     }
   }
 
@@ -260,7 +283,9 @@ export class WorkspaceManager implements Workspaces {
     branch: string,
   ): Promise<void> {
     if (existsSync(workspacePath)) {
-      const removeResult = await git.run(['worktree', 'remove', workspacePath, '--force'], { cwd: cachePath });
+      const removeResult = await git.run(['worktree', 'remove', workspacePath, '--force'], {
+        cwd: cachePath,
+      });
       if (removeResult.exitCode !== 0) {
         await rm(workspacePath, { recursive: true, force: true });
         await git.run(['worktree', 'prune'], { cwd: cachePath });
@@ -273,27 +298,42 @@ export class WorkspaceManager implements Workspaces {
     }
   }
 
-  private async ensureBaseClone(git: GitCommandRunner, cachePath: string, repo: string): Promise<void> {
+  private async ensureBaseClone(
+    git: GitCommandRunner,
+    cachePath: string,
+    repo: string,
+  ): Promise<void> {
     // Check with a plain fs call, not a git invocation with `cwd: cachePath` — spawning
     // git with a cwd that doesn't exist yet (the "not cloned yet" case, which is exactly
     // what we're distinguishing here) fails at the OS level, not as a normal git error.
     if (existsSync(cachePath)) {
       const fetchResult = await git.run(['fetch', 'origin'], { cwd: cachePath });
       if (fetchResult.exitCode !== 0) {
-        throw new WorkspaceError(`git fetch failed for ${repo}: ${fetchResult.stderr}`, fetchResult.spawnFailed === true);
+        throw new WorkspaceError(
+          `git fetch failed for ${repo}: ${fetchResult.stderr}`,
+          fetchResult.spawnFailed === true,
+        );
       }
       return;
     }
-    const cloneResult = await git.run(['clone', this.cloneUrl(repo), cachePath], { cwd: this.cacheDir });
+    const cloneResult = await git.run(['clone', this.cloneUrl(repo), cachePath], {
+      cwd: this.cacheDir,
+    });
     if (cloneResult.exitCode !== 0) {
-      throw new WorkspaceError(`git clone failed for ${repo}: ${cloneResult.stderr}`, cloneResult.spawnFailed === true);
+      throw new WorkspaceError(
+        `git clone failed for ${repo}: ${cloneResult.stderr}`,
+        cloneResult.spawnFailed === true,
+      );
     }
   }
 
   private async detectDefaultBranch(git: GitCommandRunner, cachePath: string): Promise<string> {
     const result = await git.run(['symbolic-ref', 'refs/remotes/origin/HEAD'], { cwd: cachePath });
     if (result.exitCode !== 0) {
-      throw new WorkspaceError(`could not detect default branch in ${cachePath}: ${result.stderr}`, result.spawnFailed === true);
+      throw new WorkspaceError(
+        `could not detect default branch in ${cachePath}: ${result.stderr}`,
+        result.spawnFailed === true,
+      );
     }
     const ref = result.stdout.trim();
     const branch = ref.split('/').pop();

@@ -1,6 +1,7 @@
 import { parseRef } from './github/parse-ref';
 
-export type ParsedTrackerRef = { kind: 'github'; repo: string } | { kind: 'linear'; teamKey: string; identifier: string };
+export type ParsedTrackerRef =
+  { kind: 'github'; repo: string } | { kind: 'linear'; teamKey: string; identifier: string };
 
 const LINEAR_REF_PREFIX = 'linear:';
 

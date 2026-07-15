@@ -4,16 +4,16 @@ export interface PrReviewEvent {
   prNumber: number;
   reviewBody: string;
   action: string;
-  headBranch?: string;  // the branch the PR head is on, for repair workspace
+  headBranch?: string; // the branch the PR head is on, for repair workspace
   hasAgentopsLabel: boolean;
 }
 
 interface GithubPrReviewPayload {
   action?: string;
   review?: { body?: string };
-  pull_request?: { 
-    number?: number; 
-    labels?: Array<{ name?: string }>; 
+  pull_request?: {
+    number?: number;
+    labels?: Array<{ name?: string }>;
     head?: { ref?: string };
   };
   repository?: { full_name?: string };
@@ -34,7 +34,7 @@ export function parsePrReviewEvent(
   const prNumber = body.pull_request?.number;
   const reviewBody = body.review?.body ?? '';
   const headBranch = body.pull_request?.head?.ref;
-  const hasAgentopsLabel = !!(body.pull_request?.labels?.some(l => l.name === 'agentops'));
+  const hasAgentopsLabel = !!body.pull_request?.labels?.some((l) => l.name === 'agentops');
   if (!repo || prNumber === undefined) {
     return null;
   }
