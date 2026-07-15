@@ -16,8 +16,10 @@ not bypass repository protections.
 
 ## Vision alignment
 
-This design aligns with `docs/software-lifecycle-vision.md` and does not require
-the vision to change.
+This design deliberately extends `docs/software-lifecycle-vision.md`. The
+vision is updated in the same change to make PR landing a first-class SLDS
+workflow and to define the policy-controlled transition from merge-ready to
+merged.
 
 - It implements the existing principle that project policy determines merge
   authority.
@@ -25,6 +27,8 @@ the vision to change.
   verification, review, repair, and babysitting.
 - It replaces parallel landing behavior with one reusable workflow.
 - It keeps autonomous work bounded by brakes and permits a manual outcome.
+- It adds landing as the common terminal lifecycle for AgentOps-created and
+  explicitly enrolled PRs.
 
 ## Goals
 
@@ -43,7 +47,8 @@ the vision to change.
   provider permissions.
 - Automatically enrolling every externally created PR in a repository.
 - Configuring a merge strategy in `agentops.json`.
-- Changing the top-level SLDS lifecycle or its human-authority boundary.
+- Changing the SLDS human-authority boundary: project policy continues to grant
+  or withhold merge authority.
 
 ## Project policy
 
@@ -340,5 +345,5 @@ activities, ports, gateway behavior, and Temporal workflows.
   enrollment and label changes.
 - Update workflow and Temporal architecture documentation for `prLanding` and
   worktree ownership transfer.
-- Leave `docs/software-lifecycle-vision.md` unchanged because this design
-  implements, rather than changes, its lifecycle and authority model.
+- Update `docs/software-lifecycle-vision.md` in the same change to define
+  `prLanding` and policy-controlled merging as part of the target SLDS.
