@@ -641,7 +641,12 @@ describe('GithubScmPort — mergePr', () => {
   it('maps 405 to already-merged when snapshot shows the expected head landed', async () => {
     const client = fakeClient();
     (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({
-      data: defaultPrData({ merged: true, state: 'closed', merge_commit_sha: 'abc123' }),
+      data: defaultPrData({
+        merged: true,
+        state: 'closed',
+        head: { sha: 'abc123', ref: 'feature/x', repo: { full_name: 'octocat/hello-world-fork' } },
+        merge_commit_sha: 'merge456',
+      }),
     });
     (client.rest.checks.listForRef as ReturnType<typeof vi.fn>).mockResolvedValue({
       data: { total_count: 0, check_runs: [] },

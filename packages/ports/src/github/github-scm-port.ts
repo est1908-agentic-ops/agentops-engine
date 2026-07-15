@@ -223,7 +223,7 @@ export class GithubScmPort implements ScmPort {
         return { kind: 'forbidden', reason: err instanceof Error ? err.message : 'forbidden' };
       if (status === 405) {
         const snapshot = await this.getPrSnapshot(req.prRef);
-        if (snapshot.state === 'merged' && snapshot.mergedHeadSha === req.expectedHeadSha) {
+        if (snapshot.state === 'merged' && snapshot.headSha === req.expectedHeadSha) {
           return { kind: 'already-merged', headSha: req.expectedHeadSha };
         }
         return {

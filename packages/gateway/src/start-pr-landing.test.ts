@@ -54,6 +54,29 @@ describe('startOrSignalPrLanding', () => {
     expect(signal).toHaveBeenCalledOnce();
   });
 
+  it('managed enroll events are signal-only so devCycle can startChild with workspace handoff', async () => {
+    const start = vi.fn();
+    const signal = vi.fn().mockResolvedValue(undefined);
+    const client = { workflow: { start, getHandle: vi.fn().mockReturnValue({ signal }) } } as never;
+    const result = await startOrSignalPrLanding(
+      client,
+      'q',
+      'p',
+      {
+        kind: 'enroll',
+        repo: 'o/r',
+        prRef: 'o/r#7',
+        headBranch: 'feature/x',
+        labels: ['automerge', 'agentops:managed'],
+        managed: true,
+      },
+      config,
+    );
+    expect(result.started).toBe(false);
+    expect(start).not.toHaveBeenCalled();
+    expect(signal).toHaveBeenCalledOnce();
+  });
+
   it('wake events are signal-only and pass agentCreated false only on enroll starts', async () => {
     const start = vi.fn();
     const signal = vi.fn().mockResolvedValue(undefined);

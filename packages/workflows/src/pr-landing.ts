@@ -282,7 +282,7 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
       if (decision === 'merge_ready') {
         const fresh = await activities.getPrSnapshot(input.prRef);
         state.currentHeadSha = fresh.headSha;
-        if (fresh.state === 'merged' && fresh.mergedHeadSha === state.validatedHeadSha) {
+        if (fresh.state === 'merged') {
           state.phase = 'done';
           state.outcome = 'merged';
           return state;

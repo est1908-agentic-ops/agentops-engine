@@ -177,6 +177,34 @@ describe('prLanding', () => {
     expect(result.outcome).toBe('merge-ready-manual');
   });
 
+  it('recognizes externally merged PRs when merge commit differs from head', async () => {
+    vi.mocked(getPrSnapshot)
+      .mockResolvedValueOnce(greenSnapshot({ labels: ['automerge'] }))
+      .mockResolvedValueOnce(greenSnapshot({ labels: ['automerge'] }))
+      .mockResolvedValueOnce(greenSnapshot({ labels: ['automerge'] }))
+      .mockResolvedValueOnce(
+        greenSnapshot({
+          state: 'merged',
+          headSha: 'abc',
+          mergedHeadSha: 'merge-commit-def',
+          labels: ['automerge'],
+        }),
+      );
+
+    const result = await prLanding({
+      taskId: 'landing-o-r-11',
+      project: 'p',
+      repo: 'o/r',
+      prRef: 'o/r#11',
+      agentCreated: true,
+      workspace: { workspaceRef: '/ws/t', branch: 'agentops/t', validatedHeadSha: 'abc' },
+      config: { ...baseConfig, autoMerge: 'disabled' },
+    });
+
+    expect(mergePr).not.toHaveBeenCalled();
+    expect(result.outcome).toBe('merged');
+  });
+
   it('blocks on forbidden merge and still cleans up once', async () => {
     vi.mocked(mergePr).mockResolvedValue({ kind: 'forbidden', reason: 'nope' });
     const result = await prLanding({

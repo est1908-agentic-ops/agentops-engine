@@ -19,7 +19,7 @@ export async function startOrSignalPrLanding(
 ): Promise<StartPrLandingResult> {
   const workflowId = prLandingWorkflowId(event.prRef);
 
-  if (event.kind === 'wake') {
+  if (event.kind === 'wake' || (event.kind === 'enroll' && event.managed)) {
     try {
       await client.workflow.getHandle(workflowId).signal(prLandingWakeSignal);
     } catch {
