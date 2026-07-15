@@ -53,7 +53,7 @@ export async function handleStartDevCycleRun(deps: ControlDeps, req: IncomingMes
       workflowId,
       // No config on purpose: the workflow resolves it on the worker via
       // resolveRepoConfig -- control never holds repo credentials
-      // (prompt-devcycle design §3).
+      // so the workflow resolves the registered project configuration.
       args: [{ taskId, project, repo, goal: prompt }],
       memo: { prompt },
     });

@@ -122,7 +122,7 @@ export async function listRepos(): Promise<string[]> {
   return parsed.repos;
 }
 
-// --- devCycle runs (prompt-devcycle design §6/§8) ---
+// --- devCycle runs ---
 
 export async function startDevCycleRun(input: StartDevCycleRequest): Promise<StartDevCycleResponse> {
   const res = await fetch('/api/devcycle/runs', {

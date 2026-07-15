@@ -77,4 +77,5 @@ The engine worker **auto-registers** these in its namespace at startup (idempote
 - Tier 2 (project-authored workflows via `@agentic-ops/engine-sdk` + a per-project worker) is documented in [authoring-project-workflows.md](authoring-project-workflows.md) and [project-worker-deployment.md](project-worker-deployment.md).
 - Automatic issue → `devCycle` "fix" wiring for auto-created bug issues (Gateway `issues.opened` + an `agent:fix` label) is planned but not yet implemented.
 
-See the design spec `docs/superpowers/specs/2026-07-12-custom-agent-workflows-design.md` for rationale and the full capability ladder.
+See [Authoring project workflows](authoring-project-workflows.md) for the full
+capability ladder.

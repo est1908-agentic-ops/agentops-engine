@@ -2,8 +2,8 @@
 
 Status: draft v2 · 2026-07-12 · Owner: Artem
 Tracks: follow-on to [#31](https://github.com/est1908-agentic-ops/agentops-engine/issues/31) (SP2/SP-4 line) · Parent: [#30](https://github.com/est1908-agentic-ops/agentops-engine/issues/30)
-Builds on: SP2 (`docs/superpowers/specs/2026-07-12-custom-agent-workflows-sp2-design.md`, shipped in #37) — the per-project worker mechanism, `ENGINE_QUEUE`, `AgentSpec.taskQueue`, identity binding; and the managed project registry (`docs/superpowers/specs/2026-07-08-managed-project-registry-design.md`, shipped) — the `managed_projects` DB table (repo + credential + config) and the `CONTROL_CRUD_TOKEN`-gated control API.
-Design authority: this doc governs *how a Tier-2 worker is deployed and onboarded*. It does not change the Tier ladder, the delegation/authorization model (SP2 §7), or the Temporal topology — it fills the gap SP2 left open (§15 named the *mechanism*; onboarding *ergonomics* were unaddressed).
+Builds on: the per-project worker mechanism documented in `docs/authoring-project-workflows.md` and the managed project registry (`docs/superpowers/specs/2026-07-08-managed-project-registry-design.md`, shipped) — the `managed_projects` DB table (repo + credential + config) and the `CONTROL_CRUD_TOKEN`-gated control API.
+Historical scope: this note records how a Tier-2 worker was designed to be deployed and onboarded. The current lifecycle authority is `docs/software-lifecycle-vision.md`.
 
 > **v2 change:** the worker spec is **read from the project repo** (a `worker` block in `agents.json`) through the per-project token `managed_projects` already stores — **not** stored in new `managed_projects` columns. This keeps the single source of truth in the git-sourced, PR-reviewed manifest (consistent with the whole custom-agent-workflows model) and needs **no DB schema change**. v1's DB-column approach is superseded.
 >

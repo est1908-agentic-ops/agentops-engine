@@ -1,6 +1,6 @@
 # Working in agentops-engine
 
-Rules for any agent (or human) implementing in this repo. Design lives as one dated spec per feature in [docs/superpowers/specs/](docs/superpowers/specs/) — read the spec(s) relevant to your change before non-trivial work.
+Rules for any agent (or human) implementing in this repo. The target development model lives in [docs/software-lifecycle-vision.md](docs/software-lifecycle-vision.md). Before proposing, designing, or implementing any workflow change, read that document first and state whether the change aligns with it or requires the vision to change. Dated notes in `docs/superpowers/specs/` are implementation history, not product authority.
 
 ## Stack
 
@@ -21,10 +21,11 @@ Rules for any agent (or human) implementing in this repo. Design lives as one da
 ## Conventions
 
 - Conventional commits (`feat:`, `fix:`, `docs:`, `test:`, `refactor:`, `chore:`).
-- One package per concern; do not create new top-level packages without a design spec in `docs/superpowers/specs/` in the same PR.
+- Workflow changes start with `docs/software-lifecycle-vision.md`: preserve its lifecycle and principles, or update it deliberately before changing behavior.
+- One package per concern; do not create new top-level packages without documenting the design in the same PR.
 - Prompts live in `packages/prompts` as versioned files, never inline strings in code.
 - Stage and status names are fixed vocabulary (`StageSchema`/`TaskStatusSchema` in `packages/contracts`) — do not invent synonyms; adding one is a deliberate contract change.
-- Docs: the per-feature specs in `docs/superpowers/specs/` are the design authority. If implementation deviates from a spec, update that spec in the same PR with the reason.
+- Docs: `docs/software-lifecycle-vision.md` is the authority for the development lifecycle. Feature-level design notes may add implementation detail but may not contradict it. Update the vision in the same PR when the target lifecycle changes.
 
 ## Definition of done (any task)
 
