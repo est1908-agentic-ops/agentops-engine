@@ -43,6 +43,8 @@ function isBudgetExceededFailure(err: unknown): boolean {
   );
 }
 
+// Deprecated for new starts: gateway enrollment routes to prLanding instead.
+// Kept replayable for in-flight Temporal histories — do not rewrite this body.
 export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<DevCycleState> {
   const state: DevCycleState = {
     taskId: input.taskId,
