@@ -30,8 +30,7 @@ export const BlockReasonSchema = z.enum([
   'hook-required-failed',
   // A prompt-started devCycle (no pre-resolved config) whose repo isn't in
   // the worker's merged static+managed registry -- set together with
-  // status 'failed' as a fail-fast, not a resumable block (prompt-devcycle
-  // design §5/§7).
+  // status 'failed' as a fail-fast, not a resumable block.
   'unregistered-repo',
 ]);
 export type BlockReason = z.infer<typeof BlockReasonSchema>;

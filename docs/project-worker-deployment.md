@@ -2,7 +2,7 @@
 
 A Tier-2 project (a custom Temporal workflow shape, e.g. a Rollbar monitor) runs
 in its **own worker** that polls its own task queue and delegates privileged work
-back to the engine (see `docs/superpowers/specs/2026-07-12-custom-agent-workflows-sp2-design.md`).
+back to the engine (see [Authoring project workflows](authoring-project-workflows.md)).
 This doc covers **deploying** that worker.
 
 ## Model (why there's no per-project ArgoCD Application to hand-write)

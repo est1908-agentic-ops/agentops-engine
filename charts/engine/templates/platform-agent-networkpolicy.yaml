@@ -1,7 +1,7 @@
 # Standard Kubernetes NetworkPolicy can't match by hostname/FQDN, only by
 # port and podSelector/namespaceSelector/ipBlock -- and Temporal, Grafana,
 # forge and provider endpoints are all reached over HTTPS from this
-# role's Job today (see 2026-07-07-platform-agent-design.md §6), some through
+# role's Job today, some through
 # the same public-style ingress hostnames debug-devcycle-issue already uses.
 # Port-scoping to DNS + HTTPS is the practical equivalent of "only these
 # services" without assuming a CNI capable of FQDN-based policy; revisit with

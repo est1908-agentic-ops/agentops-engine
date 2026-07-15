@@ -43,12 +43,14 @@ brakes; and dogfooded — this system is built and maintained by the agents it h
 - [docs/temporal-architecture.md](docs/temporal-architecture.md) — how Temporal
   workflows, task queues, and workers map onto this repo's packages, and how the
   worker bursts agent runs out into disposable k8s Jobs.
+- [docs/software-lifecycle-vision.md](docs/software-lifecycle-vision.md) — the
+  target development lifecycle and the authority for future workflow changes.
 - `packages/{contracts,ports,backends,policies,workflows,activities,worker,cli,gateway,control,ui,prompts,engine-sdk}` —
   workflows are deterministic policy; activities are all I/O; ports isolate
   forge/tracker SDKs; backends isolate agent CLIs. Working rules in
   [AGENTS.md](AGENTS.md).
-- Per-feature design specs (written by the agents themselves as part of each
-  task) live in [docs/superpowers/specs/](docs/superpowers/specs/).
+- Historical feature design notes live in
+  [docs/superpowers/specs/](docs/superpowers/specs/).
 
 ## Adding a repo
 
@@ -85,9 +87,10 @@ helm template engine charts/engine --namespace <namespace>
 
 | Doc                                                                        | What it covers                                                             |
 | -------------------------------------------------------------------------- | -------------------------------------------------------------------------- |
+| [docs/software-lifecycle-vision.md](docs/software-lifecycle-vision.md)     | Target lifecycle and authority for future workflow changes                |
 | [docs/temporal-architecture.md](docs/temporal-architecture.md)             | Durable-execution architecture, package map, k8s Job bursting              |
 | [docs/authoring-project-workflows.md](docs/authoring-project-workflows.md) | Writing custom Tier-2 workflows with `@agentic-ops/engine-sdk`             |
 | [docs/project-worker-deployment.md](docs/project-worker-deployment.md)     | Deploying a Tier-2 project worker                                          |
 | [docs/runbooks/](docs/runbooks/)                                           | Operational runbooks                                                       |
-| [docs/superpowers/specs/](docs/superpowers/specs/)                         | Per-feature design specs, written by the agents as they built each feature |
+| [docs/superpowers/specs/](docs/superpowers/specs/)                         | Historical feature design notes                                            |
 | [docs/project-worker/](docs/project-worker/)                               | Reference Tier-2 project worker (Rollbar monitor)                          |
