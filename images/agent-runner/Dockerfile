@@ -12,8 +12,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates curl git openssl \
     && rm -rf /var/lib/apt/lists/*
 
-# kubectl for the platform role's read-only cluster-state investigation (see
-# 2026-07-07-platform-agent-design.md §6) -- harmless for every other role's
+# kubectl for the platform role's read-only cluster-state investigation --
+# harmless for every other role's
 # Jobs, which run under the dev-agents namespace's `default` ServiceAccount
 # with no RBAC bindings: the binary is present but useless without a bound
 # Role/ClusterRole, so this doesn't change what a devCycle Job can reach.
@@ -42,7 +42,7 @@ RUN set -e; \
 # Claude Code reads ~/.claude/skills/; pi reads ~/.agents/skills/ (and
 # ~/.pi/agent/skills/, .agents/skills/, .pi/skills/) — the two CLIs share no
 # discovery path, so every skill needed by both backends is copied to both
-# locations. See 2026-07-08-devcycle-stage-skills-design.md.
+# locations so both supported CLIs discover the same stage guidance.
 COPY --chown=1000:1000 skills/platform-ops      /home/node/.claude/skills/platform-ops
 COPY --chown=1000:1000 skills/platform-ops      /home/node/.agents/skills/platform-ops
 COPY --chown=1000:1000 skills/design-brainstorm /home/node/.claude/skills/design-brainstorm

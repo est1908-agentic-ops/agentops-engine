@@ -2,7 +2,7 @@
 
 Copy this layout into **your project repo** — it is documentation, not a runnable
 package in the engine monorepo. It shows the canonical Tier-2 pattern from
-[custom agent workflows SP2](../superpowers/specs/2026-07-12-custom-agent-workflows-sp2-design.md):
+[authoring project workflows](../authoring-project-workflows.md):
 
 - **Project-owned activities** hold your secrets (`rollbarFetch` reads
   `ROLLBAR_ACCESS_TOKEN` from the worker pod).

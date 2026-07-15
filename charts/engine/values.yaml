@@ -144,7 +144,7 @@ piRateLimitFallbackModel: ""
 litellmApiKeySecretName: litellm-credentials
 litellmApiKeySecretKey: masterkey
 
-# The platform role (docs/superpowers/specs/2026-07-07-platform-agent-design.md)
+# The platform role
 # needs credentials devCycle's claude/pi Jobs don't: Temporal REST/action creds
 # and Grafana basic auth, bundled by agentops-platform into one Secret with
 # whatever keys the platform-ops skill's toolbelt expects (TEMPORAL_HOST,

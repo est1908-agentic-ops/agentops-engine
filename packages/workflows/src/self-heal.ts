@@ -2,10 +2,9 @@ import { executeChild, workflowInfo } from '@temporalio/workflow';
 import type { PlatformAgentResult } from '@agentops/contracts';
 import { platform } from './platform';
 
-// Trigger input for a scheduled self-heal sweep (not an agent-stage template --
-// this is the equivalent of what a human types into the console prompt box, so a
-// constant is consistent with the console's hardcoded SUGGESTED_PROMPTS; see
-// docs/superpowers/specs/2026-07-13-self-heal-design.md §5).
+// Trigger input for a scheduled self-heal sweep (not an agent-stage template).
+// This is the equivalent of what a human types into the console prompt box, so a
+// constant is consistent with the console's hardcoded SUGGESTED_PROMPTS.
 export const SELF_HEAL_PROMPT = [
   'You are running as a scheduled self-heal sweep.',
   'Enumerate workflow failures and terminations from roughly the last 30 minutes across the platform and its projects, using the Temporal visibility API (see the platform-ops skill, "Finding recent failures").',
@@ -15,9 +14,9 @@ export const SELF_HEAL_PROMPT = [
   'Repos in scope: the agentops-engine and agentops-platform repos plus any registered projects.',
 ].join('\n');
 
-// M6 "Heal" auto-trigger (design §2/§4): a thin scheduled wrapper that runs the
-// existing one-shot platform agent with the self-heal prompt. Awaits the child so
-// the schedule's overlap:SKIP policy serialises sweeps.
+// A thin scheduled wrapper that runs the existing one-shot platform agent with
+// the self-heal prompt. Awaits the child so the schedule's overlap:SKIP policy
+// serialises sweeps.
 export async function selfHeal(): Promise<PlatformAgentResult> {
   const runId = workflowInfo().workflowId;
   return executeChild(platform, {
