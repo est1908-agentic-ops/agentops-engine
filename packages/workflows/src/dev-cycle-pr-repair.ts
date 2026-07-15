@@ -59,12 +59,15 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
   };
 
   let cancelled = false;
-  let _stopRequested = false;
+  let stopRequested = false;
   let effectiveBrakes: Partial<Brakes> = { maxBabysitRounds: 10, maxIterations: 20 }; // defaults; override with config
 
-  setHandler(stopSignal, () => { _stopRequested = true; });
+  setHandler(stopSignal, () => { stopRequested = true; });
   setHandler(cancelSignal, () => { cancelled = true; });
   setHandler(resumeSignal, () => {
+    if (state.blockReason === 'babysit-brake') {
+      effectiveBrakes = { ...effectiveBrakes, maxBabysitRounds: Number.MAX_SAFE_INTEGER };
+    }
     state.status = 'running';
     state.blockReason = null;
   });
@@ -152,6 +155,7 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
     let lastReview = '';
 
     while (true) {
+      if (stopRequested) { state.status = 'pending'; return state; }
       state.stage = 'implement';
       const implOut = await runStageAgent('implement', implementAttempt, {
         fullVerifyFindings: lastFullVerify,
@@ -207,14 +211,28 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
     // Full babysit (identical to devCycle)
     const seen = new Set<string>();
     let waiting = 0;
+    let maxBabysitWaits = MAX_BABYSIT_WAITS;
     state.stage = 'pr_babysit';
 
     while (true) {
+      if (stopRequested) { state.status = 'pending'; return state; }
       await sleep(DEFAULT_BABYSIT_POLL_MS);
       const feedback: PrFeedback = await activities.getPrFeedback(input.prRef);
-      const decision = babysitDecision(feedback, seen, state.babysitRounds, effectiveBrakes.maxBabysitRounds ?? 10, waiting, MAX_BABYSIT_WAITS);
+      const decision = babysitDecision(feedback, seen, state.babysitRounds, effectiveBrakes.maxBabysitRounds ?? 10, waiting, maxBabysitWaits);
 
       if (decision === 'merge_ready') break;
+
+      if (decision === 'braked') {
+        state.status = 'blocked';
+        state.blockReason = 'babysit-brake';
+        if (await waitForResumeOrCancel()) {
+          throw new RepairCancelledError();
+        }
+        maxBabysitWaits = Number.MAX_SAFE_INTEGER;
+        waiting = 0;
+        state.stage = 'pr_babysit';
+        continue;
+      }
 
       if (decision === 'actionable') {
         waiting = 0;
@@ -237,12 +255,6 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
       }
 
       waiting += 1;
-      if (waiting >= MAX_BABYSIT_WAITS) {
-        state.status = 'blocked';
-        state.blockReason = 'babysit-brake';
-        await waitForResumeOrCancel();
-        waiting = 0;
-      }
     }
 
     state.stage = 'done';
