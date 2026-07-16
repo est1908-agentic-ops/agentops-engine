@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { CiStatusSchema, PrCommentSchema } from './pr-feedback';
 import { AutoMergeModeSchema, ProjectConfigSchema } from './project-config';
+import { GitRefNameSchema } from './git-ref';
 
 export const AUTO_MERGE_LABEL = 'automerge';
 export const AUTO_MERGE_DISABLE_LABEL = 'automerge:disable';
@@ -10,7 +11,7 @@ export const PrSnapshotSchema = z.object({
   prRef: z.string().min(1),
   headSha: z.string().min(1),
   headRepo: z.string().min(1),
-  headBranch: z.string().min(1),
+  headBranch: GitRefNameSchema,
   checkoutRef: z.string().min(1),
   labels: z.array(z.string()),
   state: z.enum(['open', 'closed', 'merged']),
@@ -71,7 +72,7 @@ export const PrLandingInputSchema = z.object({
   repo: z.string().min(1),
   prRef: z.string().min(1),
   agentCreated: z.boolean(),
-  headBranch: z.string().min(1).optional(),
+  headBranch: GitRefNameSchema.optional(),
   workspace: z
     .object({
       workspaceRef: z.string().min(1),

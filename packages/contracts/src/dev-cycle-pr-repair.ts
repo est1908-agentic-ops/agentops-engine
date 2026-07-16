@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ProjectConfigSchema } from './project-config';
+import { GitRefNameSchema } from './git-ref';
 
 export const DevCyclePrRepairInputSchema = z.object({
   taskId: z.string().min(1),
@@ -7,7 +8,7 @@ export const DevCyclePrRepairInputSchema = z.object({
   repo: z.string().min(1),
   prRef: z.string().min(1), // "owner/repo#123"
   prReviewFeedback: z.string().optional(),
-  headBranch: z.string().optional(), // PR head branch name for repair workspace
+  headBranch: GitRefNameSchema.optional(), // PR head branch name for repair workspace
   // Optional; resolved on worker if absent (same as TaskInput)
   config: ProjectConfigSchema.optional(),
 });

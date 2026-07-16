@@ -22,6 +22,7 @@ export * from './control-settings-api';
 export * from './agents-manifest';
 export * from './whitebox-finding';
 export * from './sha256';
+export * from './git-ref';
 export * from './engine-queue';
 export * from './project-identity';
 export * from './tracker-types';

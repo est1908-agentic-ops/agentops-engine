@@ -82,4 +82,38 @@ describe('PR landing contracts', () => {
     expect(PrLandingStateSchema.parse(base).outcome).toBe('merge-ready-manual');
     expect(PrLandingStateSchema.parse({ ...base, outcome: 'merged' }).outcome).toBe('merged');
   });
+
+  it('rejects invalid headBranch names in input', () => {
+    const base = {
+      taskId: 'landing-o-r-7',
+      project: 'p',
+      repo: 'o/r',
+      prRef: 'o/r#7',
+      agentCreated: false,
+    };
+    expect(
+      PrLandingInputSchema.safeParse({ ...base, headBranch: '--upload-pack=/tmp/x' }).success,
+    ).toBe(false);
+    expect(PrLandingInputSchema.safeParse({ ...base, headBranch: '-x' }).success).toBe(false);
+  });
+
+  it('rejects invalid headBranch names in snapshot', () => {
+    const base = {
+      prRef: 'o/r#7',
+      headSha: 'abc',
+      headRepo: 'o/r',
+      checkoutRef: 'refs/pull/7/head',
+      labels: [],
+      state: 'open' as const,
+      draft: false,
+      mergeable: true,
+      mergedHeadSha: null,
+      ciStatus: 'green' as const,
+      unresolvedThreads: 0,
+      comments: [],
+    };
+    expect(PrSnapshotSchema.safeParse({ ...base, headBranch: '--upload-pack=/tmp/x' }).success).toBe(
+      false,
+    );
+  });
 });
