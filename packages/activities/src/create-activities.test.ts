@@ -1144,6 +1144,94 @@ describe('createActivities — resolveRepoConfig', () => {
     await activities.terminateContinuousAgent('agent:acme:mon');
     expect(terminate).toHaveBeenCalledWith('agent removed from manifest');
   });
+
+  it('listAgentSchedules surfaces the real task queue from describe() for matched schedules', async () => {
+    const LEGACY_ENGINE_QUEUE = 'agentops-devcycle';
+    const describe = vi.fn().mockResolvedValue({
+      action: {
+        taskQueue: LEGACY_ENGINE_QUEUE,
+        workflowType: 'whiteboxBugHunt',
+      },
+    } as any);
+    const getHandle = vi.fn((_id: string) => ({ describe }));
+    const deps = {
+      ...buildDeps(),
+      scheduleClient: {
+        getHandle,
+        list: async function* () {
+          yield {
+            scheduleId: 'agent:acme:nightly',
+            action: { workflowType: 'whiteboxBugHunt' },
+            schedule: { spec: { cronExpressions: ['0 2 * * *'], timezone: 'UTC' } },
+          } as any;
+        },
+      } as any,
+    } as any;
+    const activities = createActivities(deps);
+
+    const schedules = await activities.listAgentSchedules('acme');
+
+    expect(schedules).toHaveLength(1);
+    expect(schedules[0]).toMatchObject({
+      id: 'agent:acme:nightly',
+      taskQueue: LEGACY_ENGINE_QUEUE,
+      workflow: 'whiteboxBugHunt',
+    });
+    expect(getHandle).toHaveBeenCalledWith('agent:acme:nightly');
+    expect(describe).toHaveBeenCalled();
+  });
+
+  it('listAgentSchedules degrades to undefined taskQueue when describe() throws', async () => {
+    const describe = vi.fn().mockRejectedValue(new Error('describe failed'));
+    const getHandle = vi.fn((_id: string) => ({ describe }));
+    const deps = {
+      ...buildDeps(),
+      scheduleClient: {
+        getHandle,
+        list: async function* () {
+          yield {
+            scheduleId: 'agent:acme:nightly',
+            action: { workflowType: 'whiteboxBugHunt' },
+            schedule: { spec: { cronExpressions: ['0 2 * * *'], timezone: 'UTC' } },
+          } as any;
+        },
+      } as any,
+    } as any;
+    const activities = createActivities(deps);
+
+    const schedules = await activities.listAgentSchedules('acme');
+
+    expect(schedules).toHaveLength(1);
+    expect(schedules[0]).toMatchObject({
+      id: 'agent:acme:nightly',
+      taskQueue: undefined,
+      workflow: 'whiteboxBugHunt', // from summary since describe failed
+    });
+  });
+
+  it('listAgentSchedules skips describe() for non-matching ids', async () => {
+    const describe = vi.fn();
+    const getHandle = vi.fn((_id: string) => ({ describe }));
+    const deps = {
+      ...buildDeps(),
+      scheduleClient: {
+        getHandle,
+        list: async function* () {
+          yield {
+            scheduleId: 'agent:other:nightly',
+            action: { workflowType: 'whiteboxBugHunt' },
+            schedule: { spec: { cronExpressions: ['0 2 * * *'], timezone: 'UTC' } },
+          } as any;
+        },
+      } as any,
+    } as any;
+    const activities = createActivities(deps);
+
+    await activities.listAgentSchedules('acme');
+
+    expect(getHandle).not.toHaveBeenCalled();
+    expect(describe).not.toHaveBeenCalled();
+  });
 });
 
 describe('createActivities — scratch workspace lifecycle', () => {

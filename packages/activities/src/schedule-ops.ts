@@ -57,6 +57,7 @@ export interface ScheduleHandleLike {
   pause?: () => Promise<void>;
   unpause?: () => Promise<void>;
   delete?: () => Promise<void>;
+  describe?: () => Promise<unknown>;
 }
 
 export interface ScheduleClientLike {
@@ -112,8 +113,20 @@ export async function listAgentSchedules(
         typeof spec === 'string'
           ? spec
           : (spec?.cronExpressions?.[0] ?? spec?.cron?.cronString ?? 'continuous');
-      const workflow = (s as any)?.action?.type ?? 'whiteboxBugHunt';
-      const taskQueue = (s as any)?.action?.taskQueue as string | undefined;
+      let workflow = (s as any)?.action?.type ?? 'whiteboxBugHunt';
+      let taskQueue: string | undefined;
+      // Fetch the real task queue and workflow from the schedule description.
+      // The list() summary does not include taskQueue; describe() returns the full object.
+      try {
+        const desc = await client.getHandle(id).describe?.();
+        if (desc) {
+          taskQueue = (desc as any)?.action?.taskQueue;
+          const descWorkflow = (desc as any)?.action?.workflowType;
+          if (descWorkflow) workflow = descWorkflow;
+        }
+      } catch {
+        // describe() failed; taskQueue remains undefined, workflow from summary
+      }
       // paused not directly on list item in all SDK versions; default false and rely on apply
       out.push({ id, scheduleSpec, workflow, paused: false, taskQueue });
     }

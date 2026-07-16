@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { ScheduleClientLike } from './schedule-ops';
-import { applyScheduleChanges } from './schedule-ops';
+import { applyScheduleChanges, listAgentSchedules } from './schedule-ops';
 import type { ReconcilePlan } from '@agentops/policies';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -90,5 +90,84 @@ describe('applyScheduleChanges (mocked ScheduleClient)', () => {
     expect(typeof handle.update.mock.calls[0][0]).toBe('function');
     const result = await handle.update.mock.calls[0][0]({});
     expect(result.action.taskQueue).toBe('q');
+  });
+});
+
+describe('listAgentSchedules (reference implementation)', () => {
+  const LEGACY_ENGINE_QUEUE = 'agentops-devcycle';
+
+  it('surfaces the real task queue from describe() for matched schedules', async () => {
+    const describe = vi.fn().mockResolvedValue({
+      action: {
+        taskQueue: LEGACY_ENGINE_QUEUE,
+        workflowType: 'whiteboxBugHunt',
+      },
+    } as any);
+    const getHandle = vi.fn((_id: string) => ({ describe }));
+    const client = {
+      getHandle,
+      list: async function* () {
+        yield {
+          scheduleId: 'agent:acme:nightly',
+          action: { type: 'startWorkflow' },
+          schedule: { spec: { cronExpressions: ['0 2 * * *'], timezone: 'UTC' } },
+        } as any;
+      },
+    } as unknown as ScheduleClientLike;
+
+    const schedules = await listAgentSchedules('acme', client);
+
+    expect(schedules).toHaveLength(1);
+    expect(schedules[0]).toMatchObject({
+      id: 'agent:acme:nightly',
+      taskQueue: LEGACY_ENGINE_QUEUE,
+      workflow: 'whiteboxBugHunt',
+    });
+    expect(getHandle).toHaveBeenCalledWith('agent:acme:nightly');
+    expect(describe).toHaveBeenCalled();
+  });
+
+  it('degrades to undefined taskQueue when describe() throws', async () => {
+    const describe = vi.fn().mockRejectedValue(new Error('describe failed'));
+    const getHandle = vi.fn((_id: string) => ({ describe }));
+    const client = {
+      getHandle,
+      list: async function* () {
+        yield {
+          scheduleId: 'agent:acme:nightly',
+          action: { type: 'startWorkflow' },
+          schedule: { spec: { cronExpressions: ['0 2 * * *'], timezone: 'UTC' } },
+        } as any;
+      },
+    } as unknown as ScheduleClientLike;
+
+    const schedules = await listAgentSchedules('acme', client);
+
+    expect(schedules).toHaveLength(1);
+    expect(schedules[0]).toMatchObject({
+      id: 'agent:acme:nightly',
+      taskQueue: undefined,
+      workflow: 'startWorkflow', // from summary since describe failed
+    });
+  });
+
+  it('skips describe() for non-matching ids', async () => {
+    const describe = vi.fn();
+    const getHandle = vi.fn((_id: string) => ({ describe }));
+    const client = {
+      getHandle,
+      list: async function* () {
+        yield {
+          scheduleId: 'agent:other:nightly',
+          action: { type: 'startWorkflow' },
+          schedule: { spec: { cronExpressions: ['0 2 * * *'], timezone: 'UTC' } },
+        } as any;
+      },
+    } as unknown as ScheduleClientLike;
+
+    await listAgentSchedules('acme', client);
+
+    expect(getHandle).not.toHaveBeenCalled();
+    expect(describe).not.toHaveBeenCalled();
   });
 });
