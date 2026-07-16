@@ -63,8 +63,8 @@ export async function platformChat(
   let pendingDecision: ChatDecision | undefined;
   let closed = false;
 
-  const actionsExecuted: PlatformAction[] = carry ? [...carry.actionsExecuted] : [];
-  const childWorkflows: PlatformChatResult['childWorkflows'] = carry ? [...carry.childWorkflows] : [];
+  const actionsExecuted: PlatformAction[] = carry?.actionsExecuted ? [...carry.actionsExecuted] : [];
+  const childWorkflows: PlatformChatResult['childWorkflows'] = carry?.childWorkflows ? [...carry.childWorkflows] : [];
 
   const push = (role: ChatMessage['role'], text: string, kind?: ChatMessage['kind']): void => {
     seq += 1;
