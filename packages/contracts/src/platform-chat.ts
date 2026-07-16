@@ -85,22 +85,27 @@ export const PlatformChatInputSchema = z.object({
 });
 export type PlatformChatInput = z.infer<typeof PlatformChatInputSchema>;
 
+export const ChatChildWorkflowSchema = z.object({
+  workflowId: z.string().min(1),
+  repo: z.string().min(1),
+  goal: z.string().min(1),
+});
+export type ChatChildWorkflow = z.infer<typeof ChatChildWorkflowSchema>;
+
 // Internal 2nd workflow arg, carried across continueAsNew. Not a public surface.
 export const PlatformChatCarrySchema = z.object({
   messages: z.array(ChatMessageSchema),
   seq: z.number().int().nonnegative(),
   workspaceRef: z.string(),
+  actionsExecuted: z.array(PlatformActionSchema).default([]),
+  childWorkflows: z.array(ChatChildWorkflowSchema).default([]),
 });
 export type PlatformChatCarry = z.infer<typeof PlatformChatCarrySchema>;
 
 export const PlatformChatResultSchema = z.object({
   turns: z.number().int().nonnegative(),
   actionsExecuted: z.array(PlatformActionSchema).default([]),
-  childWorkflows: z
-    .array(
-      z.object({ workflowId: z.string().min(1), repo: z.string().min(1), goal: z.string().min(1) }),
-    )
-    .default([]),
+  childWorkflows: z.array(ChatChildWorkflowSchema).default([]),
 });
 export type PlatformChatResult = z.output<typeof PlatformChatResultSchema>;
 
