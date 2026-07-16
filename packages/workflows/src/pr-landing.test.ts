@@ -18,6 +18,8 @@ const greenSnapshot = (overrides: Partial<PrSnapshot> = {}): PrSnapshot => ({
   ...overrides,
 });
 
+const handlers: Record<string, (...args: unknown[]) => void> = {};
+
 const {
   prepareWorkspace,
   cleanupWorkspace,
@@ -85,8 +87,10 @@ vi.mock('@temporalio/workflow', () => ({
   condition,
   sleep: vi.fn().mockResolvedValue(undefined),
   defineQuery: vi.fn(() => 'stateQuery'),
-  defineSignal: vi.fn(() => 'signal'),
-  setHandler: vi.fn(),
+  defineSignal: vi.fn((name: string) => name),
+  setHandler: vi.fn((signal: string, handler: (...args: unknown[]) => void) => {
+    handlers[signal] = handler;
+  }),
   ActivityFailure: class ActivityFailure extends Error {},
   ApplicationFailure: class ApplicationFailure extends Error {
     type = '';
@@ -219,5 +223,45 @@ describe('prLanding', () => {
     expect(cleanupWorkspace).toHaveBeenCalledTimes(1);
     expect(result.outcome).toBe('blocked');
     expect(result.blockReason).toBe('permission-denied');
+  });
+
+  it('honors cancel during steady-state babysit polling', async () => {
+    // Clear any stale handlers from previous tests
+    Object.keys(handlers).forEach(key => delete handlers[key]);
+
+    // Set up a steady 'waiting' snapshot: pending CI, no unresolved threads, no actionable comments
+    let conditionCallCount = 0;
+    vi.mocked(getPrSnapshot).mockImplementation(async () =>
+      greenSnapshot({ ciStatus: 'pending', unresolvedThreads: 0, comments: [], headSha: 'abc' }),
+    );
+
+    // Override condition to call the cancel handler immediately on first call
+    condition.mockReset();
+    condition.mockImplementation(async (_pred: () => boolean, _timeout?: number) => {
+      conditionCallCount += 1;
+      // Call the cancel handler on first invocation
+      if (conditionCallCount === 1 && handlers['cancel']) {
+        handlers['cancel']();
+      }
+    });
+
+    const result = await prLanding({
+      taskId: 'landing-o-r-12',
+      project: 'p',
+      repo: 'o/r',
+      prRef: 'o/r#12',
+      agentCreated: true,
+      workspace: { workspaceRef: '/ws/t', branch: 'agentops/t', validatedHeadSha: 'abc' },
+      config: { ...baseConfig, autoMerge: 'disabled' },
+    });
+
+    // Assert the workflow terminated with cancelled outcome
+    expect(result.outcome).toBe('cancelled');
+    expect(result.phase).toBe('done');
+    expect(cleanupWorkspace).toHaveBeenCalledTimes(1);
+    // Condition should be called (at least once in the babysit loop)
+    expect(condition).toHaveBeenCalled();
+    // Guard against polling forever: should not call condition many times
+    expect(condition.mock.calls.length).toBeLessThanOrEqual(3);
   });
 });

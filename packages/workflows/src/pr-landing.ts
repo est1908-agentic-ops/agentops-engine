@@ -261,7 +261,12 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
     while (true) {
       woke = false;
       state.phase = 'babysitting';
-      await condition(() => woke, DEFAULT_BABYSIT_POLL_MS);
+      await condition(() => woke || cancelled, DEFAULT_BABYSIT_POLL_MS);
+      if (cancelled) {
+        state.phase = 'done';
+        state.outcome = 'cancelled';
+        return state;
+      }
       const snapshot = await activities.getPrSnapshot(input.prRef);
       state.currentHeadSha = snapshot.headSha;
 
