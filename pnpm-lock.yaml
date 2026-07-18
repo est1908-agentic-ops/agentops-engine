@@ -238,6 +238,12 @@ importers:
         specifier: ^8.20.0
         version: 8.20.0
 
+  packages/gtd:
+    dependencies:
+      '@agentops/contracts':
+        specifier: workspace:*
+        version: link:../contracts
+
   packages/policies:
     dependencies:
       '@agentops/contracts':
