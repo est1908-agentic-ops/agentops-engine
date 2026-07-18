@@ -1,4 +1,4 @@
-import { GtdDocument, GtdTask, GtdList, GtdDocumentSchema } from '@agentops/contracts';
+import { GtdDocument, GtdTask, GtdList, GtdDocumentSchema, PreservedBlock } from '@agentops/contracts';
 import { sha256 } from '@agentops/contracts';
 
 const GTD_LISTS: GtdList[] = ['inbox', 'next', 'waiting', 'someday', 'done'];
@@ -151,48 +151,24 @@ export function parse(md: string): GtdDocument {
     }
   }
 
-  if (beforeInbox.length > 0) {
-    preserved.push({
-      content: beforeInbox.join('\n'),
-      position: 'before-inbox',
-    });
-  }
-  if (afterInbox.length > 0) {
-    preserved.push({
-      content: afterInbox.join('\n'),
-      position: 'after-inbox',
-    });
-  }
-  if (afterNext.length > 0) {
-    preserved.push({
-      content: afterNext.join('\n'),
-      position: 'after-next',
-    });
-  }
-  if (afterWaiting.length > 0) {
-    preserved.push({
-      content: afterWaiting.join('\n'),
-      position: 'after-waiting',
-    });
-  }
-  if (afterSomeday.length > 0) {
-    preserved.push({
-      content: afterSomeday.join('\n'),
-      position: 'after-someday',
-    });
-  }
-  if (afterDone.length > 0) {
-    preserved.push({
-      content: afterDone.join('\n'),
-      position: 'after-done',
-    });
-  }
-  if (trailingContent.length > 0) {
-    preserved.push({
-      content: trailingContent.join('\n'),
-      position: 'trailing',
-    });
-  }
+  // Trim leading/trailing blank lines so that blank section separators emitted
+  // by serialize() are not captured as preserved content (which would otherwise
+  // grow the file by a few blank lines on every parse->serialize round-trip).
+  // Internal blank lines within genuine preserved content are kept.
+  const pushPreserved = (lines: string[], position: PreservedBlock['position']) => {
+    const content = lines.join('\n').replace(/^\n+/, '').replace(/\n+$/, '');
+    if (content !== '') {
+      preserved.push({ content, position });
+    }
+  };
+
+  pushPreserved(beforeInbox, 'before-inbox');
+  pushPreserved(afterInbox, 'after-inbox');
+  pushPreserved(afterNext, 'after-next');
+  pushPreserved(afterWaiting, 'after-waiting');
+  pushPreserved(afterSomeday, 'after-someday');
+  pushPreserved(afterDone, 'after-done');
+  pushPreserved(trailingContent, 'trailing');
 
   const doc = { tasks, preserved };
   return GtdDocumentSchema.parse(doc);

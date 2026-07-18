@@ -283,5 +283,36 @@ Personal project notes
       const thirdProjectCount = (serialized.match(/## Projects/g) || []).length;
       expect(thirdProjectCount).toBe(1);
     });
+
+    it('produces stable serialized text across repeated round-trips (no blank-line growth)', () => {
+      const md = `# GTD
+
+## Inbox
+- [ ] Buy milk ^dc4d
+
+## Next
+
+## Waiting
+
+## Someday
+
+## Done
+
+## Project Notes
+some human notes
+- keep me
+`;
+
+      // First round-trip normalizes; every subsequent round-trip must be a no-op.
+      const stable = serialize(parse(md));
+      const again = serialize(parse(stable));
+      expect(again).toBe(stable);
+
+      // Preserved human content survives, and no blank lines accumulate.
+      expect(stable).toContain('## Project Notes');
+      expect(stable).toContain('- keep me');
+      const blankCount = (s: string) => (s.match(/^$/gm) || []).length;
+      expect(blankCount(again)).toBe(blankCount(stable));
+    });
   });
 });
