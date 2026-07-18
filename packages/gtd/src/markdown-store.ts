@@ -150,7 +150,6 @@ export function parse(md: string): GtdDocument {
       afterDone.push(...currentSection);
     }
   }
-  trailingContent.push(...currentSection);
 
   if (beforeInbox.length > 0) {
     preserved.push({

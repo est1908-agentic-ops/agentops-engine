@@ -243,5 +243,45 @@ Some random note
       const reparsed = parse(serialized);
       expect(reparsed.tasks[0].id).toMatch(/^[a-f0-9]{4}$/);
     });
+
+    it('does not duplicate preserved content after final GTD section on multiple round-trips', () => {
+      const md = `# GTD
+
+## Inbox
+- [ ] Buy milk
+
+## Next
+
+## Waiting
+
+## Someday
+
+## Done
+
+## Projects
+Personal project notes
+`;
+
+      let doc = parse(md);
+      let serialized = serialize(doc);
+
+      expect(serialized).toContain('## Projects');
+      const firstProjectCount = (serialized.match(/## Projects/g) || []).length;
+      expect(firstProjectCount).toBe(1);
+
+      doc = parse(serialized);
+      serialized = serialize(doc);
+
+      expect(serialized).toContain('## Projects');
+      const secondProjectCount = (serialized.match(/## Projects/g) || []).length;
+      expect(secondProjectCount).toBe(1);
+
+      doc = parse(serialized);
+      serialized = serialize(doc);
+
+      expect(serialized).toContain('## Projects');
+      const thirdProjectCount = (serialized.match(/## Projects/g) || []).length;
+      expect(thirdProjectCount).toBe(1);
+    });
   });
 });
