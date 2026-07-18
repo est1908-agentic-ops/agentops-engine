@@ -26,4 +26,5 @@ export * from './engine-queue';
 export * from './project-identity';
 export * from './tracker-types';
 export * from './engine-activities';
+export * from './gtd-task';
 export { z } from 'zod';
