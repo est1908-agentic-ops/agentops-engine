@@ -139,6 +139,7 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
     const limits = { maxTokens: config.brakes.maxTokens, ...resolveStageLimits(config, stage) };
     let result;
     while (true) {
+      if (cancelled) throw new PrLandingCancelledError();
       try {
         result = await agentActivities.runAgent({
           taskId: input.taskId,
@@ -198,6 +199,7 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
     let snapshot = initial;
     let feedback = reviewFeedback;
     while (true) {
+      if (cancelled) throw new PrLandingCancelledError();
       state.phase = 'validating';
       state.currentHeadSha = snapshot.headSha;
       const fullOutput = await runStageAgent('full_verify', state.implementAttempts + 1, {
@@ -261,7 +263,8 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
     while (true) {
       woke = false;
       state.phase = 'babysitting';
-      await condition(() => woke, DEFAULT_BABYSIT_POLL_MS);
+      await condition(() => woke || cancelled, DEFAULT_BABYSIT_POLL_MS);
+      if (cancelled) throw new PrLandingCancelledError();
       const snapshot = await activities.getPrSnapshot(input.prRef);
       state.currentHeadSha = snapshot.headSha;
 

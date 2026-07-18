@@ -18,6 +18,8 @@ const greenSnapshot = (overrides: Partial<PrSnapshot> = {}): PrSnapshot => ({
   ...overrides,
 });
 
+const handlers: Record<string, () => void> = {};
+
 const {
   prepareWorkspace,
   cleanupWorkspace,
@@ -85,8 +87,10 @@ vi.mock('@temporalio/workflow', () => ({
   condition,
   sleep: vi.fn().mockResolvedValue(undefined),
   defineQuery: vi.fn(() => 'stateQuery'),
-  defineSignal: vi.fn(() => 'signal'),
-  setHandler: vi.fn(),
+  defineSignal: vi.fn((name: string) => name),
+  setHandler: vi.fn((token: string, fn: () => void) => {
+    handlers[token] = fn;
+  }),
   ActivityFailure: class ActivityFailure extends Error {},
   ApplicationFailure: class ApplicationFailure extends Error {
     type = '';
@@ -106,6 +110,7 @@ const baseConfig: NonNullable<PrLandingInput['config']> = {
 describe('prLanding', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.keys(handlers).forEach((k) => delete handlers[k]);
     vi.mocked(getPrSnapshot).mockImplementation(async () =>
       greenSnapshot({ labels: ['automerge'] }),
     );
@@ -219,5 +224,71 @@ describe('prLanding', () => {
     expect(cleanupWorkspace).toHaveBeenCalledTimes(1);
     expect(result.outcome).toBe('blocked');
     expect(result.blockReason).toBe('permission-denied');
+  });
+
+  it('cancels during babysit loop poll', async () => {
+    vi.mocked(getPrSnapshot).mockResolvedValue(
+      greenSnapshot({ ciStatus: 'pending', unresolvedThreads: 0, comments: [] }),
+    );
+    vi.mocked(condition).mockImplementation(async (pred: () => boolean, timeout?: number) => {
+      if (timeout === 5000) {
+        // This is the babysit poll; invoke cancel handler and resolve
+        handlers['cancel']?.();
+        // Return true to indicate the predicate was satisfied
+        return;
+      }
+      // Other conditions resolve immediately
+      return;
+    });
+    const result = await prLanding({
+      taskId: 'landing-o-r-12',
+      project: 'p',
+      repo: 'o/r',
+      prRef: 'o/r#12',
+      agentCreated: true,
+      workspace: { workspaceRef: '/ws/t', branch: 'agentops/t', validatedHeadSha: 'abc' },
+      config: { ...baseConfig, autoMerge: 'label' },
+    });
+    expect(result.outcome).toBe('cancelled');
+    expect(result.phase).toBe('done');
+    expect(cleanupWorkspace).toHaveBeenCalledTimes(1);
+    expect(mergePr).not.toHaveBeenCalled();
+  });
+
+  it('cancels during repair loop iteration', async () => {
+    let implementCalls = 0;
+    vi.mocked(runAgent).mockImplementation(async (req: { stage: string }) => {
+      if (req.stage === 'implement') {
+        implementCalls += 1;
+        // Invoke cancel on the implement stage call
+        handlers['cancel']?.();
+      }
+      const outputs: Record<string, string> = {
+        implement: 'diff',
+        full_verify: 'FULL: FAIL',
+        review: 'VERDICT: FAIL',
+      };
+      return {
+        output: outputs[req.stage] ?? 'ok',
+        tokensIn: 1,
+        tokensOut: 1,
+        wallMs: 1,
+        promptHash: 'h',
+        promptSource: 's',
+      };
+    });
+    const result = await prLanding({
+      taskId: 'landing-o-r-13',
+      project: 'p',
+      repo: 'o/r',
+      prRef: 'o/r#13',
+      agentCreated: false,
+      headBranch: 'feature/x',
+      config: { ...baseConfig, autoMerge: 'label' },
+    });
+    expect(result.outcome).toBe('cancelled');
+    expect(result.phase).toBe('done');
+    expect(cleanupWorkspace).toHaveBeenCalledTimes(1);
+    expect(implementCalls).toBe(1);
   });
 });
