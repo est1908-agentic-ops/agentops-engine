@@ -141,7 +141,7 @@ describe('buildAgentJob', () => {
     ).toThrow(/CHANGEME/);
   });
 
-  it('builds the expected Job shape with shell-safe positional args', () => {
+  it('builds the expected Job shape with shell-safe positional args for write stages', () => {
     const paths = agentOpsArtifactPaths(baseRequest);
     const job = buildAgentJob(
       baseRequest,
@@ -195,6 +195,42 @@ describe('buildAgentJob', () => {
       allowPrivilegeEscalation: false,
     });
     expect(container?.envFrom).toBeUndefined();
+  });
+
+  it('builds a K8s Job with --permission-mode plan for read-only stages like bughunt', () => {
+    const paths = agentOpsArtifactPaths({ ...baseRequest, stage: 'bughunt' });
+    const job = buildAgentJob(
+      { ...baseRequest, stage: 'bughunt' },
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+      },
+      paths,
+    );
+
+    const container = job.spec?.template?.spec?.containers?.[0];
+    const command = container?.command ?? [];
+
+    // The command array contains: ['/bin/sh', '-c', '<script>', 'claude', '-p', '--output-format', ...]
+    // Find the index of 'claude' to get the argv portion
+    const claudeIndex = command.indexOf('claude');
+    expect(claudeIndex).toBeGreaterThanOrEqual(0);
+
+    const args = command.slice(claudeIndex);
+    expect(args[0]).toBe('claude');
+    expect(args).toContain('-p');
+    expect(args).toContain('--output-format');
+    expect(args).toContain('stream-json');
+    expect(args).toContain('--verbose');
+    expect(args).toContain('--model');
+    expect(args).toContain('claude-sonnet-5');
+    expect(args).toContain('--permission-mode');
+    const permModeIndex = args.indexOf('--permission-mode');
+    expect(permModeIndex).toBeGreaterThanOrEqual(0);
+    expect(args[permModeIndex + 1]).toBe('plan');
+    expect(args).not.toContain('--dangerously-skip-permissions');
   });
 
   it('also mounts the base-clone cache PVC when cachePvcName/cacheMountPath are set, so the worktree gitdir resolves in the Job pod', () => {
