@@ -100,19 +100,19 @@ export async function listAgentSchedules(
 ): Promise<ExistingSchedule[]> {
   if (!client) return [];
   const out: ExistingSchedule[] = [];
-  // list() yields schedule summaries
+  // list() yields ScheduleSummary objects
   const lister = client.list;
   if (lister) {
     for await (const s of lister()) {
       const id = (s as any).scheduleId;
       if (!id || !id.startsWith(`agent:${project}:`)) continue;
-      // Best-effort extraction; real objects have more structure.
-      const spec = (s as any)?.schedule?.spec;
-      const scheduleSpec =
-        typeof spec === 'string'
-          ? spec
-          : (spec?.cronExpressions?.[0] ?? spec?.cron?.cronString ?? 'continuous');
-      const workflow = (s as any)?.action?.type ?? 'whiteboxBugHunt';
+      // Extract from Temporal ScheduleSummary: action.workflowType is the workflow name,
+      // and scheduleSpec from memo (stored at creation time). If memo is unavailable,
+      // default to 'continuous' since real SDK responses have compiled calendars/intervals
+      // instead of the original cron expression.
+      const memoSchedule = ((s as any)?.memo as Record<string, unknown> | undefined)?.schedule;
+      const scheduleSpec = typeof memoSchedule === 'string' ? memoSchedule : 'continuous';
+      const workflow = (s as any)?.action?.workflowType ?? 'whiteboxBugHunt';
       const taskQueue = (s as any)?.action?.taskQueue as string | undefined;
       // paused not directly on list item in all SDK versions; default false and rely on apply
       out.push({ id, scheduleSpec, workflow, paused: false, taskQueue });
@@ -153,7 +153,7 @@ export async function applyScheduleChanges(
           memo,
           searchAttributes,
         },
-        memo,
+        memo: { ...memo, schedule: spec.schedule },
         searchAttributes,
       });
     }
@@ -180,7 +180,7 @@ export async function applyScheduleChanges(
         searchAttributes,
       },
       spec: cronScheduleSpec(spec.schedule, spec.timezone),
-      memo,
+      memo: { ...memo, schedule: spec.schedule },
       searchAttributes,
     }));
   }

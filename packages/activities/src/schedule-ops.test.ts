@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import type { ScheduleClientLike } from './schedule-ops';
-import { applyScheduleChanges } from './schedule-ops';
+import { applyScheduleChanges, listAgentSchedules } from './schedule-ops';
 import type { ReconcilePlan } from '@agentops/policies';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -90,5 +90,83 @@ describe('applyScheduleChanges (mocked ScheduleClient)', () => {
     expect(typeof handle.update.mock.calls[0][0]).toBe('function');
     const result = await handle.update.mock.calls[0][0]({});
     expect(result.action.taskQueue).toBe('q');
+  });
+});
+
+describe('listAgentSchedules (mocked ScheduleClient)', () => {
+  it('reads the correct workflow type and spec from ScheduleSummary', async () => {
+    const client: ScheduleClientLike = {
+      getHandle: vi.fn(),
+      list: async function* () {
+        // Real Temporal SDK ScheduleSummary: spec contains decoded calendars/intervals,
+        // not the original cronExpressions. Schedule cron is recovered from memo.
+        yield {
+          scheduleId: 'agent:acme:nightly',
+          spec: {
+            calendars: [
+              {
+                second: [{ start: 0, end: 0 }],
+                minute: [{ start: 2, end: 2 }],
+                dayOfMonth: [{ start: 0, end: 30 }],
+                month: [{ start: 0, end: 11 }],
+                dayOfWeek: [{ start: 0, end: 6 }],
+              },
+            ],
+            timezone: 'UTC',
+          },
+          action: {
+            type: 'startWorkflow',
+            workflowType: 'whiteboxBugHunt',
+            taskQueue: 'q',
+          },
+          memo: {
+            project: 'acme',
+            agentName: 'nightly',
+            workflowType: 'whiteboxBugHunt',
+            schedule: '0 2 * * *',
+          },
+          state: {
+            paused: false,
+          },
+        };
+        yield {
+          scheduleId: 'agent:other:thing',
+          spec: {
+            calendars: [
+              {
+                second: [{ start: 0, end: 0 }],
+                minute: [{ start: 1, end: 1 }],
+                dayOfMonth: [{ start: 0, end: 30 }],
+                month: [{ start: 0, end: 11 }],
+                dayOfWeek: [{ start: 0, end: 6 }],
+              },
+            ],
+            timezone: 'UTC',
+          },
+          action: {
+            type: 'startWorkflow',
+            workflowType: 'someOtherWorkflow',
+            taskQueue: 'other-q',
+          },
+          memo: {
+            project: 'other',
+            agentName: 'thing',
+            workflowType: 'someOtherWorkflow',
+            schedule: '0 1 * * *',
+          },
+          state: {
+            paused: false,
+          },
+        };
+      },
+    };
+
+    const result = await listAgentSchedules('acme', client);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('agent:acme:nightly');
+    expect(result[0].workflow).toBe('whiteboxBugHunt');
+    expect(result[0].scheduleSpec).toBe('0 2 * * *');
+    expect(result[0].taskQueue).toBe('q');
   });
 });
