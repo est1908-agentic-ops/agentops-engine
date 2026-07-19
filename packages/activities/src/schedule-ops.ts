@@ -110,7 +110,8 @@ export async function listAgentSchedules(
       // and scheduleSpec from memo (stored at creation time). If memo is unavailable,
       // default to 'continuous' since real SDK responses have compiled calendars/intervals
       // instead of the original cron expression.
-      const scheduleSpec = ((s as any)?.memo as Record<string, unknown> | undefined)?.schedule ?? 'continuous';
+      const memoSchedule = ((s as any)?.memo as Record<string, unknown> | undefined)?.schedule;
+      const scheduleSpec = typeof memoSchedule === 'string' ? memoSchedule : 'continuous';
       const workflow = (s as any)?.action?.workflowType ?? 'whiteboxBugHunt';
       const taskQueue = (s as any)?.action?.taskQueue as string | undefined;
       // paused not directly on list item in all SDK versions; default false and rely on apply
