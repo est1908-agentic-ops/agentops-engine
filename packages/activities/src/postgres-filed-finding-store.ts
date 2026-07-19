@@ -1,5 +1,5 @@
 import type { Queryable } from './postgres-stats-store';
-import type { FiledFinding, FiledFindingStore } from './filed-finding-store';
+import type { FiledFindingStore } from './filed-finding-store';
 
 const CREATE_TABLE_SQL = `
   CREATE TABLE IF NOT EXISTS filed_findings (
@@ -12,16 +12,7 @@ const CREATE_TABLE_SQL = `
   )
 `;
 
-const INSERT_SQL = `
-  INSERT INTO filed_findings (project, fingerprint, issue_ref, last_seen)
-  VALUES ($1, $2, $3, now())
-  ON CONFLICT (project, fingerprint) DO UPDATE SET last_seen = now()
-`;
-
-const SELECT_SQL = `
-  SELECT project, fingerprint, issue_ref FROM filed_findings
-  WHERE project = $1 AND fingerprint = $2
-`;
+const STALE_RESERVATION = '15 minutes';
 
 export class PostgresFiledFindingStore implements FiledFindingStore {
   constructor(private readonly db: Queryable) {}
@@ -30,14 +21,45 @@ export class PostgresFiledFindingStore implements FiledFindingStore {
     await this.db.query(CREATE_TABLE_SQL);
   }
 
-  async find(project: string, fingerprint: string): Promise<FiledFinding | null> {
-    const { rows } = await this.db.query(SELECT_SQL, [project, fingerprint]);
-    const row = (rows as Array<{ project: string; fingerprint: string; issue_ref: string }>)[0];
-    if (!row) return null;
-    return { project: row.project, fingerprint: row.fingerprint, issueRef: row.issue_ref };
+  async reserve(
+    project: string,
+    fingerprint: string,
+  ): Promise<{ won: boolean; issueRef: string }> {
+    const insertResult = await this.db.query(
+      `
+      INSERT INTO filed_findings (project, fingerprint, issue_ref, last_seen)
+      VALUES ($1, $2, '', now())
+      ON CONFLICT (project, fingerprint) DO UPDATE SET last_seen = now()
+        WHERE filed_findings.issue_ref = ''
+          AND filed_findings.last_seen < now() - ($3)::interval
+      RETURNING issue_ref
+      `,
+      [project, fingerprint, STALE_RESERVATION],
+    );
+
+    if (insertResult.rows.length > 0) {
+      return { won: true, issueRef: '' };
+    }
+
+    const selectResult = await this.db.query(
+      `SELECT issue_ref FROM filed_findings WHERE project = $1 AND fingerprint = $2`,
+      [project, fingerprint],
+    );
+    const row = (selectResult.rows as Array<{ issue_ref: string }>)[0];
+    return { won: false, issueRef: row?.issue_ref ?? '' };
   }
 
-  async record(f: FiledFinding): Promise<void> {
-    await this.db.query(INSERT_SQL, [f.project, f.fingerprint, f.issueRef]);
+  async finalize(project: string, fingerprint: string, issueRef: string): Promise<void> {
+    await this.db.query(
+      `UPDATE filed_findings SET issue_ref = $3, last_seen = now() WHERE project = $1 AND fingerprint = $2 AND issue_ref = ''`,
+      [project, fingerprint, issueRef],
+    );
+  }
+
+  async release(project: string, fingerprint: string): Promise<void> {
+    await this.db.query(
+      `DELETE FROM filed_findings WHERE project = $1 AND fingerprint = $2 AND issue_ref = ''`,
+      [project, fingerprint],
+    );
   }
 }

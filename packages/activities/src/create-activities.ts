@@ -312,15 +312,27 @@ export function createActivities(deps: ActivityDependencies) {
       assertProjectOwnsRepo(req.repo, deps.registry);
       const filedFindings = deps.filedFindings;
       if (req.dedupeFingerprint && filedFindings) {
-        const existing = await filedFindings.find(req.project, req.dedupeFingerprint);
-        if (existing) {
-          await filedFindings.record({
-            project: req.project,
-            fingerprint: req.dedupeFingerprint,
-            issueRef: existing.issueRef,
-          });
-          return { ref: existing.issueRef, url: '', deduped: true };
+        const { won, issueRef } = await filedFindings.reserve(
+          req.project,
+          req.dedupeFingerprint,
+        );
+        if (!won) {
+          return { ref: issueRef, url: '', deduped: true };
         }
+        let created;
+        try {
+          created = await deps.tracker.createIssue({
+            repo: req.repo,
+            title: req.title,
+            body: req.body,
+            labels: req.labels,
+          });
+        } catch (err) {
+          await filedFindings.release(req.project, req.dedupeFingerprint);
+          throw err;
+        }
+        await filedFindings.finalize(req.project, req.dedupeFingerprint, created.ref);
+        return { ref: created.ref, url: created.url, deduped: false };
       }
       const created = await deps.tracker.createIssue({
         repo: req.repo,
@@ -328,13 +340,6 @@ export function createActivities(deps: ActivityDependencies) {
         body: req.body,
         labels: req.labels,
       });
-      if (req.dedupeFingerprint && filedFindings) {
-        await filedFindings.record({
-          project: req.project,
-          fingerprint: req.dedupeFingerprint,
-          issueRef: created.ref,
-        });
-      }
       return { ref: created.ref, url: created.url, deduped: false };
     },
     async openPr(req: OpenPrRequest): Promise<OpenPrResult> {
