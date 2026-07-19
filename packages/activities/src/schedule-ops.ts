@@ -107,12 +107,10 @@ export async function listAgentSchedules(
       const id = (s as any).scheduleId;
       if (!id || !id.startsWith(`agent:${project}:`)) continue;
       // Extract from Temporal ScheduleSummary: action.workflowType is the workflow name,
-      // spec is top-level (not nested under schedule), and cronExpressions is in spec.
-      const spec = (s as any)?.spec;
-      const scheduleSpec =
-        typeof spec === 'string'
-          ? spec
-          : (spec?.cronExpressions?.[0] ?? spec?.cron?.cronString ?? 'continuous');
+      // and scheduleSpec from memo (stored at creation time). If memo is unavailable,
+      // default to 'continuous' since real SDK responses have compiled calendars/intervals
+      // instead of the original cron expression.
+      const scheduleSpec = ((s as any)?.memo as Record<string, unknown> | undefined)?.schedule ?? 'continuous';
       const workflow = (s as any)?.action?.workflowType ?? 'whiteboxBugHunt';
       const taskQueue = (s as any)?.action?.taskQueue as string | undefined;
       // paused not directly on list item in all SDK versions; default false and rely on apply
@@ -154,7 +152,7 @@ export async function applyScheduleChanges(
           memo,
           searchAttributes,
         },
-        memo,
+        memo: { ...memo, schedule: spec.schedule },
         searchAttributes,
       });
     }
@@ -181,7 +179,7 @@ export async function applyScheduleChanges(
         searchAttributes,
       },
       spec: cronScheduleSpec(spec.schedule, spec.timezone),
-      memo,
+      memo: { ...memo, schedule: spec.schedule },
       searchAttributes,
     }));
   }
