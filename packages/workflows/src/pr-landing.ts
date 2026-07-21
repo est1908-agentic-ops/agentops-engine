@@ -4,6 +4,7 @@ import {
   condition,
   defineQuery,
   defineSignal,
+  patched,
   proxyActivities,
   setHandler,
 } from '@temporalio/workflow';
@@ -43,6 +44,12 @@ export const prLandingStateQuery = defineQuery<PrLandingState>('state');
 const DEFAULT_BABYSIT_POLL_MS = 5000;
 const MAX_BABYSIT_WAIT_MS = 20 * 60_000;
 const MAX_BABYSIT_WAITS = Math.ceil(MAX_BABYSIT_WAIT_MS / DEFAULT_BABYSIT_POLL_MS);
+// A `pending` CI check is genuinely still running, so it gets a much larger
+// budget than stale feedback -- long enough to outlast a slow CI *queue*
+// (devcycle-109 hung when queue latency ~52min blew past the 20min cap) before
+// braking for a human. `unreadable` still brakes immediately (babysit-decision).
+const MAX_PENDING_CI_WAIT_MS = 4 * 60 * 60_000;
+const MAX_PENDING_CI_WAITS = Math.ceil(MAX_PENDING_CI_WAIT_MS / DEFAULT_BABYSIT_POLL_MS);
 
 class PrLandingCancelledError extends Error {}
 
@@ -139,6 +146,7 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
     const limits = { maxTokens: config.brakes.maxTokens, ...resolveStageLimits(config, stage) };
     let result;
     while (true) {
+      if (cancelled) throw new PrLandingCancelledError();
       try {
         result = await agentActivities.runAgent({
           taskId: input.taskId,
@@ -198,6 +206,7 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
     let snapshot = initial;
     let feedback = reviewFeedback;
     while (true) {
+      if (cancelled) throw new PrLandingCancelledError();
       state.phase = 'validating';
       state.currentHeadSha = snapshot.headSha;
       const fullOutput = await runStageAgent('full_verify', state.implementAttempts + 1, {
@@ -257,11 +266,21 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
     const seen = new Set<string>();
     let waiting = 0;
     let maxBabysitWaits = MAX_BABYSIT_WAITS;
+    // Gate the larger pending budget behind a patch so this change is
+    // replay-safe: an in-flight workflow already parked at a babysit-brake has
+    // no marker in its history, so `patched()` returns false on replay and it
+    // keeps the original short budget -- braking exactly where its history
+    // recorded, and resuming without a non-determinism error. Only executions
+    // started after this deploys get the longer pending budget.
+    let maxPendingWaits = patched('pr-landing-pending-budget-v1')
+      ? MAX_PENDING_CI_WAITS
+      : MAX_BABYSIT_WAITS;
 
     while (true) {
       woke = false;
       state.phase = 'babysitting';
-      await condition(() => woke, DEFAULT_BABYSIT_POLL_MS);
+      await condition(() => woke || cancelled, DEFAULT_BABYSIT_POLL_MS);
+      if (cancelled) throw new PrLandingCancelledError();
       const snapshot = await activities.getPrSnapshot(input.prRef);
       state.currentHeadSha = snapshot.headSha;
 
@@ -277,6 +296,7 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
         effectiveBrakes.maxBabysitRounds,
         waiting,
         maxBabysitWaits,
+        maxPendingWaits,
       );
 
       if (decision === 'merge_ready') {
@@ -344,7 +364,10 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
       if (decision === 'braked') {
         state.blockReason = 'babysit-brake';
         if ((await waitAtBrake('babysit-brake')) === 'cancelled') return state;
+        // Human resumed: lift both no-progress caps so continued babysitting
+        // isn't instantly re-braked, and restart the counter.
         maxBabysitWaits = Number.MAX_SAFE_INTEGER;
+        maxPendingWaits = Number.MAX_SAFE_INTEGER;
         waiting = 0;
         continue;
       }

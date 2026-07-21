@@ -5,8 +5,12 @@ import type { Queryable } from './postgres-stats-store';
 // Queryable + an optional checked-out client for transactions. The worker and
 // control both inject a real pg Pool (which has connect()); tests inject a bare
 // Queryable (connect() undefined -> we skip the transaction wrapper).
+interface ClientLike extends Queryable {
+  release?(): void;
+}
+
 interface PoolLike extends Queryable {
-  connect?(): Promise<Queryable>;
+  connect?(): Promise<ClientLike>;
 }
 
 const CREATE_TABLE_SQL = `
@@ -107,6 +111,8 @@ export class PostgresTierStore {
     } catch (err) {
       await client.query('ROLLBACK').catch(() => {});
       throw err;
+    } finally {
+      client.release?.();
     }
   }
 

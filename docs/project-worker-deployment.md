@@ -17,24 +17,24 @@ This doc covers **deploying** that worker.
 
 ## Onboarding (repo-sourced — the end state)
 
-Everything about your worker lives in **your repo's `agents.json`** — no platform PR:
+Everything about your worker lives in **your repo's `agentops.json`** — no platform PR:
 
 1. Author the worker (`worker.ts` using `@agentic-ops/engine-sdk/worker`; see
-   [docs/project-worker/](project-worker/)) and add a `worker` block to `agents.json`:
+   [docs/project-worker/](project-worker/)) and add a `worker` block to `agentops.json`:
    ```jsonc
    {
      "agents": [
-       { "name": "rollbar", "workflow": "rollbarMonitor", "schedule": "continuous" }
+       { "name": "rollbar", "workflow": "rollbarMonitor", "schedule": "continuous" },
        // taskQueue omitted -> defaults to proj-<project> (the queue your worker polls)
      ],
      "worker": {
-       "image": "<registry>/<repo>/agentops-worker:<tag>",  // written by your CI on release
-       "externalSecrets": ["rollbar-token"]                  // K8s Secret names (your own externals)
+       "image": "<registry>/<repo>/agentops-worker:<tag>", // written by your CI on release
+       "externalSecrets": ["rollbar-token"], // K8s Secret names (your own externals)
        // replicas defaults to 1; taskQueue defaults to proj-<project>
-     }
+     },
    }
    ```
-2. Your CI builds the image and writes its tag into `agents.json`'s `worker.image`
+2. Your CI builds the image and writes its tag into `agentops.json`'s `worker.image`
    (git-write-back — the deployed image is auditable in your repo history). Avoid a
    mutable `:latest`; use the immutable per-build tag/digest so ArgoCD detects changes.
 3. The engine's `control`/gateway surfaces your `worker` block to the ArgoCD
@@ -47,7 +47,7 @@ The `worker` block's **presence is what marks your project Tier-2**. A config-on
 ### How the worker spec reaches ArgoCD (and why it isn't on `control`)
 
 The ArgoCD plugin generator calls the **gateway** endpoint
-`POST /api/v1/getparams.execute`, which reads each managed project's `agents.json`
+`POST /api/v1/getparams.execute`, which reads each managed project's `agentops.json`
 `worker` block using the per-project token the registry already holds. It is hosted
 on the gateway — not the browser-facing `control` — because `control` is deliberately
 **encrypt-only** (it holds only the public key and cannot decrypt project tokens);

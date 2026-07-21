@@ -4,6 +4,7 @@ import {
   ChatMessageSchema,
   ConversationStateSchema,
   ExecutePlatformActionRequestSchema,
+  PlatformChatCarrySchema,
   PlatformChatInputSchema,
   PlatformChatResultSchema,
 } from './platform-chat';
@@ -65,5 +66,35 @@ describe('platform-chat contracts', () => {
       }),
     ).toThrow();
     expect(PlatformChatInputSchema.parse({}).prompt).toBeUndefined();
+  });
+
+  it('defaults carry accumulators to empty arrays', () => {
+    const carry = PlatformChatCarrySchema.parse({
+      messages: [{ seq: 1, role: 'user', text: 'hello' }],
+      seq: 1,
+      workspaceRef: 'ws-1',
+    });
+    expect(carry.actionsExecuted).toEqual([]);
+    expect(carry.childWorkflows).toEqual([]);
+  });
+
+  it('accepts carry with populated accumulators', () => {
+    const carry = PlatformChatCarrySchema.parse({
+      messages: [{ seq: 1, role: 'user', text: 'hello' }],
+      seq: 1,
+      workspaceRef: 'ws-1',
+      actionsExecuted: [{ type: 'terminate', workflowId: 'wf-1', reason: 'stuck' }],
+      childWorkflows: [{ workflowId: 'c1-fix-1', repo: 'r', goal: 'g' }],
+    });
+    expect(carry.actionsExecuted).toHaveLength(1);
+    expect(carry.childWorkflows).toHaveLength(1);
+  });
+
+  it('reuses ChatChildWorkflowSchema in result', () => {
+    const result = PlatformChatResultSchema.parse({
+      turns: 2,
+      childWorkflows: [{ workflowId: 'c1-fix-1', repo: 'repo', goal: 'goal text' }],
+    });
+    expect(result.childWorkflows[0].workflowId).toBe('c1-fix-1');
   });
 });

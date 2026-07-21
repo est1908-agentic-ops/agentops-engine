@@ -13,6 +13,6 @@ describe('Tier-2 project worker (reference + e2e placeholder)', () => {
   it('reference example exists on disk', () => {
     expect(existsSync(join(REFERENCE_ROOT, 'agentops/worker.ts'))).toBe(true);
     expect(existsSync(join(REFERENCE_ROOT, 'agentops/workflows/rollbar-monitor.ts'))).toBe(true);
-    expect(existsSync(join(REFERENCE_ROOT, 'agents.json'))).toBe(true);
+    expect(existsSync(join(REFERENCE_ROOT, 'agentops.json'))).toBe(true);
   });
 });

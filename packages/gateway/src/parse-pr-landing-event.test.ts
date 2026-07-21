@@ -54,4 +54,32 @@ describe('parsePrLandingEvent', () => {
     });
     expect(event).toBeNull();
   });
+
+  it('rejects events with hostile branch names', () => {
+    const event = parsePrLandingEvent('pull_request', {
+      action: 'labeled',
+      label: { name: 'automerge' },
+      pull_request: {
+        number: 7,
+        head: { ref: '--upload-pack=/tmp/x' },
+        labels: [{ name: 'agentops:managed' }],
+      },
+      repository: { full_name: 'octocat/hello-world' },
+    });
+    expect(event).toBeNull();
+  });
+
+  it('rejects events with leading-dash branch names', () => {
+    const event = parsePrLandingEvent('pull_request', {
+      action: 'labeled',
+      label: { name: 'automerge' },
+      pull_request: {
+        number: 7,
+        head: { ref: '-x' },
+        labels: [{ name: 'agentops:managed' }],
+      },
+      repository: { full_name: 'octocat/hello-world' },
+    });
+    expect(event).toBeNull();
+  });
 });
