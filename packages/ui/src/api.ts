@@ -100,7 +100,7 @@ async function parseEmptyResponse(res: Response): Promise<void> {
 export async function startRun(input: StartRunRequest): Promise<StartRunResponse> {
   const res = await fetch('/api/platform/runs', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: crudHeaders(true),
     body: JSON.stringify(input),
   });
   return parseJsonResponse(res, StartRunResponseSchema);
@@ -127,7 +127,7 @@ export async function listRepos(): Promise<string[]> {
 export async function startDevCycleRun(input: StartDevCycleRequest): Promise<StartDevCycleResponse> {
   const res = await fetch('/api/devcycle/runs', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: crudHeaders(true),
     body: JSON.stringify(input),
   });
   return parseJsonResponse(res, StartDevCycleResponseSchema);

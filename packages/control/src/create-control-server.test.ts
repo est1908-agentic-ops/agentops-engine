@@ -8,6 +8,9 @@ import { generateManagedProjectKeyPair, type PostgresManagedProjectStore } from 
 import type { ManagedProject, UpsertManagedProjectRequest } from '@agentops/contracts';
 import { createControlServer, type ControlDeps } from './create-control-server';
 
+const CRUD_TOKEN = 'crud-secret';
+const CRUD_HEADERS = { 'x-control-crud-token': CRUD_TOKEN };
+
 function makeExecution(overrides: Record<string, unknown> = {}) {
   return {
     workflowId: 'platform-1',
@@ -30,6 +33,21 @@ async function postJson(port: number, path: string, payload: unknown) {
   const res = await fetch(`http://127.0.0.1:${port}${path}`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  const body: unknown = await res.json();
+  return { status: res.status, body };
+}
+
+async function postJsonWithHeaders(
+  port: number,
+  path: string,
+  payload: unknown,
+  headers: Record<string, string>,
+) {
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
     body: JSON.stringify(payload),
   });
   const body: unknown = await res.json();
@@ -65,6 +83,7 @@ describe('createControlServer', () => {
       taskQueue: 'agentops-devcycle',
       namespace: 'default',
       temporalUiBaseUrl: 'https://temporal.example',
+      projectCrudAuthToken: CRUD_TOKEN,
     };
   });
 
@@ -82,7 +101,7 @@ describe('createControlServer', () => {
   describe('POST /api/platform/runs', () => {
     it('rejects an empty prompt with 400', async () => {
       await listen();
-      const { status, body } = await postJson(port, '/api/platform/runs', { prompt: '' });
+      const { status, body } = await postJsonWithHeaders(port, '/api/platform/runs', { prompt: '' }, CRUD_HEADERS);
       expect(status).toBe(400);
       expect((body as { error: string }).error).toBeTruthy();
       expect(start).not.toHaveBeenCalled();
@@ -90,10 +109,10 @@ describe('createControlServer', () => {
 
     it('starts the platform workflow with the correct taskQueue, args, and memo', async () => {
       await listen();
-      const { status, body } = await postJson(port, '/api/platform/runs', {
+      const { status, body } = await postJsonWithHeaders(port, '/api/platform/runs', {
         prompt: 'investigate the last failures',
         hintRepos: ['est1908/agentops-engine'],
-      });
+      }, CRUD_HEADERS);
 
       expect(status).toBe(202);
       expect(body).toEqual({ workflowId: 'platform-1', runId: 'run-1' });
@@ -107,7 +126,7 @@ describe('createControlServer', () => {
 
     it('uses a caller-supplied workflowId when provided', async () => {
       await listen();
-      await postJson(port, '/api/platform/runs', { prompt: 'x', workflowId: 'platform-my-run' });
+      await postJsonWithHeaders(port, '/api/platform/runs', { prompt: 'x', workflowId: 'platform-my-run' }, CRUD_HEADERS);
       const [, options] = start.mock.calls[0];
       expect(options.workflowId).toBe('platform-my-run');
     });
@@ -115,9 +134,35 @@ describe('createControlServer', () => {
     it('responds 409 when the workflowId is already in use', async () => {
       start.mockRejectedValueOnce(new WorkflowExecutionAlreadyStartedError('already started', 'platform-dup', 'platform'));
       await listen();
-      const { status, body } = await postJson(port, '/api/platform/runs', { prompt: 'x', workflowId: 'platform-dup' });
+      const { status, body } = await postJsonWithHeaders(port, '/api/platform/runs', { prompt: 'x', workflowId: 'platform-dup' }, CRUD_HEADERS);
       expect(status).toBe(409);
       expect((body as { error: string }).error).toBeTruthy();
+    });
+
+    it('rejects requests with no token with 401', async () => {
+      await listen();
+      const res = await fetch(`http://127.0.0.1:${port}/api/platform/runs`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'x' }),
+      });
+      expect(res.status).toBe(401);
+      expect(start).not.toHaveBeenCalled();
+    });
+
+    it('rejects requests with a wrong token with 401', async () => {
+      await listen();
+      const { status } = await postJsonWithHeaders(port, '/api/platform/runs', { prompt: 'x' }, { 'x-control-crud-token': 'wrong' });
+      expect(status).toBe(401);
+      expect(start).not.toHaveBeenCalled();
+    });
+
+    it('returns 401 with the correct token but when CRUD token is unconfigured (fail-closed regression)', async () => {
+      delete deps.projectCrudAuthToken;
+      await listen();
+      const { status } = await postJsonWithHeaders(port, '/api/platform/runs', { prompt: 'x' }, CRUD_HEADERS);
+      expect(status).toBe(401);
+      expect(start).not.toHaveBeenCalled();
     });
   });
 
@@ -255,14 +300,14 @@ describe('createControlServer', () => {
     describe('POST /api/devcycle/runs', () => {
       it('rejects an empty prompt with 400', async () => {
         await listen();
-        const { status } = await postJson(port, '/api/devcycle/runs', { repo: 'est1908/agentops-engine', prompt: '' });
+        const { status } = await postJsonWithHeaders(port, '/api/devcycle/runs', { repo: 'est1908/agentops-engine', prompt: '' }, CRUD_HEADERS);
         expect(status).toBe(400);
         expect(start).not.toHaveBeenCalled();
       });
 
       it('rejects an unknown repo with 422 without starting a workflow', async () => {
         await listen();
-        const { status, body } = await postJson(port, '/api/devcycle/runs', { repo: 'nobody/unknown', prompt: 'x' });
+        const { status, body } = await postJsonWithHeaders(port, '/api/devcycle/runs', { repo: 'nobody/unknown', prompt: 'x' }, CRUD_HEADERS);
         expect(status).toBe(422);
         expect((body as { error: string }).error).toContain('nobody/unknown');
         expect(start).not.toHaveBeenCalled();
@@ -272,11 +317,11 @@ describe('createControlServer', () => {
         deps.managedProjectStore = fakeStore([{ repo: 'est1908/agentops-engine', project: 'engine' }]);
         start.mockResolvedValue({ workflowId: 'prompt-engine-t1', firstExecutionRunId: 'run-1' });
         await listen();
-        const { status, body } = await postJson(port, '/api/devcycle/runs', {
+        const { status, body } = await postJsonWithHeaders(port, '/api/devcycle/runs', {
           repo: 'est1908/agentops-engine',
           prompt: 'add a widget',
           taskId: 't1',
-        });
+        }, CRUD_HEADERS);
 
         expect(status).toBe(202);
         expect(body).toEqual({ workflowId: 'prompt-engine-t1', runId: 'run-1', taskId: 't1' });
@@ -290,7 +335,7 @@ describe('createControlServer', () => {
         deps.managedProjectStore = fakeStore([{ repo: 'acme/app', project: 'acme-app' }]);
         start.mockResolvedValue({ workflowId: 'prompt-acme-app-t2', firstExecutionRunId: 'run-2' });
         await listen();
-        const { status } = await postJson(port, '/api/devcycle/runs', { repo: 'acme/app', prompt: 'x', taskId: 't2' });
+        const { status } = await postJsonWithHeaders(port, '/api/devcycle/runs', { repo: 'acme/app', prompt: 'x', taskId: 't2' }, CRUD_HEADERS);
         expect(status).toBe(202);
         const [, options] = start.mock.calls[0];
         expect(options.args[0].project).toBe('acme-app');
@@ -300,12 +345,41 @@ describe('createControlServer', () => {
         deps.managedProjectStore = fakeStore([{ repo: 'est1908/agentops-engine', project: 'engine' }]);
         start.mockRejectedValueOnce(new WorkflowExecutionAlreadyStartedError('already started', 'prompt-engine-dup', 'devCycle'));
         await listen();
-        const { status } = await postJson(port, '/api/devcycle/runs', {
+        const { status } = await postJsonWithHeaders(port, '/api/devcycle/runs', {
           repo: 'est1908/agentops-engine',
           prompt: 'x',
           taskId: 'dup',
-        });
+        }, CRUD_HEADERS);
         expect(status).toBe(409);
+      });
+
+      it('rejects requests with no token with 401', async () => {
+        deps.managedProjectStore = fakeStore([{ repo: 'est1908/agentops-engine', project: 'engine' }]);
+        await listen();
+        const res = await fetch(`http://127.0.0.1:${port}/api/devcycle/runs`, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ repo: 'est1908/agentops-engine', prompt: 'x' }),
+        });
+        expect(res.status).toBe(401);
+        expect(start).not.toHaveBeenCalled();
+      });
+
+      it('rejects requests with a wrong token with 401', async () => {
+        deps.managedProjectStore = fakeStore([{ repo: 'est1908/agentops-engine', project: 'engine' }]);
+        await listen();
+        const { status } = await postJsonWithHeaders(port, '/api/devcycle/runs', { repo: 'est1908/agentops-engine', prompt: 'x' }, { 'x-control-crud-token': 'wrong' });
+        expect(status).toBe(401);
+        expect(start).not.toHaveBeenCalled();
+      });
+
+      it('returns 401 with the correct token but when CRUD token is unconfigured (fail-closed regression)', async () => {
+        delete deps.projectCrudAuthToken;
+        deps.managedProjectStore = fakeStore([{ repo: 'est1908/agentops-engine', project: 'engine' }]);
+        await listen();
+        const { status } = await postJsonWithHeaders(port, '/api/devcycle/runs', { repo: 'est1908/agentops-engine', prompt: 'x' }, CRUD_HEADERS);
+        expect(status).toBe(401);
+        expect(start).not.toHaveBeenCalled();
       });
     });
 
@@ -578,9 +652,6 @@ function createFakeStore() {
     },
   } as unknown as PostgresManagedProjectStore;
 }
-
-const CRUD_TOKEN = 'crud-secret';
-const CRUD_HEADERS = { 'x-control-crud-token': CRUD_TOKEN };
 
 describe('createControlServer managed-project CRUD', () => {
   let server: ReturnType<typeof createControlServer>;
