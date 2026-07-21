@@ -20,20 +20,29 @@ function fakeDb(
 // Fake pool with connect() -> a fake client that records BEGIN/COMMIT/INSERT,
 // so the transactional path is observable.
 function fakePool(): Queryable & {
-  connect(): Promise<Queryable & { calls: { sql: string; params?: unknown[] }[] }>;
+  connect(): Promise<Queryable & { calls: { sql: string; params?: unknown[] }[]; release?(): void }>;
   calls: { sql: string; params?: unknown[] }[];
+  getReleaseCount(): number;
 } {
   const calls: { sql: string; params?: unknown[] }[] = [];
-  const client: Queryable & { calls: { sql: string; params?: unknown[] }[] } = {
+  let releaseCount = 0;
+  const client: Queryable & { calls: { sql: string; params?: unknown[] }[]; release?(): void } = {
     calls,
     async query(sql: string, params?: unknown[]) {
       calls.push({ sql, params });
       return { rows: [] };
     },
+    release() {
+      releaseCount += 1;
+    },
   };
   return {
     calls,
+    getReleaseCount() {
+      return releaseCount;
+    },
     async connect() {
+      releaseCount = 0;
       return client;
     },
     async query(sql: string, params?: unknown[]) {
@@ -110,20 +119,25 @@ describe('PostgresTierStore', () => {
     expect(sqls[2]).toMatch(/INSERT INTO tiers/);
     expect(sqls[sqls.length - 1]).toBe('COMMIT');
     expect(sqls).not.toContain('ROLLBACK');
+    expect(pool.getReleaseCount()).toBe(1);
   });
 
   it('replaceAll issues ROLLBACK and rethrows when an INSERT fails mid-transaction', async () => {
     const calls: { sql: string; params?: unknown[] }[] = [];
     let beginCount = 0;
-    const client: Queryable = {
+    let releaseCount = 0;
+    const client: Queryable & { release?(): void } = {
       async query(sql: string, params?: unknown[]) {
         calls.push({ sql, params });
         if (sql === 'BEGIN') beginCount += 1;
         if (sql.startsWith('INSERT')) throw new Error('constraint violation');
         return { rows: [] };
       },
+      release() {
+        releaseCount += 1;
+      },
     };
-    const pool: Queryable & { connect(): Promise<Queryable> } = {
+    const pool: Queryable & { connect(): Promise<Queryable & { release?(): void }> } = {
       connect: async () => client,
       query: async () => ({ rows: [] }),
     };
@@ -133,6 +147,7 @@ describe('PostgresTierStore', () => {
     ).rejects.toThrow('constraint violation');
     expect(calls.map((c) => c.sql)).toContain('ROLLBACK');
     expect(beginCount).toBe(1); // no retry
+    expect(releaseCount).toBe(1);
   });
 
   it('seedIfEmpty inserts DEFAULT_TIERS only when the table is empty', async () => {
