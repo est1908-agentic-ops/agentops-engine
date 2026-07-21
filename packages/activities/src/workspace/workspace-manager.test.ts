@@ -442,3 +442,68 @@ describe('WorkspaceManager.pruneOrphans', () => {
     expect(readFileSync(join(result.workspaceRef, 'pr-feature.md'), 'utf8')).toBe('pr head');
   });
 });
+
+describe('WorkspaceManager — git ref validation', () => {
+  it('rejects prepare with an invalid headBranch (leading dash)', async () => {
+    const _unused = buildManager();
+    const real = new SpawnGitCommandRunner();
+    const gitCallCount = { count: 0 };
+    const countingGit = {
+      run: (args: string[], opts: { cwd: string }) => {
+        gitCallCount.count++;
+        return real.run(args, opts);
+      },
+    };
+    const strictManager = new WorkspaceManager({
+      resolveGit: () => countingGit,
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+    });
+
+    await expect(
+      strictManager.prepare('task-1', 'owner/repo', undefined, '--upload-pack=/tmp/x'),
+    ).rejects.toMatchObject({
+      nonRetryable: true,
+      message: expect.stringContaining('invalid headBranch'),
+    });
+    // Verify no git commands were run (validation happens at the start)
+    expect(gitCallCount.count).toBe(0);
+  });
+
+  it('rejects prepare with an invalid headRef (leading dash)', async () => {
+    buildManager();
+    const real = new SpawnGitCommandRunner();
+    const gitCallCount = { count: 0 };
+    const countingGit = {
+      run: (args: string[], opts: { cwd: string }) => {
+        gitCallCount.count++;
+        return real.run(args, opts);
+      },
+    };
+    const strictManager = new WorkspaceManager({
+      resolveGit: () => countingGit,
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+    });
+
+    await expect(
+      strictManager.prepare('task-1', 'owner/repo', undefined, undefined, '-x'),
+    ).rejects.toMatchObject({
+      nonRetryable: true,
+      message: expect.stringContaining('invalid headRef'),
+    });
+    // Verify no git commands were run
+    expect(gitCallCount.count).toBe(0);
+  });
+
+  it('accepts prepare with a valid headBranch', async () => {
+    const { manager } = buildManager();
+
+    const result = await manager.prepare('task-1', 'owner/repo', undefined, 'feature/x');
+
+    expect(result.branch).toBe('feature/x');
+    expect(existsSync(result.workspaceRef)).toBe(true);
+  });
+});

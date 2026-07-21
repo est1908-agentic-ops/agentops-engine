@@ -1,4 +1,5 @@
 {
+  "autoMerge": "all",
   "agents": [
     {
       "name": "nightly-bughunt",

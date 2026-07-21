@@ -1,4 +1,3 @@
-import type { AgentSpec } from '@agentops/contracts';
 import type { ExistingSchedule, ReconcilePlan } from '@agentops/policies';
 import { scheduleId } from '@agentops/policies';
 import { ENGINE_QUEUE } from '@agentops/contracts';
@@ -72,60 +71,38 @@ export interface ScheduleOpsDeps {
   taskQueue?: string;
 }
 
-export async function loadAgentsManifest(
-  scm: { readFile: (repo: string, path: string) => Promise<string | null> },
-  project: string,
-  repo: string,
-  parse: (
-    raw: unknown,
-    opts: { workflowInputs: Record<string, unknown> },
-  ) => { agents: AgentSpec[] },
-  workflowInputs: Record<string, unknown>,
-): Promise<AgentSpec[]> {
-  const raw = await scm.readFile(repo, 'agents.json');
-  if (raw === null) return [];
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    // Let the manifest parser surface a nice error
-    parsed = raw;
-  }
-  const manifest = parse(parsed, { workflowInputs });
-  return manifest.agents;
-}
-
 export async function listAgentSchedules(
   project: string,
   client?: ScheduleClientLike,
 ): Promise<ExistingSchedule[]> {
   if (!client) return [];
   const out: ExistingSchedule[] = [];
-  // list() yields schedule summaries
+  // list() yields ScheduleSummary objects
   const lister = client.list;
   if (lister) {
     for await (const s of lister()) {
       const id = (s as any).scheduleId;
       if (!id || !id.startsWith(`agent:${project}:`)) continue;
-      // Best-effort extraction; real objects have more structure.
-      const spec = (s as any)?.schedule?.spec;
-      const scheduleSpec =
-        typeof spec === 'string'
-          ? spec
-          : (spec?.cronExpressions?.[0] ?? spec?.cron?.cronString ?? 'continuous');
-      let workflow = (s as any)?.action?.type ?? 'whiteboxBugHunt';
-      let taskQueue: string | undefined;
-      // Fetch the real task queue and workflow from the schedule description.
-      // The list() summary does not include taskQueue; describe() returns the full object.
-      try {
-        const desc = await client.getHandle(id).describe?.();
-        if (desc) {
-          taskQueue = (desc as any)?.action?.taskQueue;
-          const descWorkflow = (desc as any)?.action?.workflowType;
-          if (descWorkflow) workflow = descWorkflow;
+      // scheduleSpec is recovered from memo (stored at creation): real SDK
+      // summaries carry compiled calendars/intervals, not the original cron string.
+      const memoSchedule = ((s as any)?.memo as Record<string, unknown> | undefined)?.schedule;
+      const scheduleSpec = typeof memoSchedule === 'string' ? memoSchedule : 'continuous';
+      let workflow = (s as any)?.action?.workflowType ?? 'whiteboxBugHunt';
+      // The list() summary may omit taskQueue; when it does, describe() returns the
+      // full action so reconcileAgents has a real queue to compare against --
+      // otherwise task-queue mismatch detection is dead (issue #131).
+      let taskQueue = (s as any)?.action?.taskQueue as string | undefined;
+      if (taskQueue === undefined) {
+        try {
+          const desc = await client.getHandle(id).describe?.();
+          if (desc) {
+            taskQueue = (desc as any)?.action?.taskQueue ?? taskQueue;
+            const descWorkflow = (desc as any)?.action?.workflowType;
+            if (descWorkflow) workflow = descWorkflow;
+          }
+        } catch {
+          // describe() failed; taskQueue stays undefined, workflow from summary
         }
-      } catch {
-        // describe() failed; taskQueue remains undefined, workflow from summary
       }
       // paused not directly on list item in all SDK versions; default false and rely on apply
       out.push({ id, scheduleSpec, workflow, paused: false, taskQueue });
@@ -166,7 +143,7 @@ export async function applyScheduleChanges(
           memo,
           searchAttributes,
         },
-        memo,
+        memo: { ...memo, schedule: spec.schedule },
         searchAttributes,
       });
     }
@@ -193,7 +170,7 @@ export async function applyScheduleChanges(
         searchAttributes,
       },
       spec: cronScheduleSpec(spec.schedule, spec.timezone),
-      memo,
+      memo: { ...memo, schedule: spec.schedule },
       searchAttributes,
     }));
   }

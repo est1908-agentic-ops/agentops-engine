@@ -51,4 +51,33 @@ describe('parsePrReviewEvent', () => {
     const event = parsePrReviewEvent('pull_request_review', noBody);
     expect(event?.reviewBody).toBe('');
   });
+
+  it('rejects events with hostile branch names', () => {
+    const hostile = {
+      ...basePayload,
+      pull_request: { ...basePayload.pull_request, head: { ref: '--upload-pack=/tmp/x' } },
+    };
+    expect(parsePrReviewEvent('pull_request_review', hostile)).toBeNull();
+  });
+
+  it('rejects events with leading-dash branch names', () => {
+    const leadingDash = {
+      ...basePayload,
+      pull_request: { ...basePayload.pull_request, head: { ref: '-x' } },
+    };
+    expect(parsePrReviewEvent('pull_request_review', leadingDash)).toBeNull();
+  });
+
+  it('accepts events with missing headBranch', () => {
+    const noHeadBranch = {
+      ...basePayload,
+      pull_request: {
+        ...basePayload.pull_request,
+        head: { ref: undefined },
+      },
+    };
+    const event = parsePrReviewEvent('pull_request_review', noHeadBranch);
+    expect(event?.prRef).toBe('octocat/hello-world#42');
+    expect(event?.headBranch).toBeUndefined();
+  });
 });

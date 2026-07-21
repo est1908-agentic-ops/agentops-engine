@@ -203,3 +203,60 @@ describe('parseProjectConfig', () => {
     expect(() => parseProjectConfig({ autoMerge: 'sometimes' })).toThrow(InvalidProjectConfigError);
   });
 });
+
+describe('parseProjectConfig — agents and worker', () => {
+  it('leaves agents and worker undefined when not configured', () => {
+    const config = parseProjectConfig({});
+    expect(config.agents).toBeUndefined();
+    expect(config.worker).toBeUndefined();
+  });
+
+  it('parses agents with per-entry defaults and an optional worker block', () => {
+    const config = parseProjectConfig({
+      agents: [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *' }],
+      worker: { image: 'reg/acme/agentops-worker:abc123', externalSecrets: ['rollbar-token'] },
+    });
+    expect(config.agents).toHaveLength(1);
+    expect(config.agents?.[0]).toMatchObject({
+      name: 'nb',
+      enabled: true,
+      timezone: 'UTC',
+      overlap: 'skip',
+    });
+    expect(config.worker).toEqual({
+      image: 'reg/acme/agentops-worker:abc123',
+      replicas: 1,
+      externalSecrets: ['rollbar-token'],
+    });
+  });
+
+  it('throws InvalidProjectConfigError on duplicate agent names', () => {
+    expect(() =>
+      parseProjectConfig({
+        agents: [
+          { name: 'dup', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *' },
+          { name: 'dup', workflow: 'whiteboxBugHunt', schedule: '0 3 * * *' },
+        ],
+      }),
+    ).toThrow(InvalidProjectConfigError);
+  });
+
+  it('throws InvalidProjectConfigError on invalid built-in agent input', () => {
+    expect(() =>
+      parseProjectConfig({
+        agents: [
+          { name: 'b', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: { nope: 1 } },
+        ],
+      }),
+    ).toThrow(InvalidProjectConfigError);
+  });
+
+  it('rejects unknown per-agent keys and a worker block missing its image', () => {
+    expect(() =>
+      parseProjectConfig({
+        agents: [{ name: 'x', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', oops: 1 }],
+      }),
+    ).toThrow(InvalidProjectConfigError);
+    expect(() => parseProjectConfig({ worker: { replicas: 2 } })).toThrow(InvalidProjectConfigError);
+  });
+});

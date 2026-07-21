@@ -63,8 +63,8 @@ export async function platformChat(
   let pendingDecision: ChatDecision | undefined;
   let closed = false;
 
-  const actionsExecuted: PlatformAction[] = [];
-  const childWorkflows: PlatformChatResult['childWorkflows'] = [];
+  const actionsExecuted: PlatformAction[] = carry?.actionsExecuted ? [...carry.actionsExecuted] : [];
+  const childWorkflows: PlatformChatResult['childWorkflows'] = carry?.childWorkflows ? [...carry.childWorkflows] : [];
 
   const push = (role: ChatMessage['role'], text: string, kind?: ChatMessage['kind']): void => {
     seq += 1;
@@ -253,9 +253,11 @@ export async function platformChat(
     // quiescent point (awaiting-user) so we never drop a pending proposal.
     if (messages.length >= CONTINUE_AS_NEW_AFTER && phase === 'awaiting-user') {
       await continueAsNew<typeof platformChat>(input, {
-        messages: messages.slice(-TRANSCRIPT_WINDOW),
+        messages,
         seq,
         workspaceRef,
+        actionsExecuted,
+        childWorkflows,
       });
     }
   }

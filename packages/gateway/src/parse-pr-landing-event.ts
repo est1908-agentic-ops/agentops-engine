@@ -2,6 +2,7 @@ import {
   AGENTOPS_MANAGED_LABEL,
   AUTO_MERGE_DISABLE_LABEL,
   AUTO_MERGE_LABEL,
+  isValidGitRefName,
 } from '@agentops/contracts';
 
 export type PrLandingEvent = {
@@ -45,7 +46,7 @@ function buildEvent(
   const repo = payload.repository?.full_name;
   const prNumber = payload.pull_request?.number;
   const headBranch = payload.pull_request?.head?.ref;
-  if (!repo || prNumber === undefined || !headBranch) {
+  if (!repo || prNumber === undefined || !headBranch || !isValidGitRefName(headBranch)) {
     return null;
   }
   const labels = currentLabels(payload);

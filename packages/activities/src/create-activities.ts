@@ -38,7 +38,6 @@ import {
   type AgentSpec,
   type AgentsManifest,
 } from '@agentops/contracts';
-import { parseAgentsManifest, BUILTIN_WORKFLOW_INPUTS } from '@agentops/contracts';
 import type { FiledFindingStore } from './filed-finding-store';
 import { cronScheduleSpec, type ScheduleClientLike } from './schedule-ops';
 import { ENGINE_QUEUE } from '@agentops/contracts';
@@ -428,15 +427,11 @@ export function createActivities(deps: ActivityDependencies) {
     },
 
     async loadAgentsManifest(project: string, repo: string): Promise<AgentsManifest> {
-      const raw = await deps.scm.readFile(repo, 'agents.json');
-      if (raw === null) return { agents: [] };
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(raw);
-      } catch {
-        parsed = raw;
-      }
-      return parseAgentsManifest(parsed, { workflowInputs: BUILTIN_WORKFLOW_INPUTS });
+      // Agents + worker are the corresponding blocks of the project's
+      // agentops.json (validated by parseProjectConfig). A missing file yields
+      // full defaults, i.e. no agents and no worker.
+      const config = await loadProjectConfig(deps.scm, repo);
+      return { agents: config.agents ?? [], worker: config.worker };
     },
 
     async listAgentSchedules(

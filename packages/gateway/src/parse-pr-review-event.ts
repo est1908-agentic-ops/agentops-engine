@@ -1,3 +1,5 @@
+import { isValidGitRefName } from '@agentops/contracts';
+
 export interface PrReviewEvent {
   repo: string;
   prRef: string; // owner/repo#N
@@ -36,6 +38,9 @@ export function parsePrReviewEvent(
   const headBranch = body.pull_request?.head?.ref;
   const hasAgentopsLabel = !!body.pull_request?.labels?.some((l) => l.name === 'agentops');
   if (!repo || prNumber === undefined) {
+    return null;
+  }
+  if (headBranch !== undefined && !isValidGitRefName(headBranch)) {
     return null;
   }
   const prRef = `${repo}#${prNumber}`;
