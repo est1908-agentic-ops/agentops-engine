@@ -1,4 +1,3 @@
-import type { AgentSpec } from '@agentops/contracts';
 import type { ExistingSchedule, ReconcilePlan } from '@agentops/policies';
 import { scheduleId } from '@agentops/policies';
 import { ENGINE_QUEUE } from '@agentops/contracts';
@@ -69,29 +68,6 @@ export interface ScheduleOpsDeps {
   scheduleClient?: ScheduleClientLike;
   // The queue the Schedules should target for the built-in workflows
   taskQueue?: string;
-}
-
-export async function loadAgentsManifest(
-  scm: { readFile: (repo: string, path: string) => Promise<string | null> },
-  project: string,
-  repo: string,
-  parse: (
-    raw: unknown,
-    opts: { workflowInputs: Record<string, unknown> },
-  ) => { agents: AgentSpec[] },
-  workflowInputs: Record<string, unknown>,
-): Promise<AgentSpec[]> {
-  const raw = await scm.readFile(repo, 'agents.json');
-  if (raw === null) return [];
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch {
-    // Let the manifest parser surface a nice error
-    parsed = raw;
-  }
-  const manifest = parse(parsed, { workflowInputs });
-  return manifest.agents;
 }
 
 export async function listAgentSchedules(

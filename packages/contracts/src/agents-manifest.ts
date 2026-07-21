@@ -41,10 +41,10 @@ export const ProjectWorkerSchema = z
   .strict();
 export type ProjectWorker = z.infer<typeof ProjectWorkerSchema>;
 
-export const AgentsManifestSchema = z
-  .object({ agents: z.array(AgentSpecSchema), worker: ProjectWorkerSchema.optional() })
-  .strict();
-export type AgentsManifest = z.infer<typeof AgentsManifestSchema>;
+// The reconciler's view of a project's agents: the `agents` and `worker` blocks
+// of its `agentops.json`. These fields live on `ProjectConfig` (see
+// ./project-config) — there is no separate manifest file anymore.
+export type AgentsManifest = { agents: AgentSpec[]; worker?: ProjectWorker };
 
 // The built-in workflows the engine's shared fleet runs (they poll ENGINE_QUEUE).
 // Any other `workflow` name in a manifest is a project (Tier-2) workflow, which
@@ -68,41 +68,27 @@ export const BUILTIN_WORKFLOW_INPUTS: Record<string, z.ZodTypeAny> = {
   whiteboxBugHunt: WhiteboxBugHuntManifestInputSchema,
 };
 
-export class InvalidAgentsManifestError extends Error {
-  constructor(
-    message: string,
-    public readonly issues?: unknown,
-  ) {
-    super(message);
-  }
-}
-
 function fmt(err: ZodError): string {
   return err.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
 }
 
-export function parseAgentsManifest(
-  raw: unknown,
-  opts: { workflowInputs: Record<string, z.ZodTypeAny> },
-): AgentsManifest {
-  let manifest: AgentsManifest;
-  try {
-    manifest = AgentsManifestSchema.parse(raw);
-  } catch (err) {
-    if (err instanceof ZodError) throw new InvalidAgentsManifestError(fmt(err), err.issues);
-    throw err;
-  }
+// Manifest-level validation the per-entry zod schema can't express: unique
+// agent names, and per-workflow input validation for known built-ins. Returns
+// an error message, or null when the agents are valid. Callers wrap the message
+// in their own error type — `parseProjectConfig` throws InvalidProjectConfigError.
+export function validateAgentSpecs(
+  agents: readonly AgentSpec[],
+  workflowInputs: Record<string, z.ZodTypeAny> = BUILTIN_WORKFLOW_INPUTS,
+): string | null {
   const seen = new Set<string>();
-  for (const agent of manifest.agents) {
-    if (seen.has(agent.name))
-      throw new InvalidAgentsManifestError(`duplicate agent name "${agent.name}"`);
+  for (const agent of agents) {
+    if (seen.has(agent.name)) return `duplicate agent name "${agent.name}"`;
     seen.add(agent.name);
-    const inputSchema = opts.workflowInputs[agent.workflow];
+    const inputSchema = workflowInputs[agent.workflow];
     if (inputSchema) {
       const res = inputSchema.safeParse(agent.input);
-      if (!res.success)
-        throw new InvalidAgentsManifestError(`agent "${agent.name}" input: ${fmt(res.error)}`);
+      if (!res.success) return `agent "${agent.name}" input: ${fmt(res.error)}`;
     }
   }
-  return manifest;
+  return null;
 }
