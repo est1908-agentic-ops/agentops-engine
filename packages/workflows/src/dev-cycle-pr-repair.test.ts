@@ -12,6 +12,7 @@ const {
   recordRunStats,
   resolveRepoConfig,
   runAgent,
+  patched,
 } = vi.hoisted(() => {
   const runAgentFn = vi.fn().mockImplementation(async (req: { stage: string }) => {
     const outputs: Record<string, string> = {
@@ -41,6 +42,7 @@ const {
     recordRunStats: vi.fn().mockResolvedValue(undefined),
     resolveRepoConfig: vi.fn().mockResolvedValue({ config: null }),
     runAgent: runAgentFn,
+    patched: vi.fn().mockReturnValue(false),
   };
 });
 
@@ -59,6 +61,7 @@ vi.mock('@temporalio/workflow', () => ({
       resolveRepoConfig,
     };
   },
+  patched,
   condition: vi.fn(async (cb: () => boolean) => {
     // When called at the babysit brake, invoke the cancel handler and then resolve
     if (cancelHandler) {
@@ -95,6 +98,7 @@ const config = {
 describe('devCyclePrRepair babysit brake cancel', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    patched.mockReturnValue(false);
     cancelHandler = null;
   });
 
@@ -110,6 +114,48 @@ describe('devCyclePrRepair babysit brake cancel', () => {
     const result = await devCyclePrRepair(input);
 
     // Assertions: workflow should have terminated (not hung)
+    expect(result.status).toBe('failed');
+    expect(result.stage).toBe('failed');
+    expect(cleanupWorkspace).toHaveBeenCalledWith('ws', 'owner/repo');
+  });
+
+  it('brakes immediately on first poll when patched=true and CI is unreadable', async () => {
+    patched.mockReturnValue(true);
+    getPrFeedback.mockResolvedValue({ ciStatus: 'unreadable', unresolvedThreads: 0, comments: [] });
+
+    const input: DevCyclePrRepairInput = {
+      taskId: 'task-123',
+      project: 'test-project',
+      repo: 'owner/repo',
+      prRef: 'owner/repo#42',
+      config,
+    };
+
+    const result = await devCyclePrRepair(input);
+
+    // Assertions: should brake on first poll, not 240 polls
+    expect(getPrFeedback).toHaveBeenCalledTimes(1);
+    expect(result.status).toBe('failed');
+    expect(result.stage).toBe('failed');
+    expect(cleanupWorkspace).toHaveBeenCalledWith('ws', 'owner/repo');
+  });
+
+  it('preserves old polling behavior when patched=false and CI is unreadable', async () => {
+    patched.mockReturnValue(false);
+    getPrFeedback.mockResolvedValue({ ciStatus: 'unreadable', unresolvedThreads: 0, comments: [] });
+
+    const input: DevCyclePrRepairInput = {
+      taskId: 'task-123',
+      project: 'test-project',
+      repo: 'owner/repo',
+      prRef: 'owner/repo#42',
+      config,
+    };
+
+    const result = await devCyclePrRepair(input);
+
+    // Assertions: should poll MAX_BABYSIT_WAITS (240) times before braking locally
+    expect(getPrFeedback).toHaveBeenCalledTimes(240);
     expect(result.status).toBe('failed');
     expect(result.stage).toBe('failed');
     expect(cleanupWorkspace).toHaveBeenCalledWith('ws', 'owner/repo');
