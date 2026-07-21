@@ -169,4 +169,46 @@ describe('platformChat', () => {
       expect(result.turns).toBe(0);
     });
   }, 30_000);
+
+  it(
+    'seeds accumulators and transcript from carry and returns full state',
+    async () => {
+      const activities = scriptedActivities(['CHAT_TURN: {"message":"All set","done":true}']);
+      await withTestEnv(activities, async ({ env, taskQueue }) => {
+        const carry = {
+          messages: [
+            { seq: 1, role: 'user' as const, text: 'initial prompt' },
+            { seq: 2, role: 'agent' as const, text: 'agent reply' },
+          ],
+          seq: 2,
+          workspaceRef: 'ws-carry',
+          actionsExecuted: [{ type: 'terminate' as const, workflowId: 'wf-1', reason: 'stuck' }],
+          childWorkflows: [{ workflowId: 'c1-fix-1', repo: 'r1', goal: 'g1' }],
+        };
+        const handle = await env.client.workflow.start(platformChat, {
+          taskQueue,
+          workflowId: 'chat-carry-test',
+          args: [{}, carry],
+        });
+        await env.sleep('1 second');
+        // Send a user signal to trigger the next agent turn
+        await handle.signal(userTurnSignal, 'continue');
+        await env.sleep('2 seconds');
+        const state = await handle.query(conversationQuery);
+        expect(state.messages).toHaveLength(4); // carry 2 + new user 1 + new agent turn 1
+        expect(state.messages[0].text).toBe('initial prompt');
+        expect(state.messages[1].text).toBe('agent reply');
+        expect(state.messages[2].text).toBe('continue');
+        expect(state.messages[3].role).toBe('agent');
+        const result = await handle.result();
+        expect(result.turns).toBe(2); // 1 from carry + 1 new agent turn
+        expect(result.actionsExecuted).toHaveLength(1);
+        expect(result.actionsExecuted[0].workflowId).toBe('wf-1');
+        expect(result.childWorkflows).toHaveLength(1);
+        expect(result.childWorkflows[0].workflowId).toBe('c1-fix-1');
+      });
+    },
+    30_000,
+  );
+
 });
