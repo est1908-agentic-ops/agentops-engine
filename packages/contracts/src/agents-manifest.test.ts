@@ -1,159 +1,81 @@
 import { describe, it, expect } from 'vitest';
 import {
-  parseAgentsManifest,
-  BUILTIN_WORKFLOW_INPUTS,
-  InvalidAgentsManifestError,
+  AgentSpecSchema,
   ProjectWorkerSchema,
+  validateAgentSpecs,
+  BUILTIN_WORKFLOW_INPUTS,
   isBuiltinWorkflow,
   BUILTIN_WORKFLOWS,
+  type AgentSpec,
 } from './agents-manifest';
 
-const opts = { workflowInputs: BUILTIN_WORKFLOW_INPUTS };
+const spec = (partial: Partial<AgentSpec> & Pick<AgentSpec, 'name' | 'workflow'>): AgentSpec =>
+  AgentSpecSchema.parse({ schedule: '0 2 * * *', ...partial });
 
-describe('parseAgentsManifest', () => {
-  it('accepts a valid whiteboxBugHunt entry', () => {
-    const m = parseAgentsManifest(
-      {
-        agents: [
-          {
-            name: 'nightly-bughunt',
-            workflow: 'whiteboxBugHunt',
-            schedule: '0 2 * * *',
-            input: { focus: 'auth' },
-          },
-        ],
-      },
-      opts,
-    );
-    expect(m.agents[0]).toMatchObject({
+describe('AgentSpecSchema', () => {
+  it('applies defaults for enabled/timezone/overlap/input', () => {
+    const s = AgentSpecSchema.parse({
       name: 'nightly-bughunt',
-      enabled: true,
-      timezone: 'UTC',
-      overlap: 'skip',
+      workflow: 'whiteboxBugHunt',
+      schedule: '0 2 * * *',
     });
+    expect(s).toMatchObject({ enabled: true, timezone: 'UTC', overlap: 'skip', input: {} });
   });
 
-  it('rejects unknown top-level/entry keys (strict)', () => {
-    expect(() => parseAgentsManifest({ agents: [], oops: 1 }, opts)).toThrow(
-      InvalidAgentsManifestError,
-    );
-  });
-
-  it('rejects a bad cron and a bad name', () => {
+  it('rejects unknown entry keys (strict), a bad cron, and a bad name', () => {
     expect(() =>
-      parseAgentsManifest(
-        { agents: [{ name: 'x', workflow: 'whiteboxBugHunt', schedule: 'not cron' }] },
-        opts,
-      ),
-    ).toThrow(InvalidAgentsManifestError);
+      AgentSpecSchema.parse({ name: 'x', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', oops: 1 }),
+    ).toThrow();
     expect(() =>
-      parseAgentsManifest(
-        { agents: [{ name: 'Bad_Name', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *' }] },
-        opts,
-      ),
-    ).toThrow(InvalidAgentsManifestError);
+      AgentSpecSchema.parse({ name: 'x', workflow: 'whiteboxBugHunt', schedule: 'not cron' }),
+    ).toThrow();
+    expect(() =>
+      AgentSpecSchema.parse({ name: 'Bad_Name', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *' }),
+    ).toThrow();
   });
 
   it('accepts "continuous" as a schedule', () => {
-    const m = parseAgentsManifest(
-      { agents: [{ name: 'mon', workflow: 'whiteboxBugHunt', schedule: 'continuous' }] },
-      opts,
+    expect(spec({ name: 'mon', workflow: 'whiteboxBugHunt', schedule: 'continuous' }).schedule).toBe(
+      'continuous',
     );
-    expect(m.agents[0].schedule).toBe('continuous');
   });
 
-  it('validates per-workflow input against the workflow schema', () => {
-    // whiteboxBugHunt input rejects unknown keys
-    expect(() =>
-      parseAgentsManifest(
-        {
-          agents: [
-            { name: 'b', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: { nope: 1 } },
-          ],
-        },
-        opts,
-      ),
-    ).toThrow(InvalidAgentsManifestError);
-  });
-
-  it('passes input through for an unknown (Tier-2) workflow', () => {
-    const m = parseAgentsManifest(
-      {
-        agents: [
-          {
-            name: 'r',
-            workflow: 'rollbarMonitor',
-            schedule: 'continuous',
-            input: { anything: true },
-          },
-        ],
-      },
-      opts,
+  it('accepts an optional taskQueue and leaves it undefined when absent', () => {
+    expect(spec({ name: 'r', workflow: 'rollbarMonitor', taskQueue: 'proj-acme' }).taskQueue).toBe(
+      'proj-acme',
     );
-    expect(m.agents[0].input).toEqual({ anything: true });
+    expect(spec({ name: 'nb', workflow: 'whiteboxBugHunt' }).taskQueue).toBeUndefined();
+  });
+});
+
+describe('validateAgentSpecs', () => {
+  it('returns null for valid, uniquely-named agents', () => {
+    expect(
+      validateAgentSpecs([spec({ name: 'a', workflow: 'whiteboxBugHunt', input: { focus: 'auth' } })]),
+    ).toBeNull();
   });
 
   it('rejects duplicate names', () => {
-    expect(() =>
-      parseAgentsManifest(
-        {
-          agents: [
-            { name: 'dup', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *' },
-            { name: 'dup', workflow: 'whiteboxBugHunt', schedule: '0 3 * * *' },
-          ],
-        },
-        opts,
-      ),
-    ).toThrow(/duplicate/i);
+    const err = validateAgentSpecs([
+      spec({ name: 'dup', workflow: 'whiteboxBugHunt' }),
+      spec({ name: 'dup', workflow: 'whiteboxBugHunt', schedule: '0 3 * * *' }),
+    ]);
+    expect(err).toMatch(/duplicate/i);
   });
 
-  it('accepts an optional taskQueue and defaults it absent', () => {
-    const m = parseAgentsManifest(
-      {
-        agents: [
-          { name: 'r', workflow: 'rollbarMonitor', schedule: 'continuous', taskQueue: 'proj-acme' },
-        ],
-      },
-      opts,
+  it('validates per-workflow input against the built-in schema', () => {
+    // whiteboxBugHunt input rejects unknown keys
+    const err = validateAgentSpecs(
+      [spec({ name: 'b', workflow: 'whiteboxBugHunt', input: { nope: 1 } })],
+      BUILTIN_WORKFLOW_INPUTS,
     );
-    expect(m.agents[0].taskQueue).toBe('proj-acme');
-    const m2 = parseAgentsManifest(
-      { agents: [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *' }] },
-      opts,
-    );
-    expect(m2.agents[0].taskQueue).toBeUndefined();
+    expect(err).toMatch(/input/i);
   });
 
-  it('accepts an optional worker block and applies its defaults', () => {
-    const m = parseAgentsManifest(
-      {
-        agents: [{ name: 'r', workflow: 'rollbarMonitor', schedule: 'continuous' }],
-        worker: { image: 'reg/acme/agentops-worker:abc123', externalSecrets: ['rollbar-token'] },
-      },
-      opts,
-    );
-    expect(m.worker).toEqual({
-      image: 'reg/acme/agentops-worker:abc123',
-      replicas: 1,
-      externalSecrets: ['rollbar-token'],
-    });
-  });
-
-  it('omits worker when absent (config-only / Tier-1)', () => {
-    const m = parseAgentsManifest(
-      { agents: [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *' }] },
-      opts,
-    );
-    expect(m.worker).toBeUndefined();
-  });
-
-  it('rejects a worker block without an image, and unknown worker keys (strict)', () => {
-    expect(() => parseAgentsManifest({ agents: [], worker: { replicas: 2 } }, opts)).toThrow(
-      InvalidAgentsManifestError,
-    );
-    expect(() =>
-      parseAgentsManifest({ agents: [], worker: { image: 'x', nope: 1 } }, opts),
-    ).toThrow(InvalidAgentsManifestError);
+  it('passes input through for an unknown (Tier-2) workflow', () => {
+    expect(
+      validateAgentSpecs([spec({ name: 'r', workflow: 'rollbarMonitor', input: { anything: true } })]),
+    ).toBeNull();
   });
 });
 
@@ -165,8 +87,10 @@ describe('ProjectWorkerSchema', () => {
       externalSecrets: [],
     });
   });
-  it('rejects a non-positive replicas', () => {
+  it('rejects a non-positive replicas, a missing image, and unknown keys (strict)', () => {
     expect(() => ProjectWorkerSchema.parse({ image: 'reg/w:tag', replicas: 0 })).toThrow();
+    expect(() => ProjectWorkerSchema.parse({ replicas: 2 })).toThrow();
+    expect(() => ProjectWorkerSchema.parse({ image: 'x', nope: 1 })).toThrow();
   });
 });
 

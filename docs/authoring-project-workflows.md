@@ -1,6 +1,6 @@
 # Authoring Tier-2 project workflows
 
-Tier 1 (agents.json + built-in workflows) covers most cases. Use Tier 2 when you need a custom workflow structure (e.g. poll Rollbar, Linear, or an internal system) that no built-in provides.
+Tier 1 (agentops.json + built-in workflows) covers most cases. Use Tier 2 when you need a custom workflow structure (e.g. poll Rollbar, Linear, or an internal system) that no built-in provides.
 
 ## Install (in your project)
 
@@ -15,7 +15,7 @@ agentops/
   workflows/rollbar-monitor.ts   # your workflow(s)
   activities/rollbar-fetch.ts    # optional: your secret-holding activities
   worker.ts                      # createEngineWorker
-agents.json                      # schedule it (with "taskQueue")
+agentops.json                      # schedule it (with "taskQueue")
 ```
 
 ## Workflow example
@@ -52,7 +52,7 @@ const worker = await createEngineWorker({
 await worker.run();
 ```
 
-## agents.json
+## agentops.json
 
 ```json
 {
@@ -76,14 +76,14 @@ Omit `taskQueue` on agents — the reconciler defaults custom workflows to
 
 ## Deploy
 
-Your CI builds the worker image; the `worker` block in `agents.json` drives
+Your CI builds the worker image; the `worker` block in `agentops.json` drives
 deployment via the generic `project-worker` Helm chart (no engine secrets).
 See [project-worker-deployment.md](project-worker-deployment.md).
 
-The engine stamps `project` in memo at start (from your agents.json entry) and
+The engine stamps `project` in memo at start (from your agentops.json entry) and
 enforces repo ownership on every privileged activity.
 
 See [docs/project-worker/](project-worker/) for a full reference (Rollbar monitor),
 [project-worker-deployment.md](project-worker-deployment.md) for deploying the
-worker, and the [software lifecycle vision](software-lifecycle-vision.md) for
-how project workflows fit into the wider development system.
+worker, and the [SLDS in the engine README](../README.md#the-software-lifecycle-development-system-slds)
+for how project workflows fit into the wider development system.

@@ -48,7 +48,7 @@ describe('SP3 triggers e2e', () => {
     const scm = new MemoryScmPort();
     scm.seedFile(
       'acme/web',
-      'agents.json',
+      'agentops.json',
       JSON.stringify({
         agents: [
           {

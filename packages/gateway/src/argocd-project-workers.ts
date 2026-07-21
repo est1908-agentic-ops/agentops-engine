@@ -1,9 +1,9 @@
-import { loadManagedProjectRegistry, type ManagedProjectRegistryDeps } from '@agentops/activities';
 import {
-  parseAgentsManifest,
-  BUILTIN_WORKFLOW_INPUTS,
-  type ResolvedProjectEntry,
-} from '@agentops/contracts';
+  loadManagedProjectRegistry,
+  loadProjectConfig,
+  type ManagedProjectRegistryDeps,
+} from '@agentops/activities';
+import type { ResolvedProjectEntry } from '@agentops/contracts';
 import type { ScmPort } from '@agentops/ports';
 import { projectQueue, slugifyProject } from '@agentops/policies';
 
@@ -69,15 +69,10 @@ export function createProjectWorkerParamsProvider(
       for (const entry of entries) {
         try {
           const scm = deps.buildScm(entry);
-          const raw = await scm.readFile(entry.repo, 'agents.json');
-          if (raw === null) {
-            lastGood.delete(entry.project);
-            continue;
-          }
-          const manifest = parseAgentsManifest(JSON.parse(raw), {
-            workflowInputs: BUILTIN_WORKFLOW_INPUTS,
-          });
-          if (!manifest.worker) {
+          // The worker block lives in the project's agentops.json (a missing
+          // file or one without a `worker` block resolves to worker === undefined).
+          const config = await loadProjectConfig(scm, entry.repo);
+          if (!config.worker) {
             lastGood.delete(entry.project);
             continue;
           }
@@ -86,10 +81,10 @@ export function createProjectWorkerParamsProvider(
           // keeps working; only the emitted values need to be k8s/queue-safe.
           lastGood.set(entry.project, {
             project: slugifyProject(entry.project),
-            image: manifest.worker.image,
-            taskQueue: manifest.worker.taskQueue ?? projectQueue(entry.project),
-            replicas: String(manifest.worker.replicas),
-            externalSecretRefs: JSON.stringify(manifest.worker.externalSecrets),
+            image: config.worker.image,
+            taskQueue: config.worker.taskQueue ?? projectQueue(entry.project),
+            replicas: String(config.worker.replicas),
+            externalSecretRefs: JSON.stringify(config.worker.externalSecrets),
           });
         } catch (err) {
           console.warn(
