@@ -83,6 +83,7 @@ vi.mock('@temporalio/workflow', () => ({
     };
   },
   condition,
+  patched: vi.fn(() => true),
   sleep: vi.fn().mockResolvedValue(undefined),
   defineQuery: vi.fn(() => 'stateQuery'),
   defineSignal: vi.fn(() => 'signal'),
