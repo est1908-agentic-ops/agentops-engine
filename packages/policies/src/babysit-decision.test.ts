@@ -67,6 +67,36 @@ describe('babysitDecision', () => {
     expect(babysitDecision(failedFeedback, new Set(), 0, 5, 99, 10)).toBe('actionable');
   });
 
+  // A live `pending` status means CI is genuinely still running (the
+  // un-pollable permission case is `unreadable`, braked above). A slow CI
+  // queue must not dead-end into a human-only brake on the short
+  // stale-feedback budget -- the real devcycle-109 hang: CI queued ~52min but
+  // the 20min budget braked at ~20min, then nothing re-polled. So `pending`
+  // gets its own, much larger `maxPendingWaits` budget.
+  it('keeps waiting on pending CI past the stale-feedback cap when the pending budget is larger', () => {
+    // waitingRounds (100) is well past maxWaitingRounds (10) but under maxPendingWaits (300).
+    expect(babysitDecision(pendingFeedback, new Set(), 0, 5, 100, 10, 300)).toBe('waiting');
+  });
+
+  it('brakes pending CI once its own (larger) pending budget is exhausted', () => {
+    expect(babysitDecision(pendingFeedback, new Set(), 0, 5, 300, 10, 300)).toBe('braked');
+  });
+
+  it('still brakes stale/already-addressed feedback at the short cap even when the pending budget is large', () => {
+    // Not pending -> uses maxWaitingRounds (10), not maxPendingWaits (300).
+    const seen = new Set([feedbackHash(failedFeedback)]);
+    expect(babysitDecision(failedFeedback, seen, 0, 5, 10, 10, 300)).toBe('braked');
+  });
+
+  it('defaults maxPendingWaits to maxWaitingRounds (back-compat: pending shares the short cap)', () => {
+    // 6-arg callers keep the old behavior: pending brakes at maxWaitingRounds.
+    expect(babysitDecision(pendingFeedback, new Set(), 0, 5, 10, 10)).toBe('braked');
+  });
+
+  it('still brakes pending CI immediately when unreadable, regardless of the pending budget', () => {
+    expect(babysitDecision(unreadableFeedback, new Set(), 0, 5, 0, 10, 300)).toBe('braked');
+  });
+
   it('defaults to unbounded waiting for the legacy 4-arg call', () => {
     expect(babysitDecision(pendingFeedback, new Set(), 0, 5)).toBe('waiting');
   });

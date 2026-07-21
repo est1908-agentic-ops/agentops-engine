@@ -2,6 +2,7 @@ import {
   condition,
   defineQuery,
   defineSignal,
+  patched,
   proxyActivities,
   setHandler,
   sleep,
@@ -40,6 +41,8 @@ const MAX_BABYSIT_WAITS = 240; // ~20min
 
 // Deprecated for new starts: gateway enrollment routes to prLanding instead.
 // Kept replayable for in-flight Temporal histories — do not rewrite this body.
+// Note: babysit brake verdict handling is versioned behind patched('pr-repair-babysit-brake-v1')
+// for replay safety; in-flight pre-patch histories skip the corrected braked block.
 export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<DevCycleState> {
   const state: DevCycleState = {
     taskId: input.taskId,
@@ -212,6 +215,8 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
   // Full babysit (identical to devCycle)
   const seen = new Set<string>();
   let waiting = 0;
+  let maxBabysitWaits = MAX_BABYSIT_WAITS;
+  const brakeFixEnabled = patched('pr-repair-babysit-brake-v1');
   state.stage = 'pr_babysit';
 
   while (true) {
@@ -223,10 +228,30 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
       state.babysitRounds,
       effectiveBrakes.maxBabysitRounds ?? 10,
       waiting,
-      MAX_BABYSIT_WAITS,
+      maxBabysitWaits,
     );
 
     if (decision === 'merge_ready') break;
+
+    if (brakeFixEnabled && decision === 'braked') {
+      state.status = 'blocked';
+      state.blockReason = 'babysit-brake';
+      // A cancel signal while blocked must terminate the workflow, not be
+      // discarded (see #120). Cancellation teardown is performed inline here
+      // so the workflow terminates cleanly while waiting for a resume signal.
+      if (await waitForResumeOrCancel()) {
+        state.stage = 'failed';
+        state.status = 'failed';
+        await activities.cleanupWorkspace(state.workspaceRef, input.repo);
+        return state;
+      }
+      // Human resumed: stop auto-braking and restart the no-progress counter
+      // so continued babysitting isn't instantly re-braked.
+      maxBabysitWaits = Number.MAX_SAFE_INTEGER;
+      waiting = 0;
+      state.stage = 'pr_babysit';
+      continue;
+    }
 
     if (decision === 'actionable') {
       waiting = 0;
@@ -255,7 +280,7 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
     }
 
     waiting += 1;
-    if (waiting >= MAX_BABYSIT_WAITS) {
+    if (waiting >= maxBabysitWaits) {
       state.status = 'blocked';
       state.blockReason = 'babysit-brake';
       // A cancel signal while blocked must terminate the workflow, not be
