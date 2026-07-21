@@ -4,6 +4,7 @@ import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import type { GitCommandRunner } from '@agentops/ports';
 import { slugifyProject } from '@agentops/policies';
+import { isValidGitRefName } from '@agentops/contracts';
 import { SpawnCommandRunner, type CommandRunner } from './spawn-command-runner';
 
 export interface WorkspaceManagerOptions {
@@ -79,6 +80,13 @@ export class WorkspaceManager implements Workspaces {
     headBranch?: string,
     headRef?: string,
   ): Promise<PreparedWorkspace> {
+    if (headBranch !== undefined && !isValidGitRefName(headBranch)) {
+      throw new WorkspaceError(`invalid headBranch: does not conform to git ref format`, true);
+    }
+    if (headRef !== undefined && !isValidGitRefName(headRef)) {
+      throw new WorkspaceError(`invalid headRef: does not conform to git ref format`, true);
+    }
+
     const git = this.resolveGit(repo);
     await mkdir(this.cacheDir, { recursive: true });
     await mkdir(this.workspacesDir, { recursive: true });
