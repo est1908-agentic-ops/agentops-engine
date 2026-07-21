@@ -467,8 +467,20 @@ export function createActivities(deps: ActivityDependencies) {
               : ((spec as any)?.cronExpressions?.[0] ??
                 (spec as any)?.cron?.cronString ??
                 String(spec ?? ''));
-          const workflow = (rec.action as any)?.workflowType ?? 'whiteboxBugHunt';
-          const taskQueue = (rec.action as any)?.taskQueue as string | undefined;
+          let workflow = (rec.action as any)?.workflowType ?? 'whiteboxBugHunt';
+          let taskQueue: string | undefined;
+          // Fetch the real task queue and workflow from the schedule description.
+          // The list() summary does not include taskQueue; describe() returns the full object.
+          try {
+            const desc = await client.getHandle!(sid).describe?.();
+            if (desc) {
+              taskQueue = (desc as any)?.action?.taskQueue;
+              const descWorkflow = (desc as any)?.action?.workflowType;
+              if (descWorkflow) workflow = descWorkflow;
+            }
+          } catch {
+            // describe() failed; taskQueue remains undefined, workflow from summary
+          }
           out.push({ id: sid, scheduleSpec, workflow, paused: false, taskQueue });
         }
         /* eslint-enable @typescript-eslint/no-explicit-any */

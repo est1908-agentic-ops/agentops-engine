@@ -106,6 +106,7 @@ export function reconcileAgents(
       continue;
     }
     const desiredQueue = resolveAgentQueue(spec, project);
+    // Detect queue mismatch: taskQueue is populated by listAgentSchedules from describe()
     if (
       cur.scheduleSpec !== spec.schedule ||
       cur.workflow !== spec.workflow ||

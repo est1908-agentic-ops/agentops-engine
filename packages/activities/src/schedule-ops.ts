@@ -56,6 +56,7 @@ export interface ScheduleHandleLike {
   pause?: () => Promise<void>;
   unpause?: () => Promise<void>;
   delete?: () => Promise<void>;
+  describe?: () => Promise<unknown>;
 }
 
 export interface ScheduleClientLike {
@@ -82,14 +83,27 @@ export async function listAgentSchedules(
     for await (const s of lister()) {
       const id = (s as any).scheduleId;
       if (!id || !id.startsWith(`agent:${project}:`)) continue;
-      // Extract from Temporal ScheduleSummary: action.workflowType is the workflow name,
-      // and scheduleSpec from memo (stored at creation time). If memo is unavailable,
-      // default to 'continuous' since real SDK responses have compiled calendars/intervals
-      // instead of the original cron expression.
+      // scheduleSpec is recovered from memo (stored at creation): real SDK
+      // summaries carry compiled calendars/intervals, not the original cron string.
       const memoSchedule = ((s as any)?.memo as Record<string, unknown> | undefined)?.schedule;
       const scheduleSpec = typeof memoSchedule === 'string' ? memoSchedule : 'continuous';
-      const workflow = (s as any)?.action?.workflowType ?? 'whiteboxBugHunt';
-      const taskQueue = (s as any)?.action?.taskQueue as string | undefined;
+      let workflow = (s as any)?.action?.workflowType ?? 'whiteboxBugHunt';
+      // The list() summary may omit taskQueue; when it does, describe() returns the
+      // full action so reconcileAgents has a real queue to compare against --
+      // otherwise task-queue mismatch detection is dead (issue #131).
+      let taskQueue = (s as any)?.action?.taskQueue as string | undefined;
+      if (taskQueue === undefined) {
+        try {
+          const desc = await client.getHandle(id).describe?.();
+          if (desc) {
+            taskQueue = (desc as any)?.action?.taskQueue ?? taskQueue;
+            const descWorkflow = (desc as any)?.action?.workflowType;
+            if (descWorkflow) workflow = descWorkflow;
+          }
+        } catch {
+          // describe() failed; taskQueue stays undefined, workflow from summary
+        }
+      }
       // paused not directly on list item in all SDK versions; default false and rely on apply
       out.push({ id, scheduleSpec, workflow, paused: false, taskQueue });
     }
