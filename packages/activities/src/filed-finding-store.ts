@@ -5,8 +5,9 @@ export interface FiledFinding {
 }
 
 export interface FiledFindingStore {
-  find(project: string, fingerprint: string): Promise<FiledFinding | null>;
-  record(f: FiledFinding): Promise<void>;
+  reserve(project: string, fingerprint: string): Promise<{ won: boolean; issueRef: string }>;
+  finalize(project: string, fingerprint: string, issueRef: string): Promise<void>;
+  release(project: string, fingerprint: string): Promise<void>;
 }
 
 export class InMemoryFiledFindingStore implements FiledFindingStore {
@@ -14,10 +15,35 @@ export class InMemoryFiledFindingStore implements FiledFindingStore {
   private key(p: string, fp: string) {
     return `${p}:${fp}`;
   }
-  async find(project: string, fingerprint: string) {
-    return this.byKey.get(this.key(project, fingerprint)) ?? null;
+
+  reserve(project: string, fingerprint: string): Promise<{ won: boolean; issueRef: string }> {
+    const k = this.key(project, fingerprint);
+    const existing = this.byKey.get(k);
+    if (!existing) {
+      this.byKey.set(k, { project, fingerprint, issueRef: '' });
+      return Promise.resolve({ won: true, issueRef: '' });
+    }
+    if (existing.issueRef === '') {
+      return Promise.resolve({ won: false, issueRef: '' });
+    }
+    return Promise.resolve({ won: false, issueRef: existing.issueRef });
   }
-  async record(f: FiledFinding) {
-    this.byKey.set(this.key(f.project, f.fingerprint), f);
+
+  finalize(project: string, fingerprint: string, issueRef: string): Promise<void> {
+    const k = this.key(project, fingerprint);
+    const existing = this.byKey.get(k);
+    if (existing && existing.issueRef === '') {
+      existing.issueRef = issueRef;
+    }
+    return Promise.resolve();
+  }
+
+  release(project: string, fingerprint: string): Promise<void> {
+    const k = this.key(project, fingerprint);
+    const existing = this.byKey.get(k);
+    if (existing && existing.issueRef === '') {
+      this.byKey.delete(k);
+    }
+    return Promise.resolve();
   }
 }

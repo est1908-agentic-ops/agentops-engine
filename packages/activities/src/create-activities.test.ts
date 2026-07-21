@@ -259,6 +259,95 @@ describe('createActivities', () => {
     expect(b).toEqual({ ref: a.ref, url: '', deduped: true });
   });
 
+  it('createIssue prevents concurrent duplicate filing via atomic reserve', async () => {
+    const filedFindings = new InMemoryFiledFindingStore();
+    const barrierPromise = (() => {
+      let resolve: () => void;
+      const p = new Promise<void>((r) => {
+        resolve = r;
+      });
+      return { promise: p, resolve: resolve! };
+    })();
+    const trackerCreateIssueCalls: number[] = [];
+    const tracker = {
+      async createIssue(_req: any) {
+        trackerCreateIssueCalls.push(1);
+        await barrierPromise.promise;
+        return { ref: 'issue-1', url: 'http://issue-1' };
+      },
+    } as any;
+    const deps = { ...buildDeps(), tracker, filedFindings };
+    const activities = createActivities(deps);
+
+    const promiseA = activities.createIssue({
+      repo: 'o/r',
+      project: 'p',
+      title: 'T',
+      body: 'B',
+      labels: ['bug'],
+      dedupeFingerprint: 'fp1',
+    });
+    const promiseB = activities.createIssue({
+      repo: 'o/r',
+      project: 'p',
+      title: 'T2',
+      body: 'B2',
+      labels: ['bug'],
+      dedupeFingerprint: 'fp1',
+    });
+
+    barrierPromise.resolve();
+    const [a, b] = await Promise.all([promiseA, promiseB]);
+
+    expect(trackerCreateIssueCalls.length).toBe(1);
+    expect(a.deduped).toBe(false);
+    expect(a.ref).toBe('issue-1');
+    expect(b.deduped).toBe(true);
+    expect(b.ref).toBe('');
+  });
+
+  it('createIssue releases reservation on tracker error so retry succeeds', async () => {
+    const filedFindings = new InMemoryFiledFindingStore();
+    let createIssueCallCount = 0;
+    const tracker = {
+      async createIssue(_req: any) {
+        createIssueCallCount++;
+        if (createIssueCallCount === 1) {
+          throw new Error('transient error');
+        }
+        return { ref: 'issue-1', url: 'http://issue-1' };
+      },
+    } as any;
+    const deps = { ...buildDeps(), tracker, filedFindings };
+    const activities = createActivities(deps);
+
+    try {
+      await activities.createIssue({
+        repo: 'o/r',
+        project: 'p',
+        title: 'T',
+        body: 'B',
+        labels: ['bug'],
+        dedupeFingerprint: 'fp1',
+      });
+    } catch (err) {
+      expect((err as Error).message).toBe('transient error');
+    }
+
+    const retryResult = await activities.createIssue({
+      repo: 'o/r',
+      project: 'p',
+      title: 'T',
+      body: 'B',
+      labels: ['bug'],
+      dedupeFingerprint: 'fp1',
+    });
+
+    expect(createIssueCallCount).toBe(2);
+    expect(retryResult.deduped).toBe(false);
+    expect(retryResult.ref).toBe('issue-1');
+  });
+
   it('runAgent returns a stable promptHash and a promptSource', async () => {
     const deps = buildDeps();
     (deps.backends.stub as StubBackend).scriptResponse('bughunt', 1, { output: 'FINDINGS: []' });
