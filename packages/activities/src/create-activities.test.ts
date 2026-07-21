@@ -270,7 +270,7 @@ describe('createActivities', () => {
     })();
     const trackerCreateIssueCalls: number[] = [];
     const tracker = {
-      async createIssue(req: any) {
+      async createIssue(_req: any) {
         trackerCreateIssueCalls.push(1);
         await barrierPromise.promise;
         return { ref: 'issue-1', url: 'http://issue-1' };
@@ -310,7 +310,7 @@ describe('createActivities', () => {
     const filedFindings = new InMemoryFiledFindingStore();
     let createIssueCallCount = 0;
     const tracker = {
-      async createIssue(req: any) {
+      async createIssue(_req: any) {
         createIssueCallCount++;
         if (createIssueCallCount === 1) {
           throw new Error('transient error');
