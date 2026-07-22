@@ -29,16 +29,6 @@ async function getJson(port: number, path: string) {
   return { status: res.status, body };
 }
 
-async function postJson(port: number, path: string, payload: unknown) {
-  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
-  const body: unknown = await res.json();
-  return { status: res.status, body };
-}
-
 async function postJsonWithHeaders(
   port: number,
   path: string,
