@@ -292,4 +292,95 @@ describe('prLanding', () => {
     expect(cleanupWorkspace).toHaveBeenCalledTimes(1);
     expect(implementCalls).toBe(1);
   });
+
+  // Regression for the PR #155 crash: the `implement` prompt (implement.md)
+  // references {{fullVerifyFindings}} and {{reviewFindings}}; renderPrompt is
+  // strict and throws MissingTemplateVariableError when a key is absent. Both
+  // prLanding repair sites must therefore provide every key the template needs,
+  // exactly as dev-cycle's main loop does.
+  it('validateHead repair passes every context key the implement prompt requires', async () => {
+    let verifyCalls = 0;
+    const implementContexts: Array<Record<string, unknown> | undefined> = [];
+    vi.mocked(runAgent).mockImplementation(
+      async (req: { stage: string; promptContext?: Record<string, unknown> }) => {
+        if (req.stage === 'implement') implementContexts.push(req.promptContext);
+        let output = 'ok';
+        if (req.stage === 'implement') output = 'diff';
+        if (req.stage === 'full_verify') {
+          verifyCalls += 1;
+          output = verifyCalls === 1 ? 'FULL: FAIL' : 'FULL: PASS';
+        }
+        if (req.stage === 'review') output = 'VERDICT: PASS';
+        return { output, tokensIn: 1, tokensOut: 1, wallMs: 1, promptHash: 'h', promptSource: 's' };
+      },
+    );
+    vi.mocked(getPrSnapshot).mockImplementation(async () => greenSnapshot({ labels: ['automerge'] }));
+
+    await prLanding({
+      taskId: 'landing-o-r-20',
+      project: 'p',
+      repo: 'o/r',
+      prRef: 'o/r#20',
+      agentCreated: true,
+      headBranch: 'feature/x',
+      config: { ...baseConfig, autoMerge: 'all' },
+    });
+
+    expect(implementContexts.length).toBeGreaterThan(0);
+    expect(implementContexts[0]).toEqual(
+      expect.objectContaining({
+        fullVerifyFindings: expect.any(String),
+        reviewFindings: expect.any(String),
+        prReviewFeedback: expect.any(String),
+      }),
+    );
+  });
+
+  it('babysit repair on red CI passes every implement key and signals the CI failure', async () => {
+    const implementContexts: Array<Record<string, unknown> | undefined> = [];
+    // CI stays red until the repair agent has run, then flips green so the PR
+    // can validate and merge (mirrors CI re-running after the repair push).
+    vi.mocked(getPrSnapshot).mockImplementation(async () =>
+      implementContexts.length === 0
+        ? greenSnapshot({ ciStatus: 'failed', unresolvedThreads: 0, comments: [] })
+        : greenSnapshot({ labels: ['automerge'] }),
+    );
+    vi.mocked(runAgent).mockImplementation(
+      async (req: { stage: string; promptContext?: Record<string, unknown> }) => {
+        if (req.stage === 'implement') implementContexts.push(req.promptContext);
+        const outputs: Record<string, string> = {
+          implement: 'diff',
+          full_verify: 'FULL: PASS',
+          review: 'VERDICT: PASS',
+        };
+        return {
+          output: outputs[req.stage] ?? 'ok',
+          tokensIn: 1,
+          tokensOut: 1,
+          wallMs: 1,
+          promptHash: 'h',
+          promptSource: 's',
+        };
+      },
+    );
+
+    await prLanding({
+      taskId: 'landing-o-r-21',
+      project: 'p',
+      repo: 'o/r',
+      prRef: 'o/r#21',
+      agentCreated: true,
+      workspace: { workspaceRef: '/ws/t', branch: 'agentops/t', validatedHeadSha: 'abc' },
+      config: { ...baseConfig, autoMerge: 'all' },
+    });
+
+    expect(implementContexts.length).toBeGreaterThan(0);
+    expect(implementContexts[0]).toEqual(
+      expect.objectContaining({
+        fullVerifyFindings: expect.stringContaining('CI'),
+        reviewFindings: expect.any(String),
+        prReviewFeedback: expect.any(String),
+      }),
+    );
+  });
 });

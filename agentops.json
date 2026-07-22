@@ -1,5 +1,7 @@
 {
   "autoMerge": "all",
+  "fastVerifyCommands": ["pnpm install --frozen-lockfile", "pnpm lint", "pnpm typecheck"],
+  "fullVerifyCommands": ["pnpm test", "pnpm test:policies-coverage"],
   "agents": [
     {
       "name": "nightly-bughunt",
