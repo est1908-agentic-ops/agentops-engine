@@ -48,6 +48,9 @@ export interface ControlDeps {
   // five routes are gated behind `projectCrudAuthToken` (a bearer token);
   // with any of these three unset the routes return 503. Issue #4 (Traefik
   // basic-auth) is still required before the control ingress goes public.
+  // Platform and devCycle workflow-start routes (POST /api/platform/runs,
+  // POST /api/devcycle/runs) are also gated by this token; fail-closed (401)
+  // when unset.
   managedProjectStore?: PostgresManagedProjectStore;
   // Tier table CRUD (SP3-B). Only needs ENGINE_DB_HOST; not credential-gated
   // like managed projects (tier edits are operational, not secret-bearing).
@@ -285,6 +288,9 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
     return { status: 200 };
   }
   if (req.method === 'POST' && pathname === '/api/platform/runs') {
+    if (!authorizeControlToken(deps, req)) {
+      return { status: 401, body: { error: 'unauthorized' } };
+    }
     return handleStartRun(deps, req);
   }
   if (req.method === 'GET' && pathname === '/api/platform/runs') {
@@ -295,6 +301,9 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
     return handleGetRun(deps, runMatch.params.workflowId);
   }
   if (req.method === 'POST' && pathname === '/api/devcycle/runs') {
+    if (!authorizeControlToken(deps, req)) {
+      return { status: 401, body: { error: 'unauthorized' } };
+    }
     return handleStartDevCycleRun(deps, req);
   }
   if (req.method === 'GET' && pathname === '/api/devcycle/runs') {
