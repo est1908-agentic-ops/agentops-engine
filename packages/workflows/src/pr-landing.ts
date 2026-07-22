@@ -250,8 +250,16 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
       state.phase = 'repairing';
       state.implementAttempts += 1;
       state.iterations += 1;
+      // implement.md requires fullVerifyFindings + reviewFindings + prReviewFeedback;
+      // omitting any makes renderPrompt throw (the PR #155 self-heal crash). Give
+      // the current round's verify/review output their own slots and carry the
+      // accumulated human/review feedback in prReviewFeedback.
+      await runStageAgent('implement', state.implementAttempts, {
+        fullVerifyFindings: fullOutput,
+        reviewFindings: reviewOutput,
+        prReviewFeedback: feedback,
+      });
       feedback = [feedback, fullOutput, reviewOutput].filter(Boolean).join('\n\n---\n\n');
-      await runStageAgent('implement', state.implementAttempts, { prReviewFeedback: feedback });
       await activities.pushBranch(
         input.repo,
         state.workspaceRef,
@@ -383,7 +391,17 @@ export async function prLanding(input: PrLandingInput): Promise<PrLandingState> 
         state.phase = 'repairing';
         state.implementAttempts += 1;
         state.iterations += 1;
+        // implement.md requires all three keys (see the validateHead repair note).
+        // The babysit path is triggered by red CI and/or unresolved review
+        // threads, so surface the CI-failure signal as the verify finding and the
+        // review threads as the feedback. (Detailed failing-check logs aren't in
+        // PrFeedback yet -- tracked separately.)
         await runStageAgent('implement', state.implementAttempts, {
+          fullVerifyFindings:
+            feedback.ciStatus === 'failed'
+              ? 'CI checks are failing on this PR. Inspect the failing checks and their logs in the forge, then fix the root cause.'
+              : '',
+          reviewFindings: '',
           prReviewFeedback: reviewComments,
         });
         await activities.pushBranch(
