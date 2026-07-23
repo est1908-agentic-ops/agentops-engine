@@ -56,6 +56,10 @@ module.exports = defineConfig(
   {
     files: ['packages/workflows/src/**/*.ts'],
     rules: {
+      // AGENTS.md rule 1 (determinism boundary): no Node core imports. The `allow` array is the
+      // reviewed escape hatch for a proven-safe deterministic built-in (e.g. node:path), added
+      // only after verification that it does not break Temporal's replay determinism.
+      'import/no-nodejs-modules': ['error', { allow: [] }],
       'no-restricted-globals': [
         'error',
         { name: 'Date', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
