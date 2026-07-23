@@ -43,10 +43,9 @@ import type { ResolvedProjectEntry } from '@agentops/contracts';
 import { ENGINE_QUEUE, LEGACY_ENGINE_QUEUE } from '@agentops/contracts';
 import {
   createGithubPorts,
+  createLinearTracker,
   createProjectScopedPorts,
   githubCloneUrl,
-  LinearGraphqlClient,
-  LinearTrackerPort,
   MemoryScmPort,
   MemoryTrackerPort,
   type ScmPort,
@@ -87,7 +86,7 @@ export function buildActivityDependencies(
     if (!entry.linearToken) {
       throw new Error(`buildActivityDependencies: project "${entry.project}" is linear-tracked but has no resolved linearToken`);
     }
-    const tracker = new LinearTrackerPort(new LinearGraphqlClient(entry.linearToken));
+    const tracker = createLinearTracker(entry.linearToken);
     return { repo: entry.repo, linearTeamKey: entry.linearTeamKey, scm, tracker, git };
   });
   const { scm, tracker, resolveGit } = createProjectScopedPorts(entries);
