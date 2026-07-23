@@ -1,13 +1,12 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { ESLint } from 'eslint';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 describe('Determinism lint rules', () => {
   let eslint: ESLint;
 
-  // Resolve repo root from this file's location in packages/workflows/src
-  const repoRoot = path.resolve(fileURLToPath(import.meta.url), '../../../..');
+  // Resolve repo root from process.cwd() (runs from repo root when invoked via pnpm test)
+  const repoRoot = process.cwd();
 
   beforeAll(async () => {
     eslint = new ESLint({ cwd: repoRoot });
@@ -21,7 +20,7 @@ export {};`;
     });
     const errors = results[0].messages.filter((msg) => msg.ruleId === 'import/no-nodejs-modules');
     expect(errors).toHaveLength(1);
-    expect(errors[0].message).toContain('node');
+    expect(errors[0].message).toContain('builtin module');
   });
 
   it('should reject imports of Node core modules (bare module name)', async () => {
@@ -32,7 +31,7 @@ export {};`;
     });
     const errors = results[0].messages.filter((msg) => msg.ruleId === 'import/no-nodejs-modules');
     expect(errors).toHaveLength(1);
-    expect(errors[0].message).toContain('node');
+    expect(errors[0].message).toContain('builtin module');
   });
 
   it('should allow imports from @temporalio/workflow (false-positive guard)', async () => {

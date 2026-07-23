@@ -54,12 +54,28 @@ module.exports = defineConfig(
     },
   },
   {
-    files: ['packages/workflows/src/**/*.ts'],
+    files: ['packages/workflows/src/**/!(*.test).ts'],
     rules: {
       // AGENTS.md rule 1 (determinism boundary): no Node core imports. The `allow` array is the
       // reviewed escape hatch for a proven-safe deterministic built-in (e.g. node:path), added
       // only after verification that it does not break Temporal's replay determinism.
       'import/no-nodejs-modules': ['error', { allow: [] }],
+      'no-restricted-globals': [
+        'error',
+        { name: 'Date', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
+        { name: 'setTimeout', message: 'Use Temporal sleep() instead — AGENTS.md rule 1.' },
+        { name: 'setInterval', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
+      ],
+      'no-restricted-properties': [
+        'error',
+        { object: 'Math', property: 'random', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
+        { object: 'Date', property: 'now', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
+      ],
+    },
+  },
+  {
+    files: ['packages/workflows/src/**/*.test.ts'],
+    rules: {
       'no-restricted-globals': [
         'error',
         { name: 'Date', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
