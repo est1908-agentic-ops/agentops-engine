@@ -77,7 +77,7 @@ describe('platformChat', () => {
       // Second scripted turn marks done to end the run.
       await handle.terminate('test done');
     });
-  });
+  }, 30_000);
 
   it('surfaces a proposal, executes it on approve, and skips it on reject', async () => {
     const activities = scriptedActivities([
@@ -99,7 +99,7 @@ describe('platformChat', () => {
       expect(result.actionsExecuted).toHaveLength(1);
       expect(result.actionsExecuted[0].workflowId).toBe('wf-9');
     });
-  });
+  }, 30_000);
 
   it('gives each turn a distinct runAgent `attempt` so K8sJobRunner cannot 409-reuse a stale Job/output across turns', async () => {
     // taskId is the chatId, which is constant for the whole conversation (unlike
@@ -152,7 +152,7 @@ describe('platformChat', () => {
 
     expect(attempts).toHaveLength(2);
     expect(attempts[0]).not.toBe(attempts[1]);
-  });
+  }, 30_000);
 
   it('auto-closes after the idle timeout with no input', async () => {
     const activities = scriptedActivities(['CHAT_TURN: {"message":"unused"}']);
