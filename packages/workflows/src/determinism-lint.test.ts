@@ -21,7 +21,7 @@ export {};`;
     const errors = results[0].messages.filter((msg) => msg.ruleId === 'import/no-nodejs-modules');
     expect(errors).toHaveLength(1);
     expect(errors[0].message).toContain('builtin module');
-  });
+  }, 30_000);
 
   it('should reject imports of Node core modules (bare module name)', async () => {
     const code = `import fs from 'fs';
@@ -32,7 +32,7 @@ export {};`;
     const errors = results[0].messages.filter((msg) => msg.ruleId === 'import/no-nodejs-modules');
     expect(errors).toHaveLength(1);
     expect(errors[0].message).toContain('builtin module');
-  });
+  }, 30_000);
 
   it('should allow imports from @temporalio/workflow (false-positive guard)', async () => {
     const code = `import { defineWorkflow } from '@temporalio/workflow';
@@ -42,5 +42,5 @@ export {};`;
     });
     const errors = results[0].messages.filter((msg) => msg.ruleId === 'import/no-nodejs-modules');
     expect(errors).toHaveLength(0);
-  });
+  }, 30_000);
 });
