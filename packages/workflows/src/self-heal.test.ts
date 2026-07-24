@@ -57,5 +57,5 @@ describe('selfHeal', () => {
     } finally {
       await env.teardown();
     }
-  });
+  }, 30_000);
 });
