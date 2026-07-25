@@ -135,59 +135,13 @@ describe('engine project (control HTTP client)', () => {
   it('buildControlRequest composes URL, method, auth header, and JSON body', async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
     globalThis.fetch = fetchMock as unknown as typeof fetch;
-    await buildControlRequest('POST', '/api/projects', { project: 'acme-web', repo: 'acme/web', token: 'ghp_x' });
+    await buildControlRequest('PUT', '/api/tiers', { tiers: [] });
     const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://control.test:3001/api/projects');
-    expect(init.method).toBe('POST');
+    expect(url).toBe('http://control.test:3001/api/tiers');
+    expect(init.method).toBe('PUT');
     expect((init.headers as Record<string, string>)['x-control-crud-token']).toBe('tok');
     expect((init.headers as Record<string, string>)['content-type']).toBe('application/json');
-    expect(init.body).toBe(JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_x' }));
-  });
-
-  it('add POSTs the project and prints the result', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ project: 'acme-web', repo: 'acme/web' }), { status: 201 }));
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-    await cmdProject(['add', '--project', 'acme-web', '--repo', 'acme/web', '--token', 'ghp_x']);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://control.test:3001/api/projects');
-    expect(init.method).toBe('POST');
-  });
-
-  it('add passes tracker-type/linear-* flags through to the request body', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 201 }));
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-    await cmdProject([
-      'add',
-      '--project',
-      'acme-linear',
-      '--repo',
-      'acme/linear-tracked',
-      '--token',
-      'ghp_x',
-      '--tracker-type',
-      'linear',
-      '--linear-team-key',
-      'ENG',
-      '--linear-trigger-label-id',
-      'label-uuid',
-      '--linear-token',
-      'lin_x',
-    ]);
-    const [, init] = fetchMock.mock.calls[0];
-    expect(JSON.parse(init.body as string)).toMatchObject({
-      trackerType: 'linear',
-      linearTeamKey: 'ENG',
-      linearTriggerLabelId: 'label-uuid',
-      linearToken: 'lin_x',
-    });
-  });
-
-  it('update passes linear-* flags through to the request body', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-    await cmdProject(['update', '--repo', 'acme/linear-tracked', '--linear-token', 'lin_new']);
-    const [, init] = fetchMock.mock.calls[0];
-    expect(JSON.parse(init.body as string)).toEqual({ linearToken: 'lin_new' });
+    expect(init.body).toBe(JSON.stringify({ tiers: [] }));
   });
 
   it('list GETs /api/projects', async () => {
@@ -207,33 +161,7 @@ describe('engine project (control HTTP client)', () => {
     expect(url).toBe('http://control.test:3001/api/projects/acme%2Fweb');
   });
 
-  it('update PUTs and URL-encodes the repo', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-    await cmdProject(['update', '--repo', 'acme/web', '--token', 'ghp_new']);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://control.test:3001/api/projects/acme%2Fweb');
-    expect(init.method).toBe('PUT');
-    expect(JSON.parse(init.body)).toEqual({ token: 'ghp_new' });
-  });
-
-  it('update --config null clears config; --config <json> sets it', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-    await cmdProject(['update', '--repo', 'acme/web', '--config', 'null']);
-    expect(JSON.parse((fetchMock.mock.calls[0][1] as RequestInit).body as string)).toEqual({ config: null });
-  });
-
-  it('remove DELETEs and URL-encodes the repo', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
-    globalThis.fetch = fetchMock as unknown as typeof fetch;
-    await cmdProject(['remove', '--repo', 'acme/web']);
-    const [url, init] = fetchMock.mock.calls[0];
-    expect(url).toBe('http://control.test:3001/api/projects/acme%2Fweb');
-    expect(init.method).toBe('DELETE');
-  });
-
   it('rejects an unknown project subcommand', async () => {
-    await expect(cmdProject(['bogus'])).rejects.toThrow(/add\|list\|show\|update\|remove/);
+    await expect(cmdProject(['bogus'])).rejects.toThrow(/list\|show/);
   });
 });

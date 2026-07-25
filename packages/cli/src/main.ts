@@ -177,44 +177,6 @@ export async function buildControlRequest(method: string, path: string, body?: u
   return { status: res.status, body: parsed };
 }
 
-function parseConfigArg(configJson: string | undefined): unknown {
-  if (configJson === undefined) {
-    return undefined;
-  }
-  return configJson === 'null' ? null : JSON.parse(configJson);
-}
-
-async function cmdProjectAdd(flags: Record<string, string>): Promise<void> {
-  const {
-    project,
-    repo,
-    token,
-    config: configJson,
-    'tracker-type': trackerType,
-    'linear-team-key': linearTeamKey,
-    'linear-trigger-label-id': linearTriggerLabelId,
-    'linear-token': linearToken,
-  } = flags;
-  if (!project || !repo || !token) {
-    throw new Error(
-      'usage: engine project add --project <name> --repo <owner/repo> --token <token> [--config <json>] ' +
-        '[--tracker-type github|linear --linear-team-key <key> --linear-trigger-label-id <uuid> --linear-token <token>]',
-    );
-  }
-  const { status, body } = await buildControlRequest('POST', '/api/projects', {
-    project,
-    repo,
-    token,
-    config: parseConfigArg(configJson),
-    trackerType,
-    linearTeamKey,
-    linearTriggerLabelId,
-    linearToken,
-  });
-  console.log(`status ${status}`);
-  console.log(JSON.stringify(body, null, 2));
-}
-
 async function cmdProjectList(): Promise<void> {
   const { status, body } = await buildControlRequest('GET', '/api/projects');
   console.log(`status ${status}`);
@@ -231,65 +193,15 @@ async function cmdProjectShow(flags: Record<string, string>): Promise<void> {
   console.log(JSON.stringify(body, null, 2));
 }
 
-async function cmdProjectUpdate(flags: Record<string, string>): Promise<void> {
-  const {
-    repo,
-    token,
-    config: configJson,
-    'linear-team-key': linearTeamKey,
-    'linear-trigger-label-id': linearTriggerLabelId,
-    'linear-token': linearToken,
-  } = flags;
-  if (!repo) {
-    throw new Error(
-      'usage: engine project update --repo <owner/repo> [--token <token>] [--config <json>|null] ' +
-        '[--linear-team-key <key>] [--linear-trigger-label-id <uuid>] [--linear-token <token>]',
-    );
-  }
-  if ([token, configJson, linearTeamKey, linearTriggerLabelId, linearToken].every((value) => value === undefined)) {
-    throw new Error('usage: engine project update needs at least one field to change');
-  }
-  const payload: Record<string, unknown> = {};
-  if (token !== undefined) payload.token = token;
-  if (configJson !== undefined) payload.config = parseConfigArg(configJson);
-  if (linearTeamKey !== undefined) payload.linearTeamKey = linearTeamKey;
-  if (linearTriggerLabelId !== undefined) payload.linearTriggerLabelId = linearTriggerLabelId;
-  if (linearToken !== undefined) payload.linearToken = linearToken;
-  const { status, body } = await buildControlRequest('PUT', `/api/projects/${encodeURIComponent(repo)}`, payload);
-  console.log(`status ${status}`);
-  console.log(JSON.stringify(body, null, 2));
-}
-
-async function cmdProjectRemove(flags: Record<string, string>): Promise<void> {
-  const { repo } = flags;
-  if (!repo) {
-    throw new Error('usage: engine project remove --repo <owner/repo>');
-  }
-  const { status, body } = await buildControlRequest('DELETE', `/api/projects/${encodeURIComponent(repo)}`);
-  console.log(`status ${status}`);
-  if (body) {
-    console.log(JSON.stringify(body, null, 2));
-  }
-}
-
 export async function cmdProject(args: string[]): Promise<void> {
   const [subcommand, ...rest] = args;
-  if (subcommand === 'add') {
-    return cmdProjectAdd(parseFlags(rest));
-  }
   if (subcommand === 'list') {
     return cmdProjectList();
   }
   if (subcommand === 'show') {
     return cmdProjectShow(parseFlags(rest));
   }
-  if (subcommand === 'update') {
-    return cmdProjectUpdate(parseFlags(rest));
-  }
-  if (subcommand === 'remove') {
-    return cmdProjectRemove(parseFlags(rest));
-  }
-  throw new Error('usage: engine project <add|list|show|update|remove> ...');
+  throw new Error('usage: engine project <list|show> ...');
 }
 
 async function main(): Promise<void> {
