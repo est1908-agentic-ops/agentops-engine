@@ -3,7 +3,7 @@ import { PostgresTierStore } from './postgres-tier-store';
 import type { Queryable } from './postgres-stats-store';
 
 // Minimal fake pg pool: records calls + returns scripted rows. Mirrors the
-// pattern in postgres-managed-project-store.test.ts / postgres-stats-store.test.ts.
+// pattern in postgres-stats-store.test.ts.
 function fakeDb(
   scriptedRows: unknown[] = [],
 ): Queryable & { calls: { sql: string; params?: unknown[] }[] } {

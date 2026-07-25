@@ -2,9 +2,9 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { Client, Connection } from '@temporalio/client';
 import {
+  FileManagedProjectStore,
   loadEnv,
   PostgresEngineSettingsStore,
-  PostgresManagedProjectStore,
   PostgresStatsStore,
   PostgresTierStore,
 } from '@agentops/activities';
@@ -13,21 +13,14 @@ import { createControlServer } from './create-control-server';
 
 loadEnv();
 
-function buildManagedProjectStore(): PostgresManagedProjectStore | undefined {
-  const host = process.env.ENGINE_DB_HOST;
-  const publicKey = process.env.PROJECT_CREDENTIAL_PUBLIC_KEY;
-  if (!host || !publicKey) {
-    return undefined;
-  }
-  return new PostgresManagedProjectStore(
-    new Pool({
-      host,
-      port: process.env.ENGINE_DB_PORT ? Number(process.env.ENGINE_DB_PORT) : 5432,
-      database: process.env.ENGINE_DB_NAME ?? 'agentops_engine',
-      user: process.env.ENGINE_DB_USER ?? 'temporal',
-      password: process.env.ENGINE_DB_PASSWORD,
-    }),
-  );
+// Read-only project registry, backed by the mounted managed-projects
+// ConfigMap dir -- same construction worker/gateway/cli use. Unlike them,
+// control never resolves a token (no KubeTokenResolver here): it only reads
+// project/repo/config metadata for the console's list/detail views, so it
+// needs no secrets:get RBAC.
+function buildManagedProjectStore(): FileManagedProjectStore {
+  const dir = process.env.MANAGED_PROJECTS_DIR ?? '/etc/managed-projects';
+  return new FileManagedProjectStore(dir);
 }
 
 // Tiers table (SP3-B). Only needs ENGINE_DB_HOST (no credential key).
@@ -111,22 +104,18 @@ async function main(): Promise<void> {
   } else {
     console.log('agentops control: /api/budgets disabled (no ENGINE_DB_HOST)');
   }
+  // Read-only: /api/projects and /api/registry/repos always work (no gating,
+  // no schema to ensure) -- they read a mounted ConfigMap dir, not a DB.
+  console.log('agentops control: /api/projects (read-only) serving from ' + (process.env.MANAGED_PROJECTS_DIR ?? '/etc/managed-projects'));
   const projectCrudAuthToken = process.env.CONTROL_CRUD_TOKEN;
-  if (managedProjectStore) {
-    await managedProjectStore.ensureSchema();
-    if (projectCrudAuthToken) {
-      console.log('agentops control: managed-project CRUD routes ENABLED and token-protected (CONTROL_CRUD_TOKEN set)');
-    } else {
-      console.warn(
-        'agentops control: managed-project store is configured but CRUD routes are DISABLED — set CONTROL_CRUD_TOKEN to enable /api/projects',
-      );
-    }
-  } else if (projectCrudAuthToken) {
-    console.warn(
-      'agentops control: CONTROL_CRUD_TOKEN is set but managed-project store is unavailable (need ENGINE_DB_HOST + PROJECT_CREDENTIAL_PUBLIC_KEY) — /api/projects disabled',
+  if (projectCrudAuthToken) {
+    console.log(
+      'agentops control: mutating routes (platform/devcycle run-starts, chats, tiers PUT, self-heal PUT, agent triggers) are token-protected (CONTROL_CRUD_TOKEN set)',
     );
   } else {
-    console.log('agentops control: managed-project CRUD routes disabled (no ENGINE_DB_* / PROJECT_CREDENTIAL_PUBLIC_KEY / CONTROL_CRUD_TOKEN)');
+    console.warn(
+      'agentops control: CONTROL_CRUD_TOKEN is not set -- all mutating routes (platform/devcycle run-starts, chats, tiers PUT, self-heal PUT, agent triggers) fail-closed with 401',
+    );
   }
 
   // packages/ui's build output, resolved relative to this file so it works
@@ -147,7 +136,6 @@ async function main(): Promise<void> {
     tierStore,
     engineSettingsStore,
     statsStore,
-    projectCredentialPublicKey: process.env.PROJECT_CREDENTIAL_PUBLIC_KEY,
     projectCrudAuthToken,
   });
 

@@ -158,7 +158,7 @@ export class FileManagedProjectStore implements ManagedProjectStore {
     return map.get(normalizeRepo(repo)) ?? null;
   }
 
-  /** Lookup by the unique `project` name -- mirrors PostgresManagedProjectStore.getByProject. */
+  /** Lookup by the unique `project` name. */
   async getByProject(project: string): Promise<ManagedProject | null> {
     const map = await this.load();
     for (const managedProject of map.values()) {
