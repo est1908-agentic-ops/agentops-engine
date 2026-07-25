@@ -2,7 +2,8 @@ import { readdir, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import {
-  ProjectConfigSchema,
+  InvalidProjectConfigError,
+  parseProjectConfig,
   type ManagedProject,
   type ManagedProjectStore,
   type ProjectConfig,
@@ -33,8 +34,13 @@ function isNonEmptyString(value: unknown): value is string {
  * Reads per-project files from a directory mounted from the `managed-projects`
  * ConfigMap (`/etc/managed-projects` in cluster; a temp dir in tests):
  * `<slug>__project.yaml` (required -- `project`/`repo`/`tokenSecret`) and
- * `<slug>__agentops.json` (optional -- a *verbatim* ProjectConfig; absent
- * means "fall back to the in-repo agentops.json", which is
+ * `<slug>__agentops.json` (optional -- may be PARTIAL, just like the in-repo
+ * agentops.json `loadProjectConfig` reads: this store runs it through
+ * `parseProjectConfig`, the same DEFAULT_PROJECT_CONFIG-merge-then-validate
+ * step, so `managedProject.config` is always a COMPLETE ProjectConfig, never
+ * a raw partial patch. This matters because `resolveProjectConfig` returns
+ * `managedProject.config` straight through with no further defaulting step.
+ * Absent file means "fall back to the in-repo agentops.json", which is
  * resolveProjectConfig's job, not this class's).
  *
  * `tokenSecret` is parsed (to catch a malformed project.yaml early) but not
@@ -103,17 +109,21 @@ export class FileManagedProjectStore implements ManagedProjectStore {
           rawConfig = JSON.parse(await readFile(join(this.dir, configFileName), 'utf8'));
         } catch (err) {
           throw new Error(
-            `FileManagedProjectStore: failed to parse "${configFileName}" (slug "${slug}"): ${(err as Error).message}`,
+            `FileManagedProjectStore: "${configFileName}" (slug "${slug}") is not valid JSON: ${(err as Error).message}`,
             { cause: err },
           );
         }
-        const result = ProjectConfigSchema.safeParse(rawConfig);
-        if (!result.success) {
-          throw new Error(
-            `FileManagedProjectStore: "${configFileName}" (slug "${slug}") failed ProjectConfig validation: ${result.error.message}`,
-          );
+        try {
+          config = parseProjectConfig(rawConfig);
+        } catch (err) {
+          if (err instanceof InvalidProjectConfigError) {
+            throw new InvalidProjectConfigError(
+              `FileManagedProjectStore: "${configFileName}" (slug "${slug}"): ${err.message}`,
+              err.issues,
+            );
+          }
+          throw err;
         }
-        config = result.data;
       }
 
       const repo = normalizeRepo(parsedProject.repo);

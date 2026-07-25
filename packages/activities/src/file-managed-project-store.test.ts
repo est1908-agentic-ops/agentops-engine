@@ -2,18 +2,8 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { afterEach, describe, expect, it } from 'vitest';
+import { DEFAULT_PROJECT_CONFIG } from '@agentops/contracts';
 import { FileManagedProjectStore } from './file-managed-project-store';
-
-// A minimal, fully-valid ProjectConfig (per the shared ConfigMap contract,
-// `<slug>__agentops.json` is a *verbatim* ProjectConfig, not a partial patch
-// merged with defaults -- see resolveProjectConfig, which returns
-// managedProject.config straight through with no defaulting step).
-const FULL_PROJECT_CONFIG = {
-  stages: {},
-  routing: {},
-  brakes: { maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 },
-  autoMerge: 'all',
-};
 
 function writeProjectFiles(
   dir: string,
@@ -42,21 +32,27 @@ describe('FileManagedProjectStore', () => {
 
   it('resolves a project by short repo form, by full URL, and lists it', async () => {
     dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    // A PARTIAL agentops.json, exactly like the real imported files (e.g. the
+    // engine's own): no stages/routing/brakes at all.
     writeProjectFiles(
       dir,
       'demo',
       { project: 'Demo App', repo: 'https://github.com/acme/demo', tokenSecret: 'github-token' },
-      FULL_PROJECT_CONFIG,
+      { autoMerge: 'all' },
     );
     const store = new FileManagedProjectStore(dir);
 
     const bySlug = await store.get('acme/demo');
-    expect(bySlug).toMatchObject({
-      project: 'Demo App',
-      repo: 'acme/demo',
-      trackerType: 'github',
-      config: FULL_PROJECT_CONFIG,
-    });
+    expect(bySlug).toMatchObject({ project: 'Demo App', repo: 'acme/demo', trackerType: 'github' });
+    // Proves partial -> complete: the override (autoMerge) survives, and the
+    // fields the fixture never mentioned (stages/routing/brakes) come back
+    // fully populated from DEFAULT_PROJECT_CONFIG, the same as loadProjectConfig's
+    // in-repo fallback -- because resolveProjectConfig returns this config
+    // straight through with no further defaulting step.
+    expect(bySlug?.config?.autoMerge).toBe('all');
+    expect(bySlug?.config?.stages).toEqual(DEFAULT_PROJECT_CONFIG.stages);
+    expect(bySlug?.config?.routing).toEqual(DEFAULT_PROJECT_CONFIG.routing);
+    expect(bySlug?.config?.brakes).toEqual(DEFAULT_PROJECT_CONFIG.brakes);
 
     const byUrl = await store.get('https://github.com/acme/demo');
     expect(byUrl).toEqual(bySlug);
@@ -111,7 +107,7 @@ describe('FileManagedProjectStore', () => {
       dir,
       'broken',
       { project: 'Broken App', repo: 'https://github.com/acme/broken', tokenSecret: 'github-token' },
-      { autoMerge: 'all' }, // missing required stages/routing/brakes
+      { autoMerge: 'not-a-real-mode' }, // fails AutoMergeModeSchema's enum even after defaulting
     );
     const store = new FileManagedProjectStore(dir);
 
