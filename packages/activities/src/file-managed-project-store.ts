@@ -43,10 +43,12 @@ function isNonEmptyString(value: unknown): value is string {
  * Absent file means "fall back to the in-repo agentops.json", which is
  * resolveProjectConfig's job, not this class's).
  *
- * `tokenSecret` is parsed (to catch a malformed project.yaml early) but not
- * otherwise used here: every project resolves against the single shared
- * `GITHUB_TOKEN` for now (see the plan's Global Constraints), so which
- * Kubernetes Secret a token nominally comes from isn't this store's concern.
+ * `tokenSecret` names the Kubernetes Secret holding this project's GitHub
+ * token (per-project, not a single shared `GITHUB_TOKEN` -- that shared-env
+ * design was superseded). It's exposed on the returned `ManagedProject` so
+ * `resolveManagedProjectEntry` can hand it to a token resolver (e.g.
+ * `KubeTokenResolver`) that reads the Secret by name; this store itself never
+ * reads the Secret or sees the token value.
  *
  * Read-only and read-once: the directory is loaded lazily on first call and
  * cached for the process lifetime. A ConfigMap volume mount is refreshed by
@@ -143,6 +145,7 @@ export class FileManagedProjectStore implements ManagedProjectStore {
         createdAt: new Date(0).toISOString(),
         updatedAt: new Date(0).toISOString(),
         trackerType: 'github',
+        tokenSecret: parsedProject.tokenSecret,
       };
       byRepo.set(repo, managedProject);
     }

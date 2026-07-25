@@ -38,7 +38,7 @@ describe('resolveProjectConfig', () => {
     };
     const deps = {
       store: fakeStore([{ project: 'acme-web', repo: 'acme/web', config }]),
-      token: 'unused',
+      resolveToken: async () => 'unused',
     } as ManagedProjectRegistryDeps;
     const scm = new MemoryScmPort(); // deliberately NOT seeded -- proves the file was never read
 
@@ -50,7 +50,7 @@ describe('resolveProjectConfig', () => {
   it('falls back to loadProjectConfig when the DB config is null', async () => {
     const deps = {
       store: fakeStore([{ project: 'acme-web', repo: 'acme/web' }]),
-      token: 'unused',
+      resolveToken: async () => 'unused',
     } as ManagedProjectRegistryDeps;
     const scm = new MemoryScmPort();
     scm.seedFile(
@@ -65,7 +65,7 @@ describe('resolveProjectConfig', () => {
   });
 
   it('falls back to loadProjectConfig when the repo is not DB-managed', async () => {
-    const deps = { store: fakeStore([]), token: 'unused' } as ManagedProjectRegistryDeps;
+    const deps = { store: fakeStore([]), resolveToken: async () => 'unused' } as ManagedProjectRegistryDeps;
     const scm = new MemoryScmPort();
     scm.seedFile(
       'acme/legacy',

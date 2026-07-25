@@ -3,8 +3,15 @@ import { normalizeRepo } from '@agentops/ports';
 
 export interface ManagedProjectRegistryDeps {
   store: ManagedProjectStore;
-  /** The shared GITHUB_TOKEN every managed project resolves to (see the ConfigMap-resolver plan's Global Constraints). */
-  token: string;
+  /**
+   * Resolves a project's `tokenSecret` (a Kubernetes Secret NAME) to the
+   * actual token value -- per-project, not a single shared `GITHUB_TOKEN`
+   * (that design was superseded). The real implementation is
+   * `KubeTokenResolver.get`, bound to a namespace; the cli's local-dev path
+   * (no in-cluster API available) falls back to reading `GITHUB_TOKEN` from
+   * the environment instead (see packages/cli/src/main.ts).
+   */
+  resolveToken: (tokenSecret: string) => Promise<string>;
 }
 
 async function resolveOne(
@@ -15,18 +22,24 @@ async function resolveOne(
   if (!managedProject) {
     return null;
   }
+  if (!managedProject.tokenSecret) {
+    throw new Error(
+      `resolveManagedProjectEntry: managed project "${managedProject.project}" (repo "${repo}") has no tokenSecret configured`,
+    );
+  }
 
   // Canonicalize to short `owner/repo`: a project registered through the
   // ConfigMap with a full GitHub URL is stored verbatim, but every downstream
   // consumer (createProjectScopedPorts keys, githubCloneUrl, resolveRepoConfig)
   // assumes the short form.
   const normalizedRepo = normalizeRepo(managedProject.repo);
+  const token = await deps.resolveToken(managedProject.tokenSecret);
 
   return {
     trackerType: 'github',
     project: managedProject.project,
     repo: normalizedRepo,
-    token: deps.token,
+    token,
   };
 }
 

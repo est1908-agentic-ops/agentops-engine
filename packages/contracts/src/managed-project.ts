@@ -9,6 +9,13 @@ const BaseManagedProjectFields = {
   config: ProjectConfigSchema.nullable(),
   createdAt: z.string(),
   updatedAt: z.string(),
+  // Name of the Kubernetes Secret holding this project's GitHub token (never
+  // the token itself) -- only FileManagedProjectStore populates this today
+  // (parsed from <slug>__project.yaml's `tokenSecret` field, per the
+  // per-project-token design). Optional so PostgresManagedProjectStore (which
+  // encrypts the token inline instead of naming a Secret) doesn't need to set
+  // it -- see resolveManagedProjectEntry, the only consumer that reads it.
+  tokenSecret: z.string().optional(),
 };
 
 // A discriminated union so consumers (CLI/UI) get real narrowing on

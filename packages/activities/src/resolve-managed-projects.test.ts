@@ -26,7 +26,7 @@ describe('resolveManagedProjectEntry', () => {
     }
   });
 
-  it('resolves from the store when the repo is managed there, using the shared token', async () => {
+  it('resolves from the store when the repo is managed there, resolving its tokenSecret', async () => {
     dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
     writeProjectFiles(dir, 'acme-web', {
       project: 'acme-web',
@@ -34,8 +34,10 @@ describe('resolveManagedProjectEntry', () => {
       tokenSecret: 'github-token',
     });
     const store = new FileManagedProjectStore(dir);
+    const resolveToken = async (tokenSecret: string) =>
+      tokenSecret === 'github-token' ? 'ghp_x' : 'wrong-secret';
 
-    const resolved = await resolveManagedProjectEntry({ store, token: 'ghp_x' }, 'acme/web');
+    const resolved = await resolveManagedProjectEntry({ store, resolveToken }, 'acme/web');
 
     expect(resolved).toEqual({
       project: 'acme-web',
@@ -54,7 +56,10 @@ describe('resolveManagedProjectEntry', () => {
     dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
     const store = new FileManagedProjectStore(dir);
 
-    const resolved = await resolveManagedProjectEntry({ store, token: 'ghp_x' }, 'acme/nowhere');
+    const resolved = await resolveManagedProjectEntry(
+      { store, resolveToken: async () => 'ghp_x' },
+      'acme/nowhere',
+    );
 
     expect(resolved).toBeNull();
   });
@@ -70,13 +75,13 @@ describe('loadManagedProjectRegistry', () => {
     }
   });
 
-  it('resolves every managed project via store.list(), using the shared token', async () => {
+  it('resolves every managed project via store.list(), resolving each tokenSecret', async () => {
     dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
     writeProjectFiles(dir, 'a', { project: 'a', repo: 'https://github.com/acme/a', tokenSecret: 'github-token' });
     writeProjectFiles(dir, 'b', { project: 'b', repo: 'https://github.com/acme/b', tokenSecret: 'github-token' });
     const store = new FileManagedProjectStore(dir);
 
-    const entries = await loadManagedProjectRegistry({ store, token: 'ghp_x' });
+    const entries = await loadManagedProjectRegistry({ store, resolveToken: async () => 'ghp_x' });
 
     expect(entries).toEqual([
       { project: 'a', repo: 'acme/a', trackerType: 'github', token: 'ghp_x' },
@@ -93,7 +98,7 @@ describe('loadManagedProjectRegistry', () => {
     });
     const store = new FileManagedProjectStore(dir);
 
-    const entries = await loadManagedProjectRegistry({ store, token: 't' });
+    const entries = await loadManagedProjectRegistry({ store, resolveToken: async () => 't' });
 
     expect(entries[0].repo).toBe('acme/webapp');
   });
