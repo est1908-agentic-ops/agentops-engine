@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import type { ManagedProjectStore } from '@agentops/contracts';
 import { MemoryScmPort } from '@agentops/ports';
 import { resolveProjectConfig } from './resolve-project-config';
 import type { ManagedProjectRegistryDeps } from './resolve-managed-projects';
-import type { PostgresManagedProjectStore } from './postgres-managed-project-store';
 
 function fakeStore(rows: Array<{ project: string; repo: string; config?: unknown }>) {
   return {
@@ -17,10 +17,11 @@ function fakeStore(rows: Array<{ project: string; repo: string; config?: unknown
             config: row.config ?? null,
             createdAt: '',
             updatedAt: '',
+            trackerType: 'github' as const,
           }
         : null;
     },
-  } as unknown as PostgresManagedProjectStore;
+  } as unknown as ManagedProjectStore;
 }
 
 describe('resolveProjectConfig', () => {
@@ -37,7 +38,7 @@ describe('resolveProjectConfig', () => {
     };
     const deps = {
       store: fakeStore([{ project: 'acme-web', repo: 'acme/web', config }]),
-      privateKey: 'unused',
+      token: 'unused',
     } as ManagedProjectRegistryDeps;
     const scm = new MemoryScmPort(); // deliberately NOT seeded -- proves the file was never read
 
@@ -49,7 +50,7 @@ describe('resolveProjectConfig', () => {
   it('falls back to loadProjectConfig when the DB config is null', async () => {
     const deps = {
       store: fakeStore([{ project: 'acme-web', repo: 'acme/web' }]),
-      privateKey: 'unused',
+      token: 'unused',
     } as ManagedProjectRegistryDeps;
     const scm = new MemoryScmPort();
     scm.seedFile(
@@ -64,7 +65,7 @@ describe('resolveProjectConfig', () => {
   });
 
   it('falls back to loadProjectConfig when the repo is not DB-managed', async () => {
-    const deps = { store: fakeStore([]), privateKey: 'unused' } as ManagedProjectRegistryDeps;
+    const deps = { store: fakeStore([]), token: 'unused' } as ManagedProjectRegistryDeps;
     const scm = new MemoryScmPort();
     scm.seedFile(
       'acme/legacy',
