@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "dotenv": "^16.6.1",
+    "yaml": "^2",
     "@agentops/contracts": "workspace:*",
     "@agentops/policies": "workspace:*",
     "@agentops/ports": "workspace:*",

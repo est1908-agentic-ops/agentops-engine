@@ -10,6 +10,7 @@ export * from './workspace/workspace-manager';
 export * from './workspace/memory-workspace-manager';
 export * from './credential-crypto';
 export * from './postgres-managed-project-store';
+export * from './file-managed-project-store';
 export * from './filed-finding-store';
 export * from './postgres-filed-finding-store';
 export * from './schedule-ops';

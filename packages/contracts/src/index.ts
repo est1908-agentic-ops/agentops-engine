@@ -12,6 +12,7 @@ export * from './pr-feedback';
 export * from './pr-landing';
 export * from './resolved-project-entry';
 export * from './managed-project';
+export * from './managed-project-store';
 export * from './platform-agent';
 export * from './platform-chat';
 export * from './control-api';
