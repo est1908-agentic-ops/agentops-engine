@@ -2,25 +2,19 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { Client } from '@temporalio/client';
 import {
   resolveManagedProjectEntry,
-  resolveManagedProjectEntryByLinearTeamKey,
   resolveProjectConfig,
   type ManagedProjectRegistryDeps,
 } from '@agentops/activities';
 import type { ResolvedProjectEntry } from '@agentops/contracts';
 import type { ScmPort } from '@agentops/ports';
-import type { ProjectWorkerParamsProvider } from './argocd-project-workers';
-import { matchesLinearTriggerLabel, parseLinearIssueEvent } from './parse-linear-issue-event';
 import { parseIssueTriggerEvent } from './parse-issue-labeled';
 import { parsePushEvent } from './parse-push-event';
 import { parsePrLandingEvent } from './parse-pr-landing-event';
 import { parsePrReviewEvent } from './parse-pr-review-event';
 import { startConfigSync } from './start-config-sync';
-import { startDevCycleForLinearIssue } from './start-dev-cycle-for-linear-issue';
 import { startDevCycleForIssue } from './start-dev-cycle';
 import { startOrSignalPrLanding } from './start-pr-landing';
-import { isFreshLinearWebhook, verifyLinearSignature } from './verify-linear-signature';
 import { verifyGithubSignature } from './verify-signature';
-import { verifyBearerToken } from './verify-bearer-token';
 
 export interface GatewayDeps {
   client: Client;
@@ -30,23 +24,12 @@ export interface GatewayDeps {
   // Injectable so tests don't need a live GitHub client — the real caller
   // (main.ts) builds a GithubScmPort from the entry's token.
   buildScm: (entry: ResolvedProjectEntry) => ScmPort;
-  // The only project registry -- DB-backed (managed_projects table). No
-  // static-registry fallback exists anymore (see the Linear trigger design
-  // doc's DB-only addendum); undefined means ENGINE_DB_HOST/
-  // PROJECT_CREDENTIAL_PRIVATE_KEY aren't set, so every webhook is
-  // acknowledged and ignored (nothing is registered anywhere).
+  // The only project registry -- ConfigMap-dir-backed (FileManagedProjectStore),
+  // per-project tokens resolved via the K8s API by Secret name. Undefined means
+  // every webhook is acknowledged and ignored (nothing is registered anywhere)
+  // -- only used by tests exercising that fallback; the real gateway (main.ts)
+  // always builds one.
   managedProjectDeps?: ManagedProjectRegistryDeps;
-  // Undefined disables the /webhooks/linear route entirely (404) -- lets a
-  // deployment with no Linear-tracked projects skip configuring a new
-  // required secret, same as every existing GitHub-only gateway deployment.
-  linearWebhookSecret?: string;
-  // Serves the ArgoCD ApplicationSet plugin-generator route
-  // (POST /api/v1/getparams.execute) with per-project worker specs read from
-  // each project's agents.json. Both must be set or the route 404s (feature
-  // off), same posture as the Linear route. The token gates the route
-  // (ArgoCD sends `Authorization: Bearer <token>`).
-  argocdParams?: ProjectWorkerParamsProvider;
-  argocdPluginToken?: string;
 }
 
 function readRawBody(req: IncomingMessage): Promise<Buffer> {
@@ -90,48 +73,7 @@ async function handleRequest(
     return;
   }
 
-  if (req.method === 'POST' && req.url === '/webhooks/linear') {
-    await handleLinearWebhook(deps, req, res);
-    return;
-  }
-
-  // ArgoCD ApplicationSet plugin generator (project-worker-onboarding spec §5.2).
-  if (req.method === 'POST' && req.url === '/api/v1/getparams.execute') {
-    await handleArgoCdGetParams(deps, req, res);
-    return;
-  }
-
   res.writeHead(404).end();
-}
-
-async function handleArgoCdGetParams(
-  deps: GatewayDeps,
-  req: IncomingMessage,
-  res: ServerResponse,
-): Promise<void> {
-  // Off unless configured — 404 (same "not built here" posture as the Linear route).
-  if (!deps.argocdPluginToken || !deps.argocdParams) {
-    res.writeHead(404).end();
-    return;
-  }
-  // Drain the request body regardless (ArgoCD posts {applicationSetName, input};
-  // we take no input parameters). Do this before auth so the socket is consumed.
-  await readRawBody(req);
-  const auth = req.headers['authorization'];
-  if (!verifyBearerToken(auth, deps.argocdPluginToken)) {
-    res.writeHead(401).end('unauthorized');
-    return;
-  }
-  try {
-    const parameters = await deps.argocdParams.getParams();
-    // ArgoCD plugin-generator response contract: { output: { parameters: [...] } }.
-    res
-      .writeHead(200, { 'content-type': 'application/json' })
-      .end(JSON.stringify({ output: { parameters } }));
-  } catch (err) {
-    console.error('gateway: failed to compute ArgoCD project-worker params', err);
-    res.writeHead(500).end('failed to compute params');
-  }
 }
 
 async function handleGithubWebhook(
@@ -262,91 +204,6 @@ async function handleGithubWebhook(
     res.writeHead(202).end(JSON.stringify(result));
   } catch (err) {
     console.error(`gateway: failed to start devCycle for ${event.issueRef}:`, err);
-    res.writeHead(500).end('failed to start task');
-  }
-}
-
-async function handleLinearWebhook(
-  deps: GatewayDeps,
-  req: IncomingMessage,
-  res: ServerResponse,
-): Promise<void> {
-  if (!deps.linearWebhookSecret) {
-    // No Linear-tracked project has ever been configured on this deployment
-    // — same 404 as any other unrecognized route, not a 401/500, so an
-    // operator probing routes can't distinguish "misconfigured" from "not
-    // built here" (matching every existing GitHub-only gateway deployment).
-    res.writeHead(404).end();
-    return;
-  }
-
-  const rawBody = await readRawBody(req);
-  const signature = req.headers['linear-signature'];
-
-  if (
-    !verifyLinearSignature(
-      rawBody,
-      typeof signature === 'string' ? signature : undefined,
-      deps.linearWebhookSecret,
-    )
-  ) {
-    res.writeHead(401).end('invalid signature');
-    return;
-  }
-
-  let payload: unknown;
-  try {
-    payload = JSON.parse(rawBody.toString('utf8'));
-  } catch {
-    res.writeHead(400).end('invalid JSON');
-    return;
-  }
-
-  const parsed = parseLinearIssueEvent(payload);
-  if (!parsed || !isFreshLinearWebhook(parsed.webhookTimestamp, Date.now())) {
-    // Not an Issue create/update event this gateway understands, or stale
-    // enough to treat as a possible replay — acknowledge, do nothing.
-    res.writeHead(204).end();
-    return;
-  }
-
-  const entry = await resolveManagedProjectEntryByLinearTeamKey(
-    deps.managedProjectDeps,
-    parsed.teamKey,
-  );
-  if (!entry) {
-    console.warn(
-      `gateway: no project registered for Linear team "${parsed.teamKey}" — ignoring issue event`,
-    );
-    res.writeHead(202).end('no project registered for this Linear team');
-    return;
-  }
-
-  if (!matchesLinearTriggerLabel(parsed, entry.linearTriggerLabelId)) {
-    // Real issue, real project, just not this project's trigger label.
-    res.writeHead(204).end();
-    return;
-  }
-
-  try {
-    const scm = deps.buildScm(entry);
-    const config = await resolveProjectConfig(deps.managedProjectDeps, scm, entry.repo);
-    const result = await startDevCycleForLinearIssue(
-      deps.client,
-      deps.taskQueue,
-      entry.project,
-      parsed,
-      entry.repo,
-      config,
-    );
-    console.log(
-      result.started
-        ? `gateway: started devCycle ${result.taskId} for linear:${parsed.identifier}`
-        : `gateway: devCycle ${result.taskId} already running for linear:${parsed.identifier} — ignored duplicate label event`,
-    );
-    res.writeHead(202).end(JSON.stringify(result));
-  } catch (err) {
-    console.error(`gateway: failed to start devCycle for linear:${parsed.identifier}:`, err);
     res.writeHead(500).end('failed to start task');
   }
 }

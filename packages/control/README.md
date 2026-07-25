@@ -20,7 +20,9 @@ TEMPORAL_UI_BASE_URL=http://localhost:8233 pnpm --filter @agentops/control run s
 - `TASK_QUEUE` (default `agentops-devcycle`)
 - `TEMPORAL_UI_BASE_URL` (required) — e.g. `http://localhost:8233` locally, or the cluster's Temporal Web UI host
 - `PORT` (default `3001`)
-- `ENGINE_DB_HOST`/`PORT`/`NAME`/`USER`/`PASSWORD`, `PROJECT_CREDENTIAL_PUBLIC_KEY`, `CONTROL_CRUD_TOKEN` (all optional together) — enable the `/api/projects` managed-project CRUD routes and the `/api/registry/repos` hint-repos picker (sourced from the managed-project list; empty with no store configured)
+- `ENGINE_DB_HOST`/`PORT`/`NAME`/`USER`/`PASSWORD` (all optional together) — enable `/api/tiers` PUT, `/api/settings/self-heal`, and `/api/budgets` (Postgres-backed model tiers / self-heal schedule / run-stats)
+- `MANAGED_PROJECTS_DIR` (default `/etc/managed-projects`) — directory mounted from the `managed-projects` ConfigMap; read by `FileManagedProjectStore` to back the read-only `/api/projects`, `/api/projects/:repo`, and `/api/registry/repos` routes. The console has no write path onto this registry anymore — see `docs/superpowers/plans/2026-07-25-engine-projects-configmap-resolver.md`
+- `CONTROL_CRUD_TOKEN` — bearer token, sent as `X-Control-Crud-Token`, gating every mutating route control exposes: `POST /api/platform/runs`, `POST /api/devcycle/runs`, `/api/platform/chats/*`, `PUT /api/tiers`, `PUT /api/settings/self-heal`, `POST /api/agents/:id/run`. Unset means all of these return 401 (fail-closed); read-only GETs (including `/api/projects`) are never gated by it
 
 ## Production
 

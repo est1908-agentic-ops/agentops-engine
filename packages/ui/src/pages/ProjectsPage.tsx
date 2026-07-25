@@ -1,81 +1,33 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import type { ManagedProject } from '@agentops/contracts';
-import {
-  createProject,
-  deleteProject,
-  getCrudToken,
-  listProjects,
-  setCrudToken,
-  updateProject,
-  type UpdateProjectInput,
-} from '../api';
+import { getCrudToken, getProject, listProjects, setCrudToken } from '../api';
 import { PageShell } from '../components/PageShell';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
 
-type TrackerType = 'github' | 'linear';
-
-interface UpdateFieldValues {
-  token: string;
-  configJson: string;
-  linearTeamKey: string;
-  linearTriggerLabelId: string;
-  linearToken: string;
-}
-
-function buildUpdatePayload(existing: ManagedProject, v: UpdateFieldValues): UpdateProjectInput {
-  const payload: UpdateProjectInput = {};
-  if (v.token) payload.token = v.token;
-  if (v.configJson) payload.configJson = v.configJson;
-  if (existing.trackerType === 'linear') {
-    if (v.linearTeamKey && v.linearTeamKey !== existing.linearTeamKey) payload.linearTeamKey = v.linearTeamKey;
-    if (v.linearTriggerLabelId && v.linearTriggerLabelId !== existing.linearTriggerLabelId)
-      payload.linearTriggerLabelId = v.linearTriggerLabelId;
-    if (v.linearToken) payload.linearToken = v.linearToken;
-  }
-  return payload;
-}
-
-interface ProjectFormValues {
-  project: string;
-  repo: string;
-  trackerType: TrackerType;
-  token: string;
-  configJson: string;
-  linearTeamKey: string;
-  linearTriggerLabelId: string;
-  linearToken: string;
-}
-
-type Mode = 'add' | { project: ManagedProject } | null;
-
+// Projects are onboarded by PR to the platform repo now, not through this
+// console -- POST/PUT/DELETE /api/projects were retired along with the
+// managed-project CRUD store. `GET /api/projects` and `GET /api/projects/:repo`
+// stay open/unauthenticated (see create-control-server.ts), so this page is a
+// plain viewer: it never needs the control CRUD token itself. That token is
+// still collected here because it's the one place in the console where an
+// operator pastes it into localStorage for the *other* write actions
+// (Settings self-heal toggle, tier routing edits, run/chat start) to use.
 export function ProjectsPage() {
   const [hasToken, setHasToken] = useState<boolean>(() => getCrudToken().length > 0);
   const [tokenDraft, setTokenDraft] = useState('');
   const [projects, setProjects] = useState<ManagedProject[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [mode, setMode] = useState<Mode>(null);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
+  const [detail, setDetail] = useState<ManagedProject | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -90,10 +42,8 @@ export function ProjectsPage() {
   }, []);
 
   useEffect(() => {
-    if (hasToken) {
-      void refresh();
-    }
-  }, [hasToken, refresh]);
+    void refresh();
+  }, [refresh]);
 
   function handleSaveToken() {
     setCrudToken(tokenDraft.trim());
@@ -104,170 +54,79 @@ export function ProjectsPage() {
   function handleClearToken() {
     setCrudToken('');
     setHasToken(false);
-    setProjects([]);
-    setMode(null);
   }
 
-  async function handleCreate(values: ProjectFormValues): Promise<void> {
-    setBusy(true);
-    setFormError(null);
+  async function handleViewDetail(repo: string): Promise<void> {
+    setSelectedRepo(repo);
+    setDetail(null);
+    setDetailError(null);
+    setDetailLoading(true);
     try {
-      await createProject({
-        project: values.project,
-        repo: values.repo,
-        token: values.token,
-        configJson: values.configJson.trim() || undefined,
-        ...(values.trackerType === 'linear' && {
-          trackerType: 'linear',
-          linearTeamKey: values.linearTeamKey.trim(),
-          linearTriggerLabelId: values.linearTriggerLabelId.trim(),
-          linearToken: values.linearToken.trim(),
-        }),
-      });
-      setMode(null);
-      await refresh();
+      setDetail(await getProject(repo));
     } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'failed to create project');
-      throw err;
+      setDetailError(err instanceof Error ? err.message : 'failed to load project');
     } finally {
-      setBusy(false);
+      setDetailLoading(false);
     }
   }
 
-  async function handleUpdate(existing: ManagedProject, values: ProjectFormValues): Promise<void> {
-    setBusy(true);
-    setFormError(null);
-    try {
-      const payload = buildUpdatePayload(existing, {
-        token: values.token.trim(),
-        configJson: values.configJson.trim(),
-        linearTeamKey: values.linearTeamKey.trim(),
-        linearTriggerLabelId: values.linearTriggerLabelId.trim(),
-        linearToken: values.linearToken.trim(),
-      });
-      await updateProject(existing.repo, payload);
-      setMode(null);
-      await refresh();
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'failed to update project');
-      throw err;
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function performRemove(repo: string): Promise<void> {
-    setBusy(true);
-    setFormError(null);
-    try {
-      await deleteProject(repo);
-      await refresh();
-    } catch (err) {
-      setFormError(err instanceof Error ? err.message : 'failed to remove project');
-    } finally {
-      setBusy(false);
-      setDeleteTarget(null);
-    }
-  }
-
-  if (!hasToken) {
-    return (
-      <PageShell>
-        <h1 className="mb-6 text-2xl font-semibold">Managed Projects</h1>
-        <Card>
-          <CardContent className="pt-6">
-            <p className="mb-4 text-sm text-muted-foreground">
-              The project-management routes require an operator bearer token (
-              <code>CONTROL_CRUD_TOKEN</code>). Paste it below — it is stored only in this browser (localStorage)
-              and sent as an X-Control-Crud-Token header on each request.
-            </p>
-            <Label htmlFor="crud-token" className="mb-1 block">
-              Control CRUD token
-            </Label>
-            <Input
-              id="crud-token"
-              type="password"
-              placeholder="paste CONTROL_CRUD_TOKEN"
-              value={tokenDraft}
-              onChange={(event) => setTokenDraft(event.target.value)}
-            />
-            <div className="mt-4">
-              <Button type="button" disabled={!tokenDraft.trim()} onClick={handleSaveToken}>
-                Save token
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-        <p className="mt-4">
-          <Link to="/dashboard" className="text-sm text-muted-foreground">
-            ← Back to console
-          </Link>
-        </p>
-      </PageShell>
-    );
+  function handleCloseDetail() {
+    setSelectedRepo(null);
+    setDetail(null);
+    setDetailError(null);
   }
 
   return (
     <PageShell>
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-semibold">Managed Projects</h1>
-        <div className="flex gap-2">
-          <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
-            {loading ? 'Refreshing…' : 'Refresh'}
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={handleClearToken}>
-            Clear token
-          </Button>
-        </div>
+        <Button type="button" variant="outline" size="sm" onClick={() => void refresh()} disabled={loading}>
+          {loading ? 'Refreshing…' : 'Refresh'}
+        </Button>
       </div>
+
+      <p className="mb-4 text-sm text-muted-foreground">
+        Read-only. Projects are onboarded by opening a PR against the platform repo, not from this console.
+      </p>
+
+      <Card className="mb-6">
+        <CardContent className="space-y-2 pt-6">
+          <Label htmlFor="crud-token" className="mb-1 block">
+            Control CRUD token
+          </Label>
+          <p className="text-sm text-muted-foreground">
+            Not used to view projects (the read routes are open). Stored only in this browser and sent as an
+            X-Control-Crud-Token header by the console's other write actions (Settings, Tiers, run/chat start).
+          </p>
+          {hasToken ? (
+            <div className="flex items-center gap-2">
+              <Badge variant="default">token set</Badge>
+              <Button type="button" variant="outline" size="sm" onClick={handleClearToken}>
+                Clear token
+              </Button>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <Input
+                id="crud-token"
+                type="password"
+                placeholder="paste CONTROL_CRUD_TOKEN"
+                value={tokenDraft}
+                onChange={(event) => setTokenDraft(event.target.value)}
+              />
+              <Button type="button" size="sm" disabled={!tokenDraft.trim()} onClick={handleSaveToken}>
+                Save token
+              </Button>
+            </div>
+          )}
+        </CardContent>
+      </Card>
 
       {loadError && (
         <div className="mb-4 rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm">{loadError}</div>
       )}
-      {formError && (
-        <div className="mb-4 rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm">{formError}</div>
-      )}
 
-      {mode === 'add' ? (
-        <ProjectForm
-          title="Add managed project"
-          submitLabel="Create"
-          disabled={busy}
-          onCancel={() => {
-            setMode(null);
-            setFormError(null);
-          }}
-          onSubmit={async (values) => {
-            await handleCreate(values);
-          }}
-        />
-      ) : (
-        <div className="mb-5">
-          <Button type="button" onClick={() => setMode('add')}>
-            + Add project
-          </Button>
-        </div>
-      )}
-
-      {mode && typeof mode === 'object' && (
-        <ProjectForm
-          key={mode.project.repo}
-          title={`Edit ${mode.project.project} (${mode.project.repo})`}
-          submitLabel="Save"
-          isUpdate
-          existing={mode.project}
-          disabled={busy}
-          onCancel={() => {
-            setMode(null);
-            setFormError(null);
-          }}
-          onSubmit={async (values) => {
-            await handleUpdate(mode.project, values);
-          }}
-        />
-      )}
-
-      <h2 className="mb-3 mt-8 text-base font-semibold">Registered projects ({projects.length})</h2>
+      <h2 className="mb-3 text-base font-semibold">Registered projects ({projects.length})</h2>
       <Table>
         <TableHeader>
           <TableRow>
@@ -309,19 +168,9 @@ export function ProjectsPage() {
                   type="button"
                   variant="link"
                   className="h-auto p-0 text-sm"
-                  disabled={busy}
-                  onClick={() => setMode({ project })}
+                  onClick={() => void handleViewDetail(project.repo)}
                 >
-                  Edit
-                </Button>
-                <Button
-                  type="button"
-                  variant="link"
-                  className="h-auto p-0 text-sm text-destructive"
-                  disabled={busy}
-                  onClick={() => setDeleteTarget(project.repo)}
-                >
-                  Remove
+                  View
                 </Button>
               </TableCell>
             </TableRow>
@@ -329,34 +178,77 @@ export function ProjectsPage() {
           {projects.length === 0 && !loading && (
             <TableRow>
               <TableCell colSpan={7} className="text-muted-foreground">
-                No managed projects yet. Click "Add project" to register a repo.
+                No managed projects registered.
               </TableCell>
             </TableRow>
           )}
         </TableBody>
       </Table>
 
+      {selectedRepo && (
+        <Card className="mt-6">
+          <CardContent className="space-y-3 pt-6">
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold">{selectedRepo}</h3>
+              <Button type="button" variant="outline" size="sm" onClick={handleCloseDetail}>
+                Close
+              </Button>
+            </div>
+            {detailLoading && <p className="text-sm text-muted-foreground">Loading…</p>}
+            {detailError && <p className="text-sm text-destructive">{detailError}</p>}
+            {detail && <ProjectDetail project={detail} />}
+          </CardContent>
+        </Card>
+      )}
+
       <p className="mt-4">
         <Link to="/dashboard" className="text-sm text-muted-foreground">
           ← Back to console
         </Link>
       </p>
-
-      <AlertDialog open={deleteTarget !== null} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Remove managed project for {deleteTarget}?</AlertDialogTitle>
-            <AlertDialogDescription>This deletes its stored credential.</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
-            <AlertDialogAction disabled={busy} onClick={() => deleteTarget && void performRemove(deleteTarget)}>
-              Remove
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </PageShell>
+  );
+}
+
+function ProjectDetail({ project }: { project: ManagedProject }) {
+  return (
+    <dl className="grid grid-cols-[max-content_1fr] gap-x-4 gap-y-2 text-sm">
+      <dt className="text-muted-foreground">Project</dt>
+      <dd>{project.project}</dd>
+      <dt className="text-muted-foreground">Repo</dt>
+      <dd>
+        <code>{project.repo}</code>
+      </dd>
+      <dt className="text-muted-foreground">Tracker</dt>
+      <dd>
+        {project.trackerType === 'linear' ? (
+          <span>
+            Linear · team <code>{project.linearTeamKey}</code> · trigger label{' '}
+            <code>{project.linearTriggerLabelId}</code>
+          </span>
+        ) : (
+          'GitHub'
+        )}
+      </dd>
+      <dt className="text-muted-foreground">Credential</dt>
+      <dd>
+        <CredentialBadges project={project} />
+      </dd>
+      <dt className="text-muted-foreground">Config</dt>
+      <dd>
+        {project.config ? (
+          <pre className="max-w-full overflow-x-auto rounded-md bg-muted p-2 text-xs">
+            {JSON.stringify(project.config, null, 2)}
+          </pre>
+        ) : (
+          'file-based (agentops.json in repo)'
+        )}
+      </dd>
+      <dt className="text-muted-foreground">Created</dt>
+      <dd>{formatTimestamp(project.createdAt)}</dd>
+      <dt className="text-muted-foreground">Updated</dt>
+      <dd>{formatTimestamp(project.updatedAt)}</dd>
+    </dl>
   );
 }
 
@@ -381,191 +273,6 @@ function CredentialBadge({ set, label }: { set: boolean; label: string }) {
     >
       {label} {set ? '✓' : '—'}
     </Badge>
-  );
-}
-
-interface ProjectFormProps {
-  title: string;
-  submitLabel: string;
-  isUpdate?: boolean;
-  existing?: ManagedProject;
-  disabled: boolean;
-  onCancel: () => void;
-  onSubmit: (values: ProjectFormValues) => Promise<void>;
-}
-
-function ProjectForm({ title, submitLabel, isUpdate, existing, disabled, onCancel, onSubmit }: ProjectFormProps) {
-  const existingTracker: TrackerType = existing?.trackerType ?? 'github';
-  const [trackerType, setTrackerType] = useState<TrackerType>(existingTracker);
-  const [project, setProject] = useState('');
-  const [repo, setRepo] = useState('');
-  const [token, setToken] = useState('');
-  const [configJson, setConfigJson] = useState('');
-  const [linearTeamKey, setLinearTeamKey] = useState(existing?.trackerType === 'linear' ? existing.linearTeamKey : '');
-  const [linearTriggerLabelId, setLinearTriggerLabelId] = useState(
-    existing?.trackerType === 'linear' ? existing.linearTriggerLabelId : '',
-  );
-  const [linearToken, setLinearToken] = useState('');
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  const isLinear = trackerType === 'linear';
-
-  const trimmed = {
-    project: project.trim(),
-    repo: repo.trim(),
-    token: token.trim(),
-    linearTeamKey: linearTeamKey.trim(),
-    linearTriggerLabelId: linearTriggerLabelId.trim(),
-    linearToken: linearToken.trim(),
-    configJson: configJson.trim(),
-  };
-  const linearReady = trimmed.linearTeamKey && trimmed.linearTriggerLabelId && trimmed.linearToken;
-  const createReady = trimmed.project && trimmed.repo && trimmed.token && (!isLinear || linearReady);
-  const updatePayload = isUpdate && existing ? buildUpdatePayload(existing, trimmed) : null;
-  const canSubmit = isUpdate
-    ? !!updatePayload && Object.keys(updatePayload).length > 0 && !submitting
-    : !!createReady && !submitting;
-
-  async function handleSubmit() {
-    setError(null);
-    setSubmitting(true);
-    try {
-      if (trimmed.configJson && trimmed.configJson !== 'null') {
-        JSON.parse(trimmed.configJson);
-      }
-      await onSubmit({
-        project: trimmed.project,
-        repo: trimmed.repo,
-        trackerType,
-        token: trimmed.token,
-        configJson: trimmed.configJson,
-        linearTeamKey: trimmed.linearTeamKey,
-        linearTriggerLabelId: trimmed.linearTriggerLabelId,
-        linearToken: trimmed.linearToken,
-      });
-    } catch (err) {
-      if (err instanceof SyntaxError) {
-        setError(`Config is not valid JSON: ${err.message}`);
-      } else {
-        setError(err instanceof Error ? err.message : 'request failed');
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <Card className="mb-5">
-      <CardContent className="space-y-4 pt-6">
-        <h3 className="font-semibold">{title}</h3>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="form-tracker">Tracker</Label>
-          <Select value={trackerType} onValueChange={(value) => setTrackerType(value as TrackerType)} disabled={isUpdate}>
-            <SelectTrigger id="form-tracker" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="github">GitHub</SelectItem>
-              <SelectItem value="linear">Linear</SelectItem>
-            </SelectContent>
-          </Select>
-          {isUpdate && <p className="text-sm text-muted-foreground">Immutable — delete and recreate to change tracker.</p>}
-        </div>
-
-        {!isUpdate && (
-          <>
-            <div className="space-y-1.5">
-              <Label htmlFor="form-project">Project slug</Label>
-              <Input id="form-project" placeholder="acme-web" value={project} onChange={(e) => setProject(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="form-repo">Repo (owner/repo)</Label>
-              <Input id="form-repo" placeholder="acme/web" value={repo} onChange={(e) => setRepo(e.target.value)} />
-            </div>
-          </>
-        )}
-
-        <div className="space-y-1.5">
-          <Label htmlFor="form-token">{isUpdate ? 'GitHub token (rotate — leave blank to keep)' : 'GitHub token'}</Label>
-          <Input
-            id="form-token"
-            type="password"
-            placeholder={isUpdate ? 'ghp_… (optional)' : 'ghp_…'}
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-          />
-        </div>
-
-        {isLinear && (
-          <>
-            <div className="space-y-1.5">
-              <Label htmlFor="form-linear-team-key">Linear team key</Label>
-              <Input
-                id="form-linear-team-key"
-                placeholder="ENG"
-                value={linearTeamKey}
-                onChange={(e) => setLinearTeamKey(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="form-linear-trigger-label">Linear trigger label ID</Label>
-              <Input
-                id="form-linear-trigger-label"
-                placeholder="550e8400-e29b-41d4-a716-446655440000"
-                value={linearTriggerLabelId}
-                onChange={(e) => setLinearTriggerLabelId(e.target.value)}
-              />
-              <p className="text-sm text-muted-foreground">
-                A Linear label <strong>UUID</strong>, not its name — find it via the label settings URL or Linear's
-                GraphQL API (
-                <code>
-                  query &#123; team(key: "ENG") &#123; labels &#123; nodes &#123; id name &#125; &#125; &#125;
-                </code>
-                ).
-              </p>
-            </div>
-            <div className="space-y-1.5">
-              <Label htmlFor="form-linear-token">
-                {isUpdate ? 'Linear API token (rotate — leave blank to keep)' : 'Linear API token'}
-              </Label>
-              <Input
-                id="form-linear-token"
-                type="password"
-                placeholder={isUpdate ? 'lin_api_… (optional)' : 'lin_api_…'}
-                value={linearToken}
-                onChange={(e) => setLinearToken(e.target.value)}
-              />
-            </div>
-          </>
-        )}
-
-        <div className="space-y-1.5">
-          <Label htmlFor="form-config">
-            Config JSON (optional — {isUpdate ? 'null clears to file-based' : 'omit = file-based'})
-          </Label>
-          <Textarea
-            id="form-config"
-            rows={3}
-            placeholder={'{\n  "fastVerifyCommands": ["pnpm lint"],\n  "fullVerifyCommands": ["pnpm test"]\n}'}
-            value={configJson}
-            onChange={(e) => setConfigJson(e.target.value)}
-          />
-        </div>
-
-        {error && <p className="text-sm text-destructive">{error}</p>}
-
-        <div className="flex gap-2">
-          <Button type="button" disabled={!canSubmit || disabled} onClick={() => void handleSubmit()}>
-            {submitting ? 'Saving…' : submitLabel}
-          </Button>
-          <Button type="button" variant="outline" onClick={onCancel} disabled={disabled}>
-            Cancel
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
   );
 }
 

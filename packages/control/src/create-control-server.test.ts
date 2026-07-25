@@ -4,8 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { WorkflowExecutionAlreadyStartedError } from '@temporalio/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { generateManagedProjectKeyPair, type PostgresManagedProjectStore } from '@agentops/activities';
-import type { ManagedProject, UpsertManagedProjectRequest } from '@agentops/contracts';
+import type { ManagedProject, ManagedProjectStore } from '@agentops/contracts';
 import { createControlServer, type ControlDeps } from './create-control-server';
 
 const CRUD_TOKEN = 'crud-secret';
@@ -42,6 +41,35 @@ async function postJsonWithHeaders(
   });
   const body: unknown = await res.json();
   return { status: res.status, body };
+}
+
+function makeManagedProject(overrides: Partial<ManagedProject> & { repo: string; project: string }): ManagedProject {
+  return {
+    id: overrides.repo,
+    trackerType: 'github',
+    credentialSet: true,
+    config: null,
+    createdAt: '2026-07-08T12:00:00.000Z',
+    updatedAt: '2026-07-08T12:00:00.000Z',
+    ...overrides,
+  } as ManagedProject;
+}
+
+// A fake FileManagedProjectStore -- control never writes to this registry
+// anymore (the CRUD was retired), so the fake only needs the read-only
+// ManagedProjectStore surface (get/getByProject/list).
+function fakeManagedProjectStore(projects: ManagedProject[]): ManagedProjectStore {
+  return {
+    async get(repo: string) {
+      return projects.find((p) => p.repo === repo) ?? null;
+    },
+    async getByProject(project: string) {
+      return projects.find((p) => p.project === project) ?? null;
+    },
+    async list() {
+      return [...projects].sort((a, b) => a.project.localeCompare(b.project));
+    },
+  };
 }
 
 describe('createControlServer', () => {
@@ -254,11 +282,10 @@ describe('createControlServer', () => {
   });
 
   it('GET /api/registry/repos returns repos from the managed-project store', async () => {
-    const store = createFakeStore();
-    const { publicKey } = generateManagedProjectKeyPair();
-    await store.upsert({ project: 'engine', repo: 'est1908/agentops-engine', token: 't1' }, publicKey);
-    await store.upsert({ project: 'platform', repo: 'est1908/agentops-platform', token: 't2' }, publicKey);
-    deps.managedProjectStore = store;
+    deps.managedProjectStore = fakeManagedProjectStore([
+      makeManagedProject({ project: 'engine', repo: 'est1908/agentops-engine' }),
+      makeManagedProject({ project: 'platform', repo: 'est1908/agentops-platform' }),
+    ]);
     await listen();
 
     const { status, body } = await getJson(port, '/api/registry/repos');
@@ -516,134 +543,9 @@ describe('createControlServer', () => {
   });
 });
 
-// --- managed-project CRUD test helpers + suite ---
+// --- managed-project routes (read-only) ---
 
-async function putJson(port: number, path: string, payload: unknown, headers: Record<string, string> = {}) {
-  const res = await fetch(`http://127.0.0.1:${port}${path}`, {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json', ...headers },
-    body: JSON.stringify(payload),
-  });
-  const body: unknown = await res.json().catch(() => undefined);
-  return { status: res.status, body };
-}
-
-async function deleteJson(port: number, path: string, headers: Record<string, string> = {}) {
-  const res = await fetch(`http://127.0.0.1:${port}${path}`, { method: 'DELETE', headers });
-  const body: unknown = await res.json().catch(() => undefined);
-  return { status: res.status, body };
-}
-
-async function getJsonWithHeaders(port: number, path: string, headers: Record<string, string>) {
-  const res = await fetch(`http://127.0.0.1:${port}${path}`, { headers });
-  const body: unknown = await res.json().catch(() => undefined);
-  return { status: res.status, body };
-}
-
-function createFakeStore() {
-  // In-memory managed-project table -- same shape control relies on
-  // (get/getByProject/list/upsert/remove). control never decrypts, so the
-  // "encrypted token"s here are just placeholder strings. Not a re-test of
-  // PostgresManagedProjectStore's own business rules (see
-  // postgres-managed-project-store.test.ts) -- just enough fidelity for
-  // control's HTTP-routing/auth/error-shape tests.
-  interface FakeRow {
-    id: string;
-    project: string;
-    repo: string;
-    trackerType: 'github' | 'linear';
-    config: unknown;
-    createdAt: string;
-    updatedAt: string;
-    _token: string;
-    linearTeamKey?: string;
-    linearTriggerLabelId?: string;
-    _linearToken?: string;
-  }
-  const rows: FakeRow[] = [];
-  let nextId = 1;
-  function toManagedProject(row: FakeRow): ManagedProject {
-    const base = {
-      id: row.id,
-      project: row.project,
-      repo: row.repo,
-      credentialSet: true,
-      config: (row.config ?? null) as ManagedProject['config'],
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    };
-    if (row.trackerType === 'linear') {
-      return {
-        ...base,
-        trackerType: 'linear',
-        linearTeamKey: row.linearTeamKey!,
-        linearTriggerLabelId: row.linearTriggerLabelId!,
-        linearCredentialSet: Boolean(row._linearToken),
-      };
-    }
-    return { ...base, trackerType: 'github' };
-  }
-  return {
-    async get(repo: string) {
-      const row = rows.find((r) => r.repo === repo);
-      return row ? toManagedProject(row) : null;
-    },
-    async getByProject(project: string) {
-      const row = rows.find((r) => r.project === project);
-      return row ? toManagedProject(row) : null;
-    },
-    async getByLinearTeamKey(teamKey: string) {
-      const row = rows.find((r) => r.linearTeamKey === teamKey);
-      return row ? toManagedProject(row) : null;
-    },
-    async list() {
-      return [...rows].sort((a, b) => a.project.localeCompare(b.project)).map(toManagedProject);
-    },
-    async upsert(input: UpsertManagedProjectRequest, _publicKey: string) {
-      const existingIndex = rows.findIndex((r) => r.repo === input.repo);
-      const now = new Date().toISOString();
-      const trackerType = existingIndex >= 0 ? rows[existingIndex].trackerType : input.trackerType ?? 'github';
-      if (existingIndex >= 0 && trackerType !== 'linear' && (input.linearTeamKey || input.linearTriggerLabelId || input.linearToken)) {
-        throw new Error(`project "${input.repo}" is not linear-tracked -- cannot set linear fields on it`);
-      }
-      if (existingIndex >= 0) {
-        const existing = rows[existingIndex];
-        rows[existingIndex] = {
-          ...existing,
-          project: input.project,
-          config: input.config === undefined ? existing.config : input.config,
-          _token: input.token ?? existing._token,
-          linearTeamKey: input.linearTeamKey ?? existing.linearTeamKey,
-          linearTriggerLabelId: input.linearTriggerLabelId ?? existing.linearTriggerLabelId,
-          _linearToken: input.linearToken ?? existing._linearToken,
-          updatedAt: now,
-        };
-        return toManagedProject(rows[existingIndex]);
-      }
-      const row: FakeRow = {
-        id: String(nextId++),
-        project: input.project,
-        repo: input.repo,
-        trackerType,
-        config: input.config ?? null,
-        createdAt: now,
-        updatedAt: now,
-        _token: input.token ?? '',
-        linearTeamKey: input.linearTeamKey,
-        linearTriggerLabelId: input.linearTriggerLabelId,
-        _linearToken: input.linearToken,
-      };
-      rows.push(row);
-      return toManagedProject(row);
-    },
-    async remove(repo: string) {
-      const i = rows.findIndex((r) => r.repo === repo);
-      if (i >= 0) rows.splice(i, 1);
-    },
-  } as unknown as PostgresManagedProjectStore;
-}
-
-describe('createControlServer managed-project CRUD', () => {
+describe('createControlServer managed-project routes (read-only)', () => {
   let server: ReturnType<typeof createControlServer>;
   let port: number;
   let deps: ControlDeps;
@@ -659,15 +561,23 @@ describe('createControlServer managed-project CRUD', () => {
   }
 
   beforeEach(() => {
-    const { publicKey } = generateManagedProjectKeyPair();
     deps = {
       client: { workflow: { start: vi.fn(), list: vi.fn(), getHandle: vi.fn() } } as never,
       taskQueue: 'agentops-devcycle',
       namespace: 'default',
       temporalUiBaseUrl: 'https://temporal.example',
-      managedProjectStore: createFakeStore(),
-      projectCredentialPublicKey: publicKey,
-      projectCrudAuthToken: CRUD_TOKEN,
+      managedProjectStore: fakeManagedProjectStore([
+        makeManagedProject({ project: 'acme-web', repo: 'acme/web' }),
+        makeManagedProject({
+          project: 'acme-linear',
+          repo: 'acme/linear-tracked',
+          trackerType: 'linear',
+          linearTeamKey: 'ENG',
+          linearTriggerLabelId: 'label-uuid',
+          linearCredentialSet: true,
+        }),
+      ]),
+      // No projectCrudAuthToken set at all -- these routes must not require one.
     };
   });
 
@@ -675,260 +585,62 @@ describe('createControlServer managed-project CRUD', () => {
     server?.close();
   });
 
-  it('POST /api/projects creates a project and never echoes the token', async () => {
+  it('GET /api/projects lists projects with no auth token, and never echoes a token', async () => {
     await listen();
-    const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_secret' }),
-    });
-    const created = (await res.json()) as Record<string, unknown>;
-    expect(res.status).toBe(201);
-    expect(created.project).toBe('acme-web');
-    expect(created.credentialSet).toBe(true);
-    expect(created.token).toBeUndefined();
-    expect(created.encryptedToken).toBeUndefined();
-  });
-
-  it('POST rejects a missing token with 400', async () => {
-    await listen();
-    const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web' }),
-    });
-    expect(res.status).toBe(400);
-  });
-
-  it('POST 409s on a duplicate repo', async () => {
-    await listen();
-    await fetch(`http://127.0.0.1:${port}/api/projects`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_a' }),
-    });
-    const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({ project: 'other', repo: 'acme/web', token: 'ghp_b' }),
-    });
-    expect(res.status).toBe(409);
-  });
-
-  it('POST 409s on a duplicate project slug', async () => {
-    await listen();
-    await fetch(`http://127.0.0.1:${port}/api/projects`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_a' }),
-    });
-    const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({ project: 'acme-web', repo: 'acme/other', token: 'ghp_b' }),
-    });
-    expect(res.status).toBe(409);
-  });
-
-  it('POST creates a linear-tracked project with all linear fields', async () => {
-    await listen();
-    const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({
-        project: 'acme-linear',
-        repo: 'acme/linear-tracked',
-        token: 'ghp_secret',
-        trackerType: 'linear',
-        linearTeamKey: 'ENG',
-        linearTriggerLabelId: 'label-uuid',
-        linearToken: 'lin_secret',
-      }),
-    });
-    const created = (await res.json()) as Record<string, unknown>;
-    expect(res.status).toBe(201);
-    expect(created).toMatchObject({ trackerType: 'linear', linearTeamKey: 'ENG', linearCredentialSet: true });
-    expect(created.linearToken).toBeUndefined();
-  });
-
-  it('POST 400s a linear-tracked create missing a linear field', async () => {
-    await listen();
-    const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({ project: 'acme-linear', repo: 'acme/linear-tracked', token: 'ghp_secret', trackerType: 'linear' }),
-    });
-    expect(res.status).toBe(400);
-  });
-
-  it('POST 409s on a duplicate linearTeamKey across two different projects', async () => {
-    await listen();
-    await fetch(`http://127.0.0.1:${port}/api/projects`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({
-        project: 'acme-linear-a',
-        repo: 'acme/linear-a',
-        token: 'ghp_a',
-        trackerType: 'linear',
-        linearTeamKey: 'ENG',
-        linearTriggerLabelId: '11111111-1111-1111-1111-111111111111',
-        linearToken: 'lin_a',
-      }),
-    });
-    const res = await fetch(`http://127.0.0.1:${port}/api/projects`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({
-        project: 'acme-linear-b',
-        repo: 'acme/linear-b',
-        token: 'ghp_b',
-        trackerType: 'linear',
-        linearTeamKey: 'ENG',
-        linearTriggerLabelId: '22222222-2222-2222-2222-222222222222',
-        linearToken: 'lin_b',
-      }),
-    });
-    expect(res.status).toBe(409);
-  });
-
-  it('PUT rotates a linear-tracked project token independently of the github token', async () => {
-    await listen();
-    await fetch(`http://127.0.0.1:${port}/api/projects`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({
-        project: 'acme-linear',
-        repo: 'acme/linear-tracked',
-        token: 'ghp_secret',
-        trackerType: 'linear',
-        linearTeamKey: 'ENG',
-        linearTriggerLabelId: 'label-uuid',
-        linearToken: 'lin_old',
-      }),
-    });
-    const res = await fetch(`http://127.0.0.1:${port}/api/projects/${encodeURIComponent('acme/linear-tracked')}`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({ linearToken: 'lin_new' }),
-    });
-    const updated = (await res.json()) as Record<string, unknown>;
-    expect(res.status).toBe(200);
-    expect(updated.trackerType).toBe('linear');
-  });
-
-  it('PUT 400s when setting linear fields on a github-tracked project', async () => {
-    await listen();
-    await fetch(`http://127.0.0.1:${port}/api/projects`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_a' }),
-    });
-    const res = await fetch(`http://127.0.0.1:${port}/api/projects/${encodeURIComponent('acme/web')}`, {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({ linearTeamKey: 'ENG' }),
-    });
-    expect(res.status).toBe(400);
-  });
-
-  it('GET /api/projects lists created projects (repo URL-decoded path is tested via show)', async () => {
-    await listen();
-    await fetch(`http://127.0.0.1:${port}/api/projects`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_a' }),
-    });
-    const { status, body } = await getJsonWithHeaders(port, '/api/projects', CRUD_HEADERS);
+    const { status, body } = await getJson(port, '/api/projects');
     expect(status).toBe(200);
-    expect(body).toHaveLength(1);
-    expect((body as Array<{ project: string }>)[0].project).toBe('acme-web');
+    const projects = body as Array<Record<string, unknown>>;
+    expect(projects).toHaveLength(2);
+    expect(projects.map((p) => p.project).sort()).toEqual(['acme-linear', 'acme-web']);
+    expect(projects[0].token).toBeUndefined();
+    expect(projects[0].encryptedToken).toBeUndefined();
   });
 
   it('GET /api/projects/:repo returns 200 and URL-decodes the repo, or 404', async () => {
     await listen();
-    await fetch(`http://127.0.0.1:${port}/api/projects`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_a' }),
-    });
-    const found = await getJsonWithHeaders(port, '/api/projects/acme%2Fweb', CRUD_HEADERS);
+    const found = await getJson(port, `/api/projects/${encodeURIComponent('acme/web')}`);
     expect(found.status).toBe(200);
     expect((found.body as { repo: string }).repo).toBe('acme/web');
 
-    const missing = await getJsonWithHeaders(port, '/api/projects/acme%2Fnope', CRUD_HEADERS);
+    const missing = await getJson(port, `/api/projects/${encodeURIComponent('acme/nope')}`);
     expect(missing.status).toBe(404);
   });
 
-  it('PUT /api/projects/:repo rotates the token and updates config; identity is immutable', async () => {
+  it('GET /api/projects/:repo returns the linear-tracked project shape', async () => {
     await listen();
-    await fetch(`http://127.0.0.1:${port}/api/projects`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_old' }),
-    });
-    const config = {
-      stages: {},
-      routing: {},
-      brakes: { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 },
-    };
-    const { status, body } = await putJson(port, '/api/projects/acme%2Fweb', { token: 'ghp_new', config }, CRUD_HEADERS);
+    const { status, body } = await getJson(port, `/api/projects/${encodeURIComponent('acme/linear-tracked')}`);
     expect(status).toBe(200);
-    expect((body as { project: string }).project).toBe('acme-web'); // unchanged identity
-    expect((body as { config: { brakes: { maxTokens: number } } }).config.brakes.maxTokens).toBe(200_000);
+    expect(body).toMatchObject({ trackerType: 'linear', linearTeamKey: 'ENG', linearCredentialSet: true });
   });
 
-  it('PUT 404s on an unknown repo', async () => {
+  it('GET /api/projects returns an empty list when no store is configured (no crash)', async () => {
+    delete deps.managedProjectStore;
     await listen();
-    const { status } = await putJson(port, '/api/projects/acme%2Fnope', { token: 'ghp_new' }, CRUD_HEADERS);
-    expect(status).toBe(404);
+    const { status, body } = await getJson(port, '/api/projects');
+    expect(status).toBe(200);
+    expect(body).toEqual([]);
   });
 
-  it('PUT clears config back to file-based with an explicit null', async () => {
+  it('there is no write path -- POST/PUT/DELETE all 404', async () => {
     await listen();
-    const config = { stages: {}, routing: {}, brakes: { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 100, maxBabysitRounds: 1 } };
-    await fetch(`http://127.0.0.1:${port}/api/projects`, {
+    const post = await fetch(`http://127.0.0.1:${port}/api/projects`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_a', config }),
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ project: 'new-one', repo: 'acme/new', token: 'ghp_x' }),
     });
-    const { body } = await putJson(port, '/api/projects/acme%2Fweb', { config: null }, CRUD_HEADERS);
-    expect((body as { config: unknown }).config).toBeNull();
-  });
+    expect(post.status).toBe(404);
 
-  it('DELETE /api/projects/:repo removes a project (204), 404 when absent', async () => {
-    await listen();
-    await fetch(`http://127.0.0.1:${port}/api/projects`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', ...CRUD_HEADERS },
-      body: JSON.stringify({ project: 'acme-web', repo: 'acme/web', token: 'ghp_a' }),
+    const put = await fetch(`http://127.0.0.1:${port}/api/projects/${encodeURIComponent('acme/web')}`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: 'ghp_new' }),
     });
-    expect((await deleteJson(port, '/api/projects/acme%2Fweb', CRUD_HEADERS)).status).toBe(204);
-    expect((await deleteJson(port, '/api/projects/acme%2Fweb', CRUD_HEADERS)).status).toBe(404);
-  });
+    expect(put.status).toBe(404);
 
-  it('returns 401 without/with-wrong the bearer token', async () => {
-    await listen();
-    expect((await getJson(port, '/api/projects')).status).toBe(401);
-    expect((await getJsonWithHeaders(port, '/api/projects', { 'x-control-crud-token': 'wrong' })).status).toBe(401);
-  });
-
-  it('returns 401 with a wrong token of the same length as the configured token', async () => {
-    await listen();
-    const wrongSameLength = 'crud-secXet'; // same length as 'crud-secret'
-    expect((await getJsonWithHeaders(port, '/api/projects', { 'x-control-crud-token': wrongSameLength })).status).toBe(401);
-  });
-
-  it('returns 401 with a wrong token of a different length than the configured token', async () => {
-    await listen();
-    const wrongDiffLength = 'short'; // different length from 'crud-secret'
-    expect((await getJsonWithHeaders(port, '/api/projects', { 'x-control-crud-token': wrongDiffLength })).status).toBe(401);
-  });
-
-  it('returns 503 when CRUD is not configured (no auth token)', async () => {
-    delete deps.projectCrudAuthToken;
-    await listen();
-    expect((await getJsonWithHeaders(port, '/api/projects', CRUD_HEADERS)).status).toBe(503);
+    const del = await fetch(`http://127.0.0.1:${port}/api/projects/${encodeURIComponent('acme/web')}`, {
+      method: 'DELETE',
+    });
+    expect(del.status).toBe(404);
   });
 });
 

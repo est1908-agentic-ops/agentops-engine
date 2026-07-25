@@ -52,11 +52,14 @@ spec:
                   name: {{ .Values.engineDb.passwordSecretName }}
                   key: password
             {{- end }}
-            {{- if .Values.projectCredentialPublicKey }}
-            - name: PROJECT_CREDENTIAL_PUBLIC_KEY
-              value: {{ .Values.projectCredentialPublicKey | quote }}
-            {{- end }}
             {{- if .Values.projectCrudTokenSecretName }}
+            # General control-mutation bearer token (X-Control-Crud-Token) --
+            # NOT project-CRUD-specific anymore (that CRUD was retired; see
+            # docs/superpowers/plans/2026-07-25-engine-projects-configmap-resolver.md).
+            # Still gates every other mutating route control exposes (platform/
+            # devcycle run-starts, chats, tiers PUT, self-heal PUT, agent
+            # triggers), so this stays wired even though /api/projects no
+            # longer needs it.
             - name: CONTROL_CRUD_TOKEN
               valueFrom:
                 secretKeyRef:
@@ -86,4 +89,15 @@ spec:
             httpGet:
               path: /healthz
               port: {{ .Values.control.port }}
+          volumeMounts:
+            - name: managed-projects
+              mountPath: /etc/managed-projects
+              readOnly: true
+      volumes:
+        # control reads project/repo/config metadata (FileManagedProjectStore)
+        # for the read-only /api/projects + /api/registry/repos routes -- it
+        # never resolves a token, so unlike worker/gateway it needs no
+        # secrets:get RBAC alongside this mount.
+        - name: managed-projects
+          configMap: { name: {{ .Values.managedProjectsConfigMapName }} }
 {{- end }}
