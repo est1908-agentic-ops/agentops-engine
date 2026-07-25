@@ -4,6 +4,31 @@ const tseslint = require('typescript-eslint');
 const importPlugin = require('eslint-plugin-import');
 const reactHooks = require('eslint-plugin-react-hooks');
 
+// AGENTS.md rule 1 (determinism boundary): shared rule lists to prevent drift between blocks
+const determinismGlobals = [
+  { name: 'Date', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
+  { name: 'setTimeout', message: 'Use Temporal sleep() instead — AGENTS.md rule 1.' },
+  { name: 'setInterval', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
+  { name: 'fetch', message: 'Use Temporal activities for I/O — AGENTS.md rule 1.' },
+  { name: 'crypto', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
+];
+
+const determinismProperties = [
+  { object: 'Math', property: 'random', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
+  { object: 'Date', property: 'now', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
+  { object: 'crypto', property: 'randomUUID', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
+  { object: 'crypto', property: 'getRandomValues', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
+];
+
+const httpClientImports = [
+  { name: 'axios', message: 'Use Temporal activities for I/O — AGENTS.md rule 1.' },
+  { name: 'node-fetch', message: 'Use Temporal activities for I/O — AGENTS.md rule 1.' },
+  { name: 'undici', message: 'Use Temporal activities for I/O — AGENTS.md rule 1.' },
+  { name: 'got', message: 'Use Temporal activities for I/O — AGENTS.md rule 1.' },
+  { name: 'superagent', message: 'Use Temporal activities for I/O — AGENTS.md rule 1.' },
+  { name: 'request', message: 'Use Temporal activities for I/O — AGENTS.md rule 1.' },
+];
+
 module.exports = defineConfig(
   { ignores: ['**/dist/**', '**/node_modules/**'] },
   js.configs.recommended,
@@ -60,33 +85,19 @@ module.exports = defineConfig(
       // reviewed escape hatch for a proven-safe deterministic built-in (e.g. node:path), added
       // only after verification that it does not break Temporal's replay determinism.
       'import/no-nodejs-modules': ['error', { allow: [] }],
-      'no-restricted-globals': [
+      'no-restricted-globals': ['error', ...determinismGlobals],
+      'no-restricted-properties': ['error', ...determinismProperties],
+      'no-restricted-imports': [
         'error',
-        { name: 'Date', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
-        { name: 'setTimeout', message: 'Use Temporal sleep() instead — AGENTS.md rule 1.' },
-        { name: 'setInterval', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
-      ],
-      'no-restricted-properties': [
-        'error',
-        { object: 'Math', property: 'random', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
-        { object: 'Date', property: 'now', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
+        ...httpClientImports,
       ],
     },
   },
   {
     files: ['packages/workflows/src/**/*.test.ts'],
     rules: {
-      'no-restricted-globals': [
-        'error',
-        { name: 'Date', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
-        { name: 'setTimeout', message: 'Use Temporal sleep() instead — AGENTS.md rule 1.' },
-        { name: 'setInterval', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
-      ],
-      'no-restricted-properties': [
-        'error',
-        { object: 'Math', property: 'random', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
-        { object: 'Date', property: 'now', message: 'Non-deterministic in workflow code — AGENTS.md rule 1.' },
-      ],
+      'no-restricted-globals': ['error', ...determinismGlobals],
+      'no-restricted-properties': ['error', ...determinismProperties],
     },
   },
   {

@@ -11,7 +11,7 @@ Rules for any agent (or human) implementing in this repo. The target development
 
 ## Hard rules (violating these = rejected PR)
 
-1. **Determinism boundary.** Code in `packages/workflows` may not do I/O, use `Date.now()`, `Math.random()`, timers, or import from `activities`/`ports`/`backends`. All side effects go through Temporal activities (proxied). Workflow-safe utilities only.
+1. **Determinism boundary.** Code in `packages/workflows` may not do I/O (`fetch`, `axios`, HTTP clients), use `Date.now()`, `Math.random()`, `crypto.randomUUID()`, timers, or import from `activities`/`ports`/`backends`. All side effects go through Temporal activities (proxied). Workflow-safe utilities only.
 2. **`packages/policies` stays pure.** No Temporal imports, no I/O, no async where avoidable. Pure functions with exhaustive unit tests. This package encodes the battle-tested repair-loop, verdict-parsing, brake, and babysit semantics — behavior changes require updating the corresponding test _and_ a note in the PR description explaining why the semantic is safe to change.
 3. **Contracts first.** New data shapes are added to `contracts` with a zod schema before use. No `any`, no structural duplication of a contract type.
 4. **Ports, not vendors.** Nothing outside `ports/` may import a forge/tracker SDK or call their APIs. Nothing outside `backends/` may spawn an agent CLI.
