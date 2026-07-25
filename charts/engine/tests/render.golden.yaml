@@ -31,6 +31,14 @@ spec:
           port: 443
 
 ---
+# Source: engine/templates/gateway-serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: engine-gateway
+  namespace: dev-agents
+
+---
 # Source: engine/templates/platform-agent-serviceaccount.yaml
 apiVersion: v1
 kind: ServiceAccount
@@ -103,6 +111,18 @@ subjects:
     namespace: dev-agents
 
 ---
+# Source: engine/templates/gateway-role.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: engine-gateway-secrets
+  namespace: dev-agents
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+
+---
 # Source: engine/templates/role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
@@ -119,6 +139,25 @@ rules:
   - apiGroups: [""]
     resources: ["pods/log"]
     verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get"]
+
+---
+# Source: engine/templates/gateway-rolebinding.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: engine-gateway-secrets
+  namespace: dev-agents
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: engine-gateway-secrets
+subjects:
+  - kind: ServiceAccount
+    name: engine-gateway
+    namespace: dev-agents
 
 ---
 # Source: engine/templates/rolebinding.yaml
@@ -237,6 +276,9 @@ spec:
               mountPath: /workspace/tasks
             - name: workspace-cache
               mountPath: /workspace/cache
+            - name: managed-projects
+              mountPath: /etc/managed-projects
+              readOnly: true
       volumes:
         - name: workspace-tasks
           persistentVolumeClaim:
@@ -244,6 +286,8 @@ spec:
         - name: workspace-cache
           persistentVolumeClaim:
             claimName: workspace-cache
+        - name: managed-projects
+          configMap: { name: managed-projects }
 
 ---
 # Source: engine/templates/gateway-deployment.yaml
@@ -262,6 +306,7 @@ spec:
       labels:
         app: engine-gateway
     spec:
+      serviceAccountName: engine-gateway
       securityContext:
         fsGroup: 1000
         runAsGroup: 1000
@@ -291,6 +336,8 @@ spec:
             - name: TEMPORAL_ADDRESS
               value: "localhost:7233"
             - name: TEMPORAL_NAMESPACE
+              value: "dev-agents"
+            - name: AGENT_NAMESPACE
               value: "dev-agents"
             - name: TRIGGER_LABEL
               value: "agentops"
@@ -323,6 +370,13 @@ spec:
             httpGet:
               path: /healthz
               port: 3000
+          volumeMounts:
+            - name: managed-projects
+              mountPath: /etc/managed-projects
+              readOnly: true
+      volumes:
+        - name: managed-projects
+          configMap: { name: managed-projects }
 ---
 # Source: engine/templates/temporal-namespace-job.yaml
 apiVersion: batch/v1

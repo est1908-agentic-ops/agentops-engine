@@ -86,13 +86,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.engineDb.passwordSecretName }}
                   key: password
-            {{- if .Values.projectCredentialPrivateKeySecretName }}
-            - name: PROJECT_CREDENTIAL_PRIVATE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.projectCredentialPrivateKeySecretName }}
-                  key: privateKey
-            {{- end }}
             {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
@@ -101,6 +94,9 @@ spec:
               mountPath: {{ .Values.workspace.mountPath }}
             - name: workspace-cache
               mountPath: {{ .Values.workspace.cacheMountPath }}
+            - name: managed-projects
+              mountPath: /etc/managed-projects
+              readOnly: true
       volumes:
         - name: workspace-tasks
           persistentVolumeClaim:
@@ -108,3 +104,5 @@ spec:
         - name: workspace-cache
           persistentVolumeClaim:
             claimName: {{ .Values.workspace.cachePvcName }}
+        - name: managed-projects
+          configMap: { name: {{ .Values.managedProjectsConfigMapName }} }
