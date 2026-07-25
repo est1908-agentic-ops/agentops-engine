@@ -4,7 +4,7 @@
 
 **Goal:** Make the engine resolve a project's repo/config/token from a mounted `managed-projects` ConfigMap + a shared `GITHUB_TOKEN` secret instead of the Postgres `managed_projects` table, and retire the DB registry, the X25519 credential crypto, the `control` project CRUD, and the gateway ArgoCD plugin route.
 
-**Architecture:** A new `FileManagedProjectStore` reads per-project files from a mounted directory (`/etc/managed-projects/<slug>__project.yaml` + `<slug>__agentops.json`). The resolver returns a single shared token (from `process.env.GITHUB_TOKEN`) rather than decrypting a per-row blob. The platform repo (see the companion Phase-2 plan) owns the files, generates the ConfigMap, and deploys the Tier-2 workers via an ArgoCD ApplicationSet — so the gateway plugin route and `control` CRUD are dead code and get removed.
+**Architecture:** A new `FileManagedProjectStore` reads per-project files from a mounted directory (`/etc/managed-projects/<slug>__project.yaml` + `<slug>__agentops.json`). The resolver reads each project's own token from the K8s Secret named by its `tokenSecret` (via the K8s API — `KubeTokenResolver`) rather than decrypting a per-row blob. (Superseded the earlier single-shared-`GITHUB_TOKEN` idea: per-project by name, RBAC `secrets:get` in `dev-agents`; multiple projects MAY point at one shared Secret.) The platform repo (see the companion Phase-2 plan) owns the files, generates the ConfigMap, and deploys the Tier-2 workers via an ArgoCD ApplicationSet — so the gateway plugin route and `control` CRUD are dead code and get removed.
 
 **Tech Stack:** TypeScript/pnpm monorepo, `node:test`/vitest, Helm chart under `charts/engine`. Adds the `yaml` npm package (engine has no YAML parser today).
 
@@ -21,7 +21,7 @@ Design spec: `../../../../agentops-platform/docs/superpowers/specs/2026-07-24-pr
 
 - **On disk** (platform repo) `clusters/ops/projects/<slug>/`: `project.yaml` (`project`, `repo`, `tokenSecret`), optional `agentops.json` (verbatim `ProjectConfig`; omit → engine reads it from the repo), optional `worker.yaml` (ApplicationSet-only; the engine ignores it). `<slug>` = `slugifyProject(project)`.
 - **ConfigMap `managed-projects`** (namespace `dev-agents`): keys are flattened `<slug>__project.yaml` and `<slug>__agentops.json` (double underscore — slugs are `[a-z0-9-]`, so `__` is an unambiguous separator; ConfigMap keys can't contain `/`). Mounted **read-only at `/etc/managed-projects`** into the worker and gateway. `worker.yaml` is NOT in this ConfigMap.
-- **Token**: one shared `GITHUB_TOKEN` env var, from the Secret named by chart value `githubTokenSecretName` (default `github-token`, key `GITHUB_TOKEN`). Every project resolves to this token for now.
+- **Token** (per-project, K8s-API read): each project's `tokenSecret` names a K8s Secret (key `GITHUB_TOKEN`) that the engine reads via the K8s API (`KubeTokenResolver`; worker+gateway need RBAC `secrets:get` in `dev-agents`). Multiple projects may point `tokenSecret` at the same Secret — homelab uses one shared `github-token` (a classic PAT owned by `est1908`, `repo` scope) for all three.
 
 ## File Structure
 
