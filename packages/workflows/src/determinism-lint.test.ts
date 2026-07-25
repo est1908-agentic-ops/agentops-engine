@@ -43,4 +43,93 @@ export {};`;
     const errors = results[0].messages.filter((msg) => msg.ruleId === 'import/no-nodejs-modules');
     expect(errors).toHaveLength(0);
   }, 30_000);
+
+  it('should reject fetch() calls', async () => {
+    const code = `fetch('https://example.com');
+export {};`;
+    const results = await eslint.lintText(code, {
+      filePath: path.join(repoRoot, 'packages/workflows/src/__lint_fixture__.ts'),
+    });
+    const errors = results[0].messages.filter((msg) => msg.ruleId === 'no-restricted-globals');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain('AGENTS.md rule 1');
+    expect(errors[0].message).toContain('Temporal activities');
+  }, 30_000);
+
+  it('should reject crypto.randomUUID() calls', async () => {
+    const code = `crypto.randomUUID();
+export {};`;
+    const results = await eslint.lintText(code, {
+      filePath: path.join(repoRoot, 'packages/workflows/src/__lint_fixture__.ts'),
+    });
+    const errors = results[0].messages.filter((msg) => msg.ruleId === 'no-restricted-properties');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain('AGENTS.md rule 1');
+  }, 30_000);
+
+  it('should reject crypto.getRandomValues() calls', async () => {
+    const code = `crypto.getRandomValues(new Uint8Array(1));
+export {};`;
+    const results = await eslint.lintText(code, {
+      filePath: path.join(repoRoot, 'packages/workflows/src/__lint_fixture__.ts'),
+    });
+    const errors = results[0].messages.filter((msg) => msg.ruleId === 'no-restricted-properties');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain('AGENTS.md rule 1');
+  }, 30_000);
+
+  it('should reject axios imports', async () => {
+    const code = `import axios from 'axios';
+export {};`;
+    const results = await eslint.lintText(code, {
+      filePath: path.join(repoRoot, 'packages/workflows/src/__lint_fixture__.ts'),
+    });
+    const errors = results[0].messages.filter((msg) => msg.ruleId === 'no-restricted-imports');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain('AGENTS.md rule 1');
+    expect(errors[0].message).toContain('Temporal activities');
+  }, 30_000);
+
+  it('should allow local fetch() shadow', async () => {
+    const code = `function fetch() {}
+fetch();
+export {};`;
+    const results = await eslint.lintText(code, {
+      filePath: path.join(repoRoot, 'packages/workflows/src/__lint_fixture__.ts'),
+    });
+    const errors = results[0].messages.filter((msg) => msg.ruleId === 'no-restricted-globals');
+    expect(errors).toHaveLength(0);
+  }, 30_000);
+
+  it('should allow randomUUID on non-crypto objects', async () => {
+    const code = `const o = { randomUUID() { return ''; } };
+o.randomUUID();
+export {};`;
+    const results = await eslint.lintText(code, {
+      filePath: path.join(repoRoot, 'packages/workflows/src/__lint_fixture__.ts'),
+    });
+    const errors = results[0].messages.filter((msg) => msg.ruleId === 'no-restricted-properties');
+    expect(errors).toHaveLength(0);
+  }, 30_000);
+
+  it('should allow axios imports in test files', async () => {
+    const code = `import axios from 'axios';
+export {};`;
+    const results = await eslint.lintText(code, {
+      filePath: path.join(repoRoot, 'packages/workflows/src/__lint_fixture__.test.ts'),
+    });
+    const errors = results[0].messages.filter((msg) => msg.ruleId === 'no-restricted-imports');
+    expect(errors).toHaveLength(0);
+  }, 30_000);
+
+  it('should reject fetch() in test files (globals mirrored)', async () => {
+    const code = `fetch('https://example.com');
+export {};`;
+    const results = await eslint.lintText(code, {
+      filePath: path.join(repoRoot, 'packages/workflows/src/__lint_fixture__.test.ts'),
+    });
+    const errors = results[0].messages.filter((msg) => msg.ruleId === 'no-restricted-globals');
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toContain('AGENTS.md rule 1');
+  }, 30_000);
 });
