@@ -4,14 +4,15 @@ import { BatchV1Api, KubeConfig } from '@kubernetes/client-node';
 import { Pool } from 'pg';
 import {
   createActivities,
+  FileManagedProjectStore,
   InMemoryFiledFindingStore,
   InMemoryStageResultStore,
   InMemoryStatsStore,
+  KubeTokenResolver,
   loadEnv,
   loadManagedProjectRegistry,
   MemoryWorkspaceManager,
   PostgresFiledFindingStore,
-  PostgresManagedProjectStore,
   PostgresStatsStore,
   PostgresTierStore,
   PostgresEngineSettingsStore,
@@ -93,12 +94,16 @@ export function buildActivityDependencies(
   return { scm, tracker, workspaces: new WorkspaceManager({ resolveGit, cloneUrl: githubCloneUrl, workspacesDir, cacheDir }) };
 }
 
-function buildManagedProjectDeps(pool: Pool | undefined): ManagedProjectRegistryDeps | undefined {
-  const privateKey = process.env.PROJECT_CREDENTIAL_PRIVATE_KEY;
-  if (!pool || !privateKey) {
-    return undefined;
-  }
-  return { store: new PostgresManagedProjectStore(pool), privateKey };
+// Per-project tokens, read from a mounted managed-projects ConfigMap dir and
+// resolved via the K8s API by Secret name -- not a single shared GITHUB_TOKEN
+// env var (that design was superseded) and no longer coupled to the run-stats
+// Postgres pool (see enginePool below, which stats/tiers/self-heal still use).
+function buildManagedProjectDeps(): ManagedProjectRegistryDeps {
+  const dir = process.env.MANAGED_PROJECTS_DIR ?? '/etc/managed-projects';
+  const namespace = process.env.AGENT_NAMESPACE ?? 'dev-agents';
+  const store = new FileManagedProjectStore(dir);
+  const resolver = new KubeTokenResolver(namespace);
+  return { store, resolveToken: (tokenSecret) => resolver.get(tokenSecret) };
 }
 
 // The workspace-tasks PVC is mounted at this path in both the engine-worker
@@ -378,14 +383,8 @@ async function main(): Promise<void> {
         password: process.env.ENGINE_DB_PASSWORD,
       })
     : undefined;
-  const managedProjectDeps = buildManagedProjectDeps(enginePool);
-  if (enginePool && !managedProjectDeps) {
-    console.warn('agentops worker: ENGINE_DB_HOST set but PROJECT_CREDENTIAL_PRIVATE_KEY missing — managed-project DB lookup disabled');
-  }
-  if (managedProjectDeps) {
-    await managedProjectDeps.store.ensureSchema();
-  }
-  const registry = managedProjectDeps ? await loadManagedProjectRegistry(managedProjectDeps) : [];
+  const managedProjectDeps = buildManagedProjectDeps();
+  const registry = await loadManagedProjectRegistry(managedProjectDeps);
   const inCluster = Boolean(process.env.KUBERNETES_SERVICE_HOST);
   const { scm, tracker, workspaces } = buildActivityDependencies(
     registry,
@@ -397,7 +396,7 @@ async function main(): Promise<void> {
       ? `agentops worker: LIVE mode — ${registry.length} project(s) registered: ${registry
           .map((entry) => `${entry.project} (${entry.repo})`)
           .join(', ')} — real GitHub + real agent CLIs, will spend tokens and open real PRs`
-      : 'agentops worker: DEMO mode (no managed-project DB configured) — in-memory ports + stub backend only',
+      : 'agentops worker: DEMO mode (no managed projects in the mounted ConfigMap) — in-memory ports + stub backend only',
   );
   console.log(
     inCluster

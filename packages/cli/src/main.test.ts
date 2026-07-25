@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { encryptForManagedProject, generateManagedProjectKeyPair, loadProjectConfig, type PostgresManagedProjectStore } from '@agentops/activities';
+import { loadProjectConfig } from '@agentops/activities';
+import type { ManagedProjectStore } from '@agentops/contracts';
 import { GithubScmPort, MemoryScmPort } from '@agentops/ports';
 import { buildControlRequest, buildStartScmPort, cmdProject, controlBaseUrl, controlCrudHeaders, parseFlags, seedDemoAgentopsConfig } from './main';
 
@@ -42,17 +43,27 @@ describe('buildStartScmPort', () => {
   });
 
   it('returns a GithubScmPort for a repo registered under the given project', async () => {
-    const { publicKey, privateKey } = generateManagedProjectKeyPair();
     const store = {
       async get(repo: string) {
-        return repo === 'octocat/demo' ? { id: '1', project: 'my-project', repo, credentialSet: true, config: null, createdAt: '', updatedAt: '' } : null;
+        return repo === 'octocat/demo'
+          ? {
+              id: '1',
+              project: 'my-project',
+              repo,
+              credentialSet: true,
+              config: null,
+              createdAt: '',
+              updatedAt: '',
+              trackerType: 'github' as const,
+              tokenSecret: 'github-token-my-project',
+            }
+          : null;
       },
-      async getEncryptedToken(repo: string) {
-        return repo === 'octocat/demo' ? encryptForManagedProject(publicKey, 'fake-token') : null;
-      },
-    } as unknown as PostgresManagedProjectStore;
+    } as unknown as ManagedProjectStore;
+    const resolveToken = async (tokenSecret: string) =>
+      tokenSecret === 'github-token-my-project' ? 'fake-token' : '';
 
-    const scm = await buildStartScmPort({ store, privateKey }, 'my-project', 'octocat/demo');
+    const scm = await buildStartScmPort({ store, resolveToken }, 'my-project', 'octocat/demo');
 
     expect(scm).toBeInstanceOf(GithubScmPort);
   });
@@ -62,30 +73,39 @@ describe('buildStartScmPort', () => {
       async get() {
         return null;
       },
-      async getEncryptedToken() {
-        return null;
-      },
-    } as unknown as PostgresManagedProjectStore;
+    } as unknown as ManagedProjectStore;
 
-    await expect(buildStartScmPort({ store, privateKey: 'unused' }, 'my-project', 'octocat/other')).rejects.toThrow(
-      /no project registered/,
-    );
+    await expect(
+      buildStartScmPort({ store, resolveToken: async () => 'unused' }, 'my-project', 'octocat/other'),
+    ).rejects.toThrow(/no project registered/);
   });
 
   it('throws when the repo is registered under a different project', async () => {
-    const { publicKey, privateKey } = generateManagedProjectKeyPair();
     const store = {
       async get(repo: string) {
-        return repo === 'octocat/demo' ? { id: '1', project: 'my-project', repo, credentialSet: true, config: null, createdAt: '', updatedAt: '' } : null;
+        return repo === 'octocat/demo'
+          ? {
+              id: '1',
+              project: 'my-project',
+              repo,
+              credentialSet: true,
+              config: null,
+              createdAt: '',
+              updatedAt: '',
+              trackerType: 'github' as const,
+              tokenSecret: 'github-token-my-project',
+            }
+          : null;
       },
-      async getEncryptedToken(repo: string) {
-        return repo === 'octocat/demo' ? encryptForManagedProject(publicKey, 'fake-token') : null;
-      },
-    } as unknown as PostgresManagedProjectStore;
+    } as unknown as ManagedProjectStore;
 
-    await expect(buildStartScmPort({ store, privateKey }, 'wrong-project', 'octocat/demo')).rejects.toThrow(
-      /registered under project "my-project"/,
-    );
+    await expect(
+      buildStartScmPort(
+        { store, resolveToken: async () => 'fake-token' },
+        'wrong-project',
+        'octocat/demo',
+      ),
+    ).rejects.toThrow(/registered under project "my-project"/);
   });
 });
 
