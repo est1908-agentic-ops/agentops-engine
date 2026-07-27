@@ -71,8 +71,23 @@ export function buildActivityDependencies(
   registry: ResolvedProjectEntry[],
   workspacesDir?: string,
   cacheDir?: string,
+  // In-cluster, an empty registry is never valid: it means the managed-projects
+  // ConfigMap failed to mount or is empty. The in-memory fallback below is only
+  // for local/dev/tests — silently using it in-cluster ran real workflows
+  // against MemoryScmPort/MemoryWorkspaceManager and corrupted their Temporal
+  // history. Callers in production (boot, in-cluster) pass requireRegistry=true
+  // so this fails fast instead. Defaults false to preserve the local/test path.
+  requireRegistry = false,
 ): ActivityWiring {
   if (registry.length === 0) {
+    if (requireRegistry) {
+      throw new Error(
+        'buildActivityDependencies: refusing to start with an empty managed-project registry while ' +
+          'running in-cluster — the managed-projects ConfigMap is empty or failed to mount at ' +
+          '/etc/managed-projects. Falling back to in-memory ports here would silently corrupt workflow ' +
+          'history. Fix the ConfigMap/mount (or onboard at least one project) and restart.',
+      );
+    }
     return { scm: new MemoryScmPort(), tracker: new MemoryTrackerPort(), workspaces: new MemoryWorkspaceManager() };
   }
   const entries = registry.map((entry) => {
@@ -386,17 +401,22 @@ async function main(): Promise<void> {
   const managedProjectDeps = buildManagedProjectDeps();
   const registry = await loadManagedProjectRegistry(managedProjectDeps);
   const inCluster = Boolean(process.env.KUBERNETES_SERVICE_HOST);
+  // Require a non-empty registry in-cluster: an empty one there is a
+  // ConfigMap mount/population failure, and the in-memory fallback would
+  // silently corrupt workflow history (see buildActivityDependencies).
   const { scm, tracker, workspaces } = buildActivityDependencies(
     registry,
     resolveWorkspacesDir(inCluster),
     resolveCacheDir(inCluster),
+    inCluster,
   );
   console.log(
     registry.length > 0
       ? `agentops worker: LIVE mode — ${registry.length} project(s) registered: ${registry
           .map((entry) => `${entry.project} (${entry.repo})`)
           .join(', ')} — real GitHub + real agent CLIs, will spend tokens and open real PRs`
-      : 'agentops worker: DEMO mode (no managed projects in the mounted ConfigMap) — in-memory ports + stub backend only',
+      : // Only reachable when NOT in-cluster (in-cluster empty registry threw above).
+        'agentops worker: DEMO mode (local, no managed projects) — in-memory ports + stub backend only',
   );
   console.log(
     inCluster

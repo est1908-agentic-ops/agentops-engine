@@ -52,12 +52,22 @@ describe('assertLiveBackendConfig', () => {
 const registry = [{ project: 'demo', repo: 'octocat/demo', trackerType: 'github' as const, token: 'fake-token' }];
 
 describe('buildActivityDependencies', () => {
-  it('uses in-memory ports and workspace manager when the registry is empty', () => {
+  it('uses in-memory ports and workspace manager when the registry is empty (local, requireRegistry=false)', () => {
     const deps = buildActivityDependencies([]);
 
     expect(deps.scm).toBeInstanceOf(MemoryScmPort);
     expect(deps.tracker).toBeInstanceOf(MemoryTrackerPort);
     expect(deps.workspaces).toBeInstanceOf(MemoryWorkspaceManager);
+  });
+
+  it('throws on an empty registry when requireRegistry is set (in-cluster), rather than silently using in-memory ports', () => {
+    // Regression: in-cluster, an empty registry means the managed-projects
+    // ConfigMap failed to mount / is empty. Falling back to MemoryScmPort +
+    // MemoryWorkspaceManager silently corrupted three workflows' Temporal
+    // history. It must fail fast instead.
+    expect(() => buildActivityDependencies([], undefined, undefined, true)).toThrow(
+      /empty managed-project registry.*in-cluster/s,
+    );
   });
 
   it('uses project-scoped ports and a real WorkspaceManager when the registry is non-empty', () => {
