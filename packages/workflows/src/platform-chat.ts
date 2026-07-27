@@ -263,7 +263,11 @@ export async function platformChat(
   }
 
   // Reached only on real close / idle timeout / done -- never on continueAsNew
-  // (which unwinds above). Safe to release the scratch workspace here.
+  // (which unwinds above). Safe to release the scratch workspace here. This call
+  // is deliberately outside any error path, so there is no in-flight error for a
+  // cleanup throw to mask. The primary-error guard added in platform.ts is not
+  // replicated here; if this call moves into a finally/catch block, that guard must
+  // be added to prevent error masking.
   await activities.cleanupScratchWorkspace(workspaceRef);
   phase = 'closed';
   return PlatformChatResultSchema.parse({
