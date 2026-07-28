@@ -27,7 +27,7 @@ spec:
         - name: registry-credentials
       containers:
         - name: worker
-          image: "gitactions.est1908.top/acme/agentops-worker:testsha"
+          image: "registry.example.com/acme/agentops-worker:testsha"
           imagePullPolicy: IfNotPresent
           env:
             - name: TEMPORAL_ADDRESS

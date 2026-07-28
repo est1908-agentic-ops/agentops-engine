@@ -17,8 +17,10 @@ spec:
         app: {{ .Values.project }}-worker
     spec:
       serviceAccountName: {{ .Values.project }}-worker
+      {{- if .Values.imagePullSecretName }}
       imagePullSecrets:
         - name: {{ .Values.imagePullSecretName }}
+      {{- end }}
       containers:
         - name: worker
           image: {{ .Values.image | quote }}

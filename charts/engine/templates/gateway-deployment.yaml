@@ -16,8 +16,10 @@ spec:
       serviceAccountName: {{ .Release.Name }}-gateway
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.imagePullSecretName }}
       imagePullSecrets:
         - name: {{ .Values.imagePullSecretName }}
+      {{- end }}
       containers:
         - name: gateway
           image: "{{ .Values.image.repository }}/gateway:{{ .Values.image.gatewayTag }}"
