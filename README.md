@@ -110,23 +110,32 @@ to `Issues`.
 
 ## Images & chart
 
-Three images build from `images/`:
+Four images build from `images/`:
 
 - `images/engine/Dockerfile --target worker` — the Temporal worker, same
   `tsx src/main.ts` entrypoint used locally.
 - `images/engine/Dockerfile --target gateway` — the webhook receiver.
+- `images/engine/Dockerfile --target control` — the platform console.
 - `images/agent-runner/Dockerfile` — `git` + every agent backend's CLI
   (`claude`, `pi`) in one shared image; one disposable Job pod per agent call.
 
-CI builds all three on every push/PR and, on merge to `main`, pushes immutable
-`:<git-sha>` tags and commits that sha into `agentops-platform`'s values — Argo
-CD auto-sync then rolls the cluster. No manual deploy step. (Requires the
-`PLATFORM_PAT` repo secret: a fine-grained PAT scoped to the platform repo with
-Contents read/write.)
+CI builds them on every push/PR and, on merge to `main`, pushes immutable
+`:<git-sha>` tags to **two** registries — the private `gitactions.est1908.top`
+and the public `ghcr.io/est1908-agentic-ops` (dual-push transition; see
+`docs/superpowers/specs/2026-07-28-public-engine-registry-design.md`). Both Helm
+charts are packaged as `0.0.0-<git-sha>` OCI artifacts and pushed to both.
+
+Consumers pick up new **image tags** via ArgoCD Image Updater; there is no
+cross-repo commit step (the old `bump-platform` job and its `PLATFORM_PAT` secret
+were removed in S1). Image Updater does **not** bump the chart
+`targetRevision` — a change touching `charts/engine/**` or
+`charts/project-worker/**` needs a manual `targetRevision` bump to the merge sha
+in each consuming repo, or that cluster runs new image code against an old chart.
 
 `charts/engine/` is the Helm chart for the worker Deployment (RBAC to manage
-agent-runner Jobs, shared workspace PVCs). It ships no real image tag or
-registry — the platform repo supplies those as values overrides. Render locally:
+agent-runner Jobs, shared workspace PVCs). It defaults `image.repository` to the
+public registry but ships no real image tags (`CHANGEME`) — the consuming repo
+supplies those as values overrides. Render locally:
 
 ```bash
 helm template engine charts/engine --namespace <namespace>

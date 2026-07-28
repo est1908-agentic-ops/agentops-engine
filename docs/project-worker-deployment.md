@@ -8,8 +8,8 @@ This doc covers **deploying** that worker.
 ## Model (why there's no per-project ArgoCD Application to hand-write)
 
 - The worker is deployed by the generic `project-worker` Helm chart
-  (`oci://gitactions.est1908.top/agentic-ops/project-worker`), rendered per project
-  by one ArgoCD `ApplicationSet` in `agentops-platform`
+  (`oci://ghcr.io/est1908-agentic-ops/project-worker`), rendered per project
+  by one ArgoCD `ApplicationSet` in the platform repo
   (`clusters/ops/project-workers/`).
 - Temporal is a single shared namespace; the worker "registers" simply by polling
   its task queue `proj-<project>`. The engine reconciler starts the project's

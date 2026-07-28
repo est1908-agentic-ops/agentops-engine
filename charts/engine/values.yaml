@@ -1,7 +1,10 @@
 namespace: dev-agents
 
 image:
-  repository: gitactions.est1908.top/agentic-ops
+  # Public registry (S1). A publicly published chart must not default to a
+  # private registry: an adopter who doesn't override this would get an
+  # unpullable image with no hint why.
+  repository: ghcr.io/est1908-agentic-ops
   workerTag: CHANGEME
   # One shared image runs every agent-CLI backend (claude, pi, ...) — see
   # images/agent-runner/Dockerfile and ARCHITECTURE.md §5.4.
