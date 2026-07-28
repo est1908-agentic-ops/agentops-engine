@@ -86,17 +86,21 @@ jobs:
       # three divergent targets concurrently, instead of three separate
       # `docker build` calls serialized as workflow steps.
       #
-      # Both registries are pushed from ONE build (dual-push transition, S1):
-      # tags are comma-separated on a single assignment because repeating
-      # `<target>.tags=` OVERRIDES rather than appends -- which would silently
-      # publish to only the last registry named.
+      # Both registries are pushed from ONE build (dual-push transition, S1).
+      # `+=` APPENDS to the target's tag list; a plain second `<target>.tags=`
+      # also appends, but `+=` says so. What does NOT work is comma-joining two
+      # refs into one assignment -- buildx treats the whole string as a single
+      # tag and fails with `invalid tag ...: invalid reference format`.
       - uses: docker/bake-action@v7
         with:
           push: ${{ github.ref == 'refs/heads/main' }}
           set: |
-            worker.tags=gitactions.est1908.top/agentic-ops/worker:${{ github.sha }},ghcr.io/est1908-agentic-ops/worker:${{ github.sha }}
-            gateway.tags=gitactions.est1908.top/agentic-ops/gateway:${{ github.sha }},ghcr.io/est1908-agentic-ops/gateway:${{ github.sha }}
-            control.tags=gitactions.est1908.top/agentic-ops/control:${{ github.sha }},ghcr.io/est1908-agentic-ops/control:${{ github.sha }}
+            worker.tags=gitactions.est1908.top/agentic-ops/worker:${{ github.sha }}
+            worker.tags+=ghcr.io/est1908-agentic-ops/worker:${{ github.sha }}
+            gateway.tags=gitactions.est1908.top/agentic-ops/gateway:${{ github.sha }}
+            gateway.tags+=ghcr.io/est1908-agentic-ops/gateway:${{ github.sha }}
+            control.tags=gitactions.est1908.top/agentic-ops/control:${{ github.sha }}
+            control.tags+=ghcr.io/est1908-agentic-ops/control:${{ github.sha }}
 
       - uses: azure/setup-helm@v4
         with:

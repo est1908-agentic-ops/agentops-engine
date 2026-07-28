@@ -111,12 +111,21 @@ tests) is unchanged.
 - Add `permissions: packages: write` alongside `contents: read`.
 - Add a second `docker/login-action` step for `ghcr.io` using `${{ github.actor }}` and
   `${{ secrets.GITHUB_TOKEN }}`, keeping the existing Forgejo login.
-- Extend each `docker/bake-action` `set:` entry to carry both tags as a **comma-separated
-  list** on one assignment:
-  `worker.tags=gitactions.est1908.top/agentic-ops/worker:<sha>,ghcr.io/est1908-agentic-ops/worker:<sha>`.
-  Repeating the key (`worker.tags=a` then `worker.tags=b`) **overrides** rather than
-  appends, which would silently publish to only the second registry. One assignment, one
-  build, two references pushed.
+- Extend each `docker/bake-action` `set:` entry to add a second tag per target with the
+  **append operator**: `worker.tags=<forgejo-ref>` followed by
+  `worker.tags+=<ghcr-ref>`. One build, two references pushed.
+
+  Verified against `docker buildx bake --print` (buildx v0.35.0) rather than assumed,
+  because two of the three plausible forms behave unintuitively:
+
+  | Form | Result |
+  |---|---|
+  | `tags=a` then `tags+=b` | `["a","b"]` — appends |
+  | `tags=a` then `tags=b` | `["a","b"]` — also appends, despite reading like an override |
+  | `tags=a,b` | **fails** — one tag string, `invalid tag "a,b": invalid reference format` |
+
+  Prefer `+=`: it makes the append explicit instead of leaving a reader to wonder whether
+  the second assignment wins. Do not comma-join.
 - In the chart step, add `helm registry login ghcr.io` and a second `helm push` per chart to
   `oci://ghcr.io/est1908-agentic-ops`. Package once, push twice; the `.tgz` is identical.
 
