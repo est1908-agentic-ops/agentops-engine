@@ -57,7 +57,7 @@ function makeManagedProject(overrides: Partial<ManagedProject> & { repo: string;
 
 // A fake FileManagedProjectStore -- control never writes to this registry
 // anymore (the CRUD was retired), so the fake only needs the read-only
-// ManagedProjectStore surface (get/getByProject/list).
+// ManagedProjectStore surface (get/getByProject/getByLinearTeamKey/list).
 function fakeManagedProjectStore(projects: ManagedProject[]): ManagedProjectStore {
   return {
     async get(repo: string) {
@@ -65,6 +65,9 @@ function fakeManagedProjectStore(projects: ManagedProject[]): ManagedProjectStor
     },
     async getByProject(project: string) {
       return projects.find((p) => p.project === project) ?? null;
+    },
+    async getByLinearTeamKey(teamKey: string) {
+      return projects.find((p) => p.trackerType === 'linear' && p.linearTeamKey === teamKey) ?? null;
     },
     async list() {
       return [...projects].sort((a, b) => a.project.localeCompare(b.project));

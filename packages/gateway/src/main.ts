@@ -50,6 +50,7 @@ async function main(): Promise<void> {
     client,
     taskQueue: TASK_QUEUE,
     webhookSecret,
+    linearWebhookSecret: process.env.LINEAR_WEBHOOK_SECRET,
     triggerLabel: process.env.TRIGGER_LABEL ?? DEFAULT_TRIGGER_LABEL,
     buildScm,
     managedProjectDeps,

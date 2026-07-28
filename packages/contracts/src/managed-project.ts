@@ -29,6 +29,7 @@ export const ManagedProjectSchema = z.discriminatedUnion('trackerType', [
     linearTeamKey: z.string().min(1),
     linearTriggerLabelId: z.string().min(1),
     linearCredentialSet: z.boolean(), // Linear token set? never the token itself
+    linearTokenSecret: z.string().optional(), // Name of the Kubernetes Secret holding this project's Linear token
   }),
 ]);
 export type ManagedProject = z.infer<typeof ManagedProjectSchema>;

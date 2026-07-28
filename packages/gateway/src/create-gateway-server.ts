@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type Server, type ServerResponse } 
 import type { Client } from '@temporalio/client';
 import {
   resolveManagedProjectEntry,
+  resolveManagedProjectEntryByLinearTeamKey,
   resolveProjectConfig,
   type ManagedProjectRegistryDeps,
 } from '@agentops/activities';
@@ -15,11 +16,18 @@ import { startConfigSync } from './start-config-sync';
 import { startDevCycleForIssue } from './start-dev-cycle';
 import { startOrSignalPrLanding } from './start-pr-landing';
 import { verifyGithubSignature } from './verify-signature';
+import {
+  parseLinearIssueEvent,
+  matchesLinearTriggerLabel,
+} from './parse-linear-issue-event';
+import { verifyLinearSignature, isFreshLinearWebhook } from './verify-linear-signature';
+import { startDevCycleForLinearIssue } from './start-dev-cycle-for-linear-issue';
 
 export interface GatewayDeps {
   client: Client;
   taskQueue: string;
   webhookSecret: string;
+  linearWebhookSecret?: string;
   triggerLabel: string;
   // Injectable so tests don't need a live GitHub client — the real caller
   // (main.ts) builds a GithubScmPort from the entry's token.
@@ -70,6 +78,11 @@ async function handleRequest(
 
   if (req.method === 'POST' && req.url === '/webhooks/github') {
     await handleGithubWebhook(deps, req, res);
+    return;
+  }
+
+  if (req.method === 'POST' && req.url === '/webhooks/linear' && deps.linearWebhookSecret) {
+    await handleLinearWebhook(deps, req, res);
     return;
   }
 
@@ -204,6 +217,89 @@ async function handleGithubWebhook(
     res.writeHead(202).end(JSON.stringify(result));
   } catch (err) {
     console.error(`gateway: failed to start devCycle for ${event.issueRef}:`, err);
+    res.writeHead(500).end('failed to start task');
+  }
+}
+
+async function handleLinearWebhook(
+  deps: GatewayDeps,
+  req: IncomingMessage,
+  res: ServerResponse,
+): Promise<void> {
+  const rawBody = await readRawBody(req);
+  const signature = req.headers['linear-signature'];
+
+  if (
+    !verifyLinearSignature(
+      rawBody,
+      typeof signature === 'string' ? signature : undefined,
+      deps.linearWebhookSecret!,
+    )
+  ) {
+    res.writeHead(401).end('invalid signature');
+    return;
+  }
+
+  let payload: unknown;
+  try {
+    payload = JSON.parse(rawBody.toString('utf8'));
+  } catch {
+    res.writeHead(400).end('invalid JSON');
+    return;
+  }
+
+  const event = parseLinearIssueEvent(payload);
+  if (!event) {
+    // Not an Issue create/update event — acknowledge, do nothing.
+    res.writeHead(204).end();
+    return;
+  }
+
+  if (!isFreshLinearWebhook(event.webhookTimestamp, Date.now())) {
+    console.warn(
+      `gateway: Linear webhook stale for issue "${event.identifier}" — ignoring`,
+    );
+    res.writeHead(202).end('webhook too old');
+    return;
+  }
+
+  const entry = await resolveManagedProjectEntryByLinearTeamKey(
+    deps.managedProjectDeps,
+    event.teamKey,
+  );
+  if (!entry || entry.trackerType !== 'linear') {
+    console.warn(
+      `gateway: no project registered for Linear team "${event.teamKey}" — ignoring issue event`,
+    );
+    res.writeHead(202).end('no project registered for this team');
+    return;
+  }
+
+  if (!matchesLinearTriggerLabel(event, entry.linearTriggerLabelId)) {
+    // Label present but not a fresh trigger-label add — do nothing.
+    res.writeHead(204).end();
+    return;
+  }
+
+  try {
+    const scm = deps.buildScm(entry);
+    const config = await resolveProjectConfig(deps.managedProjectDeps, scm, entry.repo);
+    const result = await startDevCycleForLinearIssue(
+      deps.client,
+      deps.taskQueue,
+      entry.project,
+      event,
+      entry.repo,
+      config,
+    );
+    console.log(
+      result.started
+        ? `gateway: started devCycle ${result.taskId} for ${event.identifier}`
+        : `gateway: devCycle ${result.taskId} already running for ${event.identifier} — ignored duplicate label event`,
+    );
+    res.writeHead(202).end(JSON.stringify(result));
+  } catch (err) {
+    console.error(`gateway: failed to start devCycle for ${event.identifier}:`, err);
     res.writeHead(500).end('failed to start task');
   }
 }
