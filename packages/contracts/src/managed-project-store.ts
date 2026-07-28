@@ -8,13 +8,12 @@ import type { ManagedProject } from './managed-project';
  * (`getEncryptedToken`/`getEncryptedLinearToken`) are DB/crypto-specific and
  * stay off this interface -- callers depend on it for lookups only.
  *
- * `getByLinearTeamKey` is intentionally omitted: Linear resolution is
- * retired against the file-backed store (see
- * docs/superpowers/plans/2026-07-25-engine-projects-configmap-resolver.md's
- * Global Constraints -- no homelab Linear project exists).
+ * Linear resolution is back and resolved by team key against the ConfigMap store.
+ * See docs/superpowers/specs/issue-agentic-ops-engine-169-design.md.
  */
 export interface ManagedProjectStore {
   get(repo: string): Promise<ManagedProject | null>;
   getByProject(project: string): Promise<ManagedProject | null>;
+  getByLinearTeamKey(teamKey: string): Promise<ManagedProject | null>;
   list(): Promise<ManagedProject[]>;
 }

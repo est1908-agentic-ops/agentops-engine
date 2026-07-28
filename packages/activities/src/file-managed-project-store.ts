@@ -24,6 +24,10 @@ interface RawManagedProjectFile {
   project?: unknown;
   repo?: unknown;
   tokenSecret?: unknown;
+  trackerType?: unknown;
+  linearTeamKey?: unknown;
+  linearTriggerLabelId?: unknown;
+  linearTokenSecret?: unknown;
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -58,21 +62,22 @@ function isNonEmptyString(value: unknown): value is string {
  * registry once, per the Phase-2 platform plan).
  */
 export class FileManagedProjectStore implements ManagedProjectStore {
-  private cache: Promise<Map<string, ManagedProject>> | null = null;
+  private cache: Promise<{ byRepo: Map<string, ManagedProject>; byLinearTeamKey: Map<string, ManagedProject> }> | null = null;
 
   constructor(private readonly dir: string) {}
 
-  private load(): Promise<Map<string, ManagedProject>> {
+  private load(): Promise<{ byRepo: Map<string, ManagedProject>; byLinearTeamKey: Map<string, ManagedProject> }> {
     if (!this.cache) {
       this.cache = this.readAll();
     }
     return this.cache;
   }
 
-  private async readAll(): Promise<Map<string, ManagedProject>> {
+  private async readAll(): Promise<{ byRepo: Map<string, ManagedProject>; byLinearTeamKey: Map<string, ManagedProject> }> {
     const entries = await readdir(this.dir);
     const entrySet = new Set(entries);
     const byRepo = new Map<string, ManagedProject>();
+    const byLinearTeamKey = new Map<string, ManagedProject>();
 
     for (const entry of entries) {
       const match = PROJECT_FILE_PATTERN.exec(entry);
@@ -95,12 +100,38 @@ export class FileManagedProjectStore implements ManagedProjectStore {
         typeof parsedProject !== 'object' ||
         parsedProject === null ||
         !isNonEmptyString(parsedProject.project) ||
-        !isNonEmptyString(parsedProject.repo) ||
-        !isNonEmptyString(parsedProject.tokenSecret)
+        !isNonEmptyString(parsedProject.repo)
       ) {
         throw new Error(
-          `FileManagedProjectStore: "${entry}" (slug "${slug}") must have non-empty string "project", "repo", and "tokenSecret" fields`,
+          `FileManagedProjectStore: "${entry}" (slug "${slug}") must have non-empty string "project" and "repo" fields`,
         );
+      }
+
+      const trackerType = parsedProject.trackerType === 'linear' ? 'linear' : 'github';
+
+      if (trackerType === 'linear') {
+        // Linear tracker: validate Linear-specific fields
+        if (
+          !isNonEmptyString(parsedProject.linearTeamKey) ||
+          !isNonEmptyString(parsedProject.linearTriggerLabelId)
+        ) {
+          throw new Error(
+            `FileManagedProjectStore: "${entry}" (slug "${slug}") with trackerType "linear" must have non-empty string "linearTeamKey" and "linearTriggerLabelId" fields`,
+          );
+        }
+        // Linear projects also need tokenSecret for the GitHub/Linear API resolver
+        if (!isNonEmptyString(parsedProject.tokenSecret)) {
+          throw new Error(
+            `FileManagedProjectStore: "${entry}" (slug "${slug}") with trackerType "linear" must have non-empty string "tokenSecret" field`,
+          );
+        }
+      } else {
+        // GitHub tracker: validate GitHub-specific fields
+        if (!isNonEmptyString(parsedProject.tokenSecret)) {
+          throw new Error(
+            `FileManagedProjectStore: "${entry}" (slug "${slug}") with trackerType "github" must have non-empty string "tokenSecret" field`,
+          );
+        }
       }
 
       const configFileName = `${slug}${CONFIG_FILE_SUFFIX}`;
@@ -136,32 +167,53 @@ export class FileManagedProjectStore implements ManagedProjectStore {
       // run through ManagedProjectSchema.parse() (id isn't a real UUID), the
       // same "constructed, not re-validated" convention ResolvedProjectEntry
       // already uses.
-      const managedProject: ManagedProject = {
+      const baseFields = {
         id: slug,
         project: parsedProject.project,
         repo,
-        credentialSet: true,
         config,
         createdAt: new Date(0).toISOString(),
         updatedAt: new Date(0).toISOString(),
-        trackerType: 'github',
-        tokenSecret: parsedProject.tokenSecret,
       };
+
+      let managedProject: ManagedProject;
+      if (trackerType === 'linear') {
+        managedProject = {
+          ...baseFields,
+          trackerType: 'linear',
+          credentialSet: true,
+          tokenSecret: parsedProject.tokenSecret as string,
+          linearTeamKey: parsedProject.linearTeamKey as string,
+          linearTriggerLabelId: parsedProject.linearTriggerLabelId as string,
+          linearCredentialSet: true,
+          linearTokenSecret: isNonEmptyString(parsedProject.linearTokenSecret)
+            ? (parsedProject.linearTokenSecret as string)
+            : undefined,
+        };
+        byLinearTeamKey.set(managedProject.linearTeamKey, managedProject);
+      } else {
+        managedProject = {
+          ...baseFields,
+          trackerType: 'github',
+          credentialSet: true,
+          tokenSecret: parsedProject.tokenSecret as string,
+        };
+      }
       byRepo.set(repo, managedProject);
     }
 
-    return byRepo;
+    return { byRepo, byLinearTeamKey };
   }
 
   async get(repo: string): Promise<ManagedProject | null> {
-    const map = await this.load();
-    return map.get(normalizeRepo(repo)) ?? null;
+    const { byRepo } = await this.load();
+    return byRepo.get(normalizeRepo(repo)) ?? null;
   }
 
   /** Lookup by the unique `project` name. */
   async getByProject(project: string): Promise<ManagedProject | null> {
-    const map = await this.load();
-    for (const managedProject of map.values()) {
+    const { byRepo } = await this.load();
+    for (const managedProject of byRepo.values()) {
       if (managedProject.project === project) {
         return managedProject;
       }
@@ -169,8 +221,13 @@ export class FileManagedProjectStore implements ManagedProjectStore {
     return null;
   }
 
+  async getByLinearTeamKey(teamKey: string): Promise<ManagedProject | null> {
+    const { byLinearTeamKey } = await this.load();
+    return byLinearTeamKey.get(teamKey) ?? null;
+  }
+
   async list(): Promise<ManagedProject[]> {
-    const map = await this.load();
-    return [...map.values()].sort((a, b) => a.project.localeCompare(b.project));
+    const { byRepo } = await this.load();
+    return [...byRepo.values()].sort((a, b) => a.project.localeCompare(b.project));
   }
 }

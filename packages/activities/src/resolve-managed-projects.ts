@@ -14,33 +14,65 @@ export interface ManagedProjectRegistryDeps {
   resolveToken: (tokenSecret: string) => Promise<string>;
 }
 
+async function buildResolvedEntry(
+  deps: ManagedProjectRegistryDeps,
+  managedProject: Awaited<ReturnType<ManagedProjectStore['get']>>,
+): Promise<ResolvedProjectEntry | null> {
+  if (!managedProject) {
+    return null;
+  }
+
+  const normalizedRepo = normalizeRepo(managedProject.repo);
+
+  if (managedProject.trackerType === 'linear') {
+    if (!managedProject.linearTokenSecret) {
+      throw new Error(
+        `resolveManagedProjectEntry: managed project "${managedProject.project}" (Linear team "${managedProject.linearTeamKey}") has no linearTokenSecret configured`,
+      );
+    }
+    if (!managedProject.tokenSecret) {
+      throw new Error(
+        `resolveManagedProjectEntry: managed project "${managedProject.project}" (Linear team "${managedProject.linearTeamKey}") has no tokenSecret configured`,
+      );
+    }
+
+    const token = await deps.resolveToken(managedProject.tokenSecret);
+    const linearToken = await deps.resolveToken(managedProject.linearTokenSecret);
+
+    return {
+      trackerType: 'linear',
+      project: managedProject.project,
+      repo: normalizedRepo,
+      token,
+      linearTeamKey: managedProject.linearTeamKey,
+      linearTriggerLabelId: managedProject.linearTriggerLabelId,
+      linearToken,
+    };
+  } else {
+    // GitHub tracker
+    if (!managedProject.tokenSecret) {
+      throw new Error(
+        `resolveManagedProjectEntry: managed project "${managedProject.project}" (repo "${normalizedRepo}") has no tokenSecret configured`,
+      );
+    }
+
+    const token = await deps.resolveToken(managedProject.tokenSecret);
+
+    return {
+      trackerType: 'github',
+      project: managedProject.project,
+      repo: normalizedRepo,
+      token,
+    };
+  }
+}
+
 async function resolveOne(
   deps: ManagedProjectRegistryDeps,
   repo: string,
 ): Promise<ResolvedProjectEntry | null> {
   const managedProject = await deps.store.get(repo);
-  if (!managedProject) {
-    return null;
-  }
-  if (!managedProject.tokenSecret) {
-    throw new Error(
-      `resolveManagedProjectEntry: managed project "${managedProject.project}" (repo "${repo}") has no tokenSecret configured`,
-    );
-  }
-
-  // Canonicalize to short `owner/repo`: a project registered through the
-  // ConfigMap with a full GitHub URL is stored verbatim, but every downstream
-  // consumer (createProjectScopedPorts keys, githubCloneUrl, resolveRepoConfig)
-  // assumes the short form.
-  const normalizedRepo = normalizeRepo(managedProject.repo);
-  const token = await deps.resolveToken(managedProject.tokenSecret);
-
-  return {
-    trackerType: 'github',
-    project: managedProject.project,
-    repo: normalizedRepo,
-    token,
-  };
+  return buildResolvedEntry(deps, managedProject);
 }
 
 /**
@@ -58,6 +90,21 @@ export async function resolveManagedProjectEntry(
     return null;
   }
   return resolveOne(deps, repo);
+}
+
+/**
+ * Linear-tracked project lookup by team key. `deps` is undefined when no
+ * store is configured at all.
+ */
+export async function resolveManagedProjectEntryByLinearTeamKey(
+  deps: ManagedProjectRegistryDeps | undefined,
+  teamKey: string,
+): Promise<ResolvedProjectEntry | null> {
+  if (!deps) {
+    return null;
+  }
+  const managedProject = await deps.store.getByLinearTeamKey(teamKey);
+  return buildResolvedEntry(deps, managedProject);
 }
 
 /**
