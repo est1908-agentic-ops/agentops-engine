@@ -1,0 +1,21 @@
+# Per-Dockerfile ignore file. BuildKit looks for `<dockerfile-path>.dockerignore`
+# before falling back to `.dockerignore` at the context root -- and the root file
+# demonstrably was NOT applied to this build (the published image contained
+# /app/.dockerignore itself, alongside every directory that file excludes).
+#
+# The Dockerfile's COPY steps are an explicit allowlist, so this is defence in
+# depth rather than the primary control. The one entry that is load-bearing is
+# node_modules: `COPY packages ./packages` from a dirty local tree would
+# otherwise overwrite pnpm's workspace symlinks with a host node_modules tree.
+node_modules
+**/node_modules
+.git
+docs
+e2e
+charts
+.github
+.claude
+scripts
+*.log
+.env
+.env.*
