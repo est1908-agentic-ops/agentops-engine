@@ -120,10 +120,14 @@ Four images build from `images/`:
   (`claude`, `pi`) in one shared image; one disposable Job pod per agent call.
 
 CI builds them on every push/PR and, on merge to `main`, pushes immutable
-`:<git-sha>` tags to **two** registries — the private `gitactions.est1908.top`
-and the public `ghcr.io/est1908-agentic-ops` (dual-push transition; see
-`docs/superpowers/specs/2026-07-28-public-engine-registry-design.md`). Both Helm
-charts are packaged as `0.0.0-<git-sha>` OCI artifacts and pushed to both.
+`:<git-sha>` tags to the public registry `ghcr.io/est1908-agentic-ops`. Both Helm
+charts are packaged as `0.0.0-<git-sha>` OCI artifacts and pushed there too. See
+`docs/superpowers/specs/2026-07-28-public-engine-registry-design.md`.
+
+Publishing uses the workflow's own `GITHUB_TOKEN` with `packages: write`, so
+there is no long-lived registry credential to rotate. A **newly created** package
+inherits repository visibility — this repo is private, so a new package starts
+private and must be flipped to public once, by hand, or consumers get 403.
 
 Consumers pick up new **image tags** via ArgoCD Image Updater; there is no
 cross-repo commit step (the old `bump-platform` job and its `PLATFORM_PAT` secret

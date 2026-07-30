@@ -40,10 +40,11 @@ updating the chart defaults that point at the private registry; resolving the
 `bump-platform` job that the registry change breaks; and verifying ArgoCD and ArgoCD Image
 Updater can consume the public artifacts anonymously.
 
-**Out of scope:** migrating the homelab cluster's pins (that repo's own change, unblocked by
-§4's dual-push); retiring the Forgejo registry; the rest of template pivot step 3
-(`__TOKEN__` placeholders, `.template` sentinel, `check-customized.sh`, flipping repos
-public); any change to what the images contain.
+**Out of scope:** migrating the homelab cluster's pins (that repo's own change — the
+artifacts it needs already exist in both registries); decommissioning the Forgejo registry
+itself, which still hosts `artem-private-agents`' project-built worker image; the rest of
+template pivot step 3 (`__TOKEN__` placeholders, `.template` sentinel,
+`check-customized.sh`, flipping repos public); any change to what the images contain.
 
 ## 3. What gets published
 
@@ -87,19 +88,35 @@ is the point, not the auth; **Docker Hub** — anonymous pull limits; **a flair-
 registry** — would make a personal repo push into a company namespace, and would not help
 any other adopter.
 
-### 4.1 Dual-push, not a clean cut
+### 4.1 Clean cut (revised 2026-07-30)
 
-CI pushes to **both** registries for a transition period.
+**Superseded decision.** This section originally specified dual-push for a transition
+period, and that is how the work shipped on 2026-07-28 (build `ea577b08` pushed all six
+artifacts to both registries). At the operator's direction the Forgejo push has now been
+removed: CI publishes to GHCR only.
 
-The homelab cluster is live and pins `gitactions.est1908.top`. A clean cut would require its
-`engine/values.yaml` `image.repository`, its two `oci://` chart repoURLs, and its Image
-Updater registry config to change in lockstep with this CI change — across two repos, with a
-live worker in between. The prior cutover in this project already produced an outage from a
-narrower version of that coupling ("new image on old chart").
+What made the clean cut acceptable in the end:
 
-Dual-push costs one extra tag per image and one extra `helm push` per chart, and it makes
-the homelab migration an independent, revertable change in its own repo. The Forgejo push is
-removed in a follow-up once the homelab pins GHCR and one update round-trips.
+- **Removing a push does not delete existing artifacts.** Every tag Forgejo already holds —
+  including the `0.0.0-fd738fdd…` engine chart the homelab is currently pinned to — stays
+  there. The live cluster keeps resolving its current pin with no change at all.
+- **The homelab migration is still an independent change** in its own repo, because the
+  artifacts it needs already exist in both places.
+
+What it costs, and this is real: **new engine builds land only in GHCR.** While the GHCR
+packages are private, a merged engine PR produces artifacts the cluster cannot read. That is
+not an outage — Image Updater simply finds nothing new and the cluster stays on its current
+version — but engine updates are silently paused until the packages are public. The window
+closes the moment visibility is flipped (§7).
+
+The original argument for dual-push was rollback safety, and it still applies in one
+direction: reverting a consumer to `gitactions.est1908.top` works for any sha built before
+2026-07-30, and stops working for anything built after.
+
+**Not in scope of this removal:** `artem-private-agents`' Tier-2 worker image, which is
+project-built into `gitactions.est1908.top` by a different repo's CI. It is not an engine
+artifact, it keeps living there, and the homelab's `registry-credentials` Secret must
+therefore keep existing.
 
 ## 5. CI changes
 
@@ -109,14 +126,16 @@ tests) is unchanged.
 **`build-engine-images`:**
 
 - Add `permissions: packages: write` alongside `contents: read`.
-- Add a second `docker/login-action` step for `ghcr.io` using `${{ github.actor }}` and
-  `${{ secrets.GITHUB_TOKEN }}`, keeping the existing Forgejo login.
-- Extend each `docker/bake-action` `set:` entry to add a second tag per target with the
-  **append operator**: `worker.tags=<forgejo-ref>` followed by
-  `worker.tags+=<ghcr-ref>`. One build, two references pushed.
+- Replace the Forgejo `docker/login-action` step with one for `ghcr.io` using
+  `${{ github.actor }}` and `${{ secrets.GITHUB_TOKEN }}`. The
+  `REGISTRY_USERNAME` / `REGISTRY_PASSWORD` repo secrets become unused and can be deleted.
+- Point each `docker/bake-action` `set:` entry at the GHCR ref:
+  `worker.tags=ghcr.io/est1908-agentic-ops/worker:<sha>`, and likewise for `gateway` and
+  `control`. One tag per target after the clean cut (§4.1).
 
-  Verified against `docker buildx bake --print` (buildx v0.35.0) rather than assumed,
-  because two of the three plausible forms behave unintuitively:
+  Recorded because it cost a red build during the dual-push phase, and applies to anyone
+  adding a second registry later — the three plausible multi-tag forms do **not** behave
+  alike. Verified with `docker buildx bake --print` (buildx v0.35.0):
 
   | Form | Result |
   |---|---|
@@ -124,8 +143,7 @@ tests) is unchanged.
   | `tags=a` then `tags=b` | `["a","b"]` — also appends, despite reading like an override |
   | `tags=a,b` | **fails** — one tag string, `invalid tag "a,b": invalid reference format` |
 
-  Prefer `+=`: it makes the append explicit instead of leaving a reader to wonder whether
-  the second assignment wins. Do not comma-join.
+  If a second registry is ever reintroduced, use `+=` and never comma-join.
 - In the chart step, add `helm registry login ghcr.io` and a second `helm push` per chart to
   `oci://ghcr.io/est1908-agentic-ops`. Package once, push twice; the `.tgz` is identical.
 
@@ -220,8 +238,11 @@ Ordered, because several steps can only be checked after the one before.
 1. **CI green on the branch.** PR builds do not push (`if: github.ref == 'refs/heads/main'`),
    so a PR proves only that the workflow parses and the build still works. Regenerated chart
    golden tests pass.
-2. **One `main` build publishes all six artifacts** to GHCR, and the existing Forgejo pushes
-   still succeed (§4.1's whole point).
+2. **One `main` build publishes all six artifacts** to GHCR. Done on 2026-07-28 by build
+   `ea577b08`, which also confirmed the charts' digests are identical to the Forgejo copies
+   (`sha256:3f8d00fb…` engine, `sha256:ded2061e…` project-worker) — evidence that "package
+   once, push twice" produced byte-identical artifacts, so a consumer can move registries
+   without a chart version change.
 3. **All six packages flipped to public** (§7).
 4. **Anonymous pull works, from a machine with no credentials:**
    `docker logout ghcr.io && docker pull ghcr.io/est1908-agentic-ops/worker:<sha>` and
@@ -249,9 +270,12 @@ Ordered, because several steps can only be checked after the one before.
   four images and both charts. That follows from the template going public and is consistent
   with `@agentic-ops/engine-sdk` already being on npm, but it is a real change in posture and
   is worth stating rather than assuming.
-- **Two registries to reason about** until the Forgejo push is retired. A build that
-  succeeds on one and fails on the other leaves the two out of sync; the job must fail if
-  either push fails.
+- **GHCR is now the only source of new engine artifacts** (§4.1). While the packages are
+  private, a merged engine PR produces artifacts no cluster can read: Image Updater finds
+  nothing new and consumers silently stay on their current version. Not an outage, but
+  engine updates are paused until visibility is flipped.
+- **Reverting a consumer to Forgejo only works for pre-2026-07-30 shas.** Everything built
+  before the clean cut exists in both registries; nothing after exists in Forgejo.
 - **Ordering discipline.** Steps 3 and 7 of §10 are manual and easy to skip, and skipping
   either produces a system that looks published and is not (403s), or one that is published
   with more than intended.
