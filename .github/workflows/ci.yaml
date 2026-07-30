@@ -63,16 +63,9 @@ jobs:
         with:
           driver: docker
 
-      - uses: docker/login-action@v3
-        if: github.ref == 'refs/heads/main'
-        with:
-          registry: gitactions.est1908.top
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
-
-      # Public registry (S1). GITHUB_TOKEN + packages:write replaces a
-      # long-lived credential; the pushed packages inherit repo visibility, so
-      # they are created PRIVATE and must be flipped to public once, per
+      # Public registry only. GITHUB_TOKEN + packages:write, so no long-lived
+      # registry credential. Pushed packages inherit repo visibility, so a NEW
+      # package is created PRIVATE and must be flipped to public once, per
       # package -- see the S1 design's "package visibility" section.
       - uses: docker/login-action@v3
         if: github.ref == 'refs/heads/main'
@@ -85,34 +78,21 @@ jobs:
       # BuildKit builds their shared deps/base stages once and builds the
       # three divergent targets concurrently, instead of three separate
       # `docker build` calls serialized as workflow steps.
-      #
-      # Both registries are pushed from ONE build (dual-push transition, S1).
-      # `+=` APPENDS to the target's tag list; a plain second `<target>.tags=`
-      # also appends, but `+=` says so. What does NOT work is comma-joining two
-      # refs into one assignment -- buildx treats the whole string as a single
-      # tag and fails with `invalid tag ...: invalid reference format`.
       - uses: docker/bake-action@v7
         with:
           push: ${{ github.ref == 'refs/heads/main' }}
           set: |
-            worker.tags=gitactions.est1908.top/agentic-ops/worker:${{ github.sha }}
-            worker.tags+=ghcr.io/est1908-agentic-ops/worker:${{ github.sha }}
-            gateway.tags=gitactions.est1908.top/agentic-ops/gateway:${{ github.sha }}
-            gateway.tags+=ghcr.io/est1908-agentic-ops/gateway:${{ github.sha }}
-            control.tags=gitactions.est1908.top/agentic-ops/control:${{ github.sha }}
-            control.tags+=ghcr.io/est1908-agentic-ops/control:${{ github.sha }}
+            worker.tags=ghcr.io/est1908-agentic-ops/worker:${{ github.sha }}
+            gateway.tags=ghcr.io/est1908-agentic-ops/gateway:${{ github.sha }}
+            control.tags=ghcr.io/est1908-agentic-ops/control:${{ github.sha }}
 
       - uses: azure/setup-helm@v4
         with:
           version: v4.2.2
 
-      # Package once, push to both registries. The .tgz is byte-identical, so
-      # a consumer can move between registries without a chart version change.
       - name: Package and push the engine + project-worker charts (OCI)
         if: github.ref == 'refs/heads/main'
         run: |
-          helm registry login gitactions.est1908.top \
-            -u "${{ secrets.REGISTRY_USERNAME }}" -p "${{ secrets.REGISTRY_PASSWORD }}"
           helm registry login ghcr.io \
             -u "${{ github.actor }}" -p "${{ secrets.GITHUB_TOKEN }}"
           for chart in engine project-worker; do
@@ -120,8 +100,6 @@ jobs:
               --version "0.0.0-${{ github.sha }}" \
               --app-version "${{ github.sha }}" \
               --destination /tmp/chart
-            helm push "/tmp/chart/$chart-0.0.0-${{ github.sha }}.tgz" \
-              oci://gitactions.est1908.top/agentic-ops
             helm push "/tmp/chart/$chart-0.0.0-${{ github.sha }}.tgz" \
               oci://ghcr.io/est1908-agentic-ops
           done
@@ -139,14 +117,7 @@ jobs:
         with:
           driver: docker
 
-      - uses: docker/login-action@v3
-        if: github.ref == 'refs/heads/main'
-        with:
-          registry: gitactions.est1908.top
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
-
-      # Public registry (S1) -- see the note in build-engine-images.
+      # Public registry only -- see the note in build-engine-images.
       - uses: docker/login-action@v3
         if: github.ref == 'refs/heads/main'
         with:
@@ -160,8 +131,6 @@ jobs:
           file: images/agent-runner/Dockerfile
           push: ${{ github.ref == 'refs/heads/main' }}
           tags: |
-            gitactions.est1908.top/agentic-ops/agent-runner:${{ github.sha }}
-            gitactions.est1908.top/agentic-ops/agent-runner:latest
             ghcr.io/est1908-agentic-ops/agent-runner:${{ github.sha }}
             ghcr.io/est1908-agentic-ops/agent-runner:latest
 
