@@ -6,5 +6,7 @@ describe('EngineActivities', () => {
     expectTypeOf<EngineActivities>().toHaveProperty('runAgent');
     expectTypeOf<EngineActivities>().toHaveProperty('createIssue');
     expectTypeOf<EngineActivities>().toHaveProperty('getIssue');
+    expectTypeOf<EngineActivities>().toHaveProperty('createRepositorySession');
+    expectTypeOf<EngineActivities>().toHaveProperty('cleanupRepositorySession');
   });
 });
