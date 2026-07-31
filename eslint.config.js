@@ -101,6 +101,28 @@ module.exports = defineConfig(
     },
   },
   {
+    files: ['packages/policies/src/**/*.ts'],
+    rules: {
+      // AGENTS.md rule 2: packages/policies stays pure — no Temporal imports, no I/O.
+      // The `allow` array is the reviewed escape hatch for a proven-safe built-in, mirroring
+      // the workflows block; empty today because policies imports only @agentops/contracts.
+      'import/no-nodejs-modules': ['error', { allow: [] }],
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [...httpClientImports],
+          patterns: [
+            {
+              group: ['@temporalio/*'],
+              message:
+                'AGENTS.md rule 2: packages/policies stays pure — no Temporal imports.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
     files: ['eslint.config.js'],
     languageOptions: {
       sourceType: 'commonjs',
