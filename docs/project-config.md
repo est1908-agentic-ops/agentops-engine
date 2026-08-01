@@ -91,7 +91,7 @@ are dropped, not rejected.
   has `name`, `image`, optional `env`, and a `readiness` probe that is either
   `{ "type": "exec", "command": [...] }` or `{ "type": "tcpSocket", "port": <n> }`.
 - `initCommands` — commands to prepare the workspace (install deps, migrate) before
-  verify runs.
+  verify runs. Init commands run with a minimal environment (no inherited engine secrets) and must declare any environment variables they need inline in the command string.
 - `fastVerifyCommands` / `fullVerifyCommands` — the two verify gates. The engine runs
   them during `devCycle`, `devCyclePrRepair`, and PR landing.
 
