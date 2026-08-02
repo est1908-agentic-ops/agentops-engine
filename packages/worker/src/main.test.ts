@@ -4,7 +4,12 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MemoryWorkspaceManager, WorkspaceManager } from '@agentops/activities';
 import { MemoryScmPort, MemoryTrackerPort } from '@agentops/ports';
-import { assertLiveBackendConfig, buildActivityDependencies, resolveCacheDir, resolveWorkspacesDir } from './main';
+import {
+  assertLiveBackendConfig,
+  buildActivityDependencies,
+  resolveCacheDir,
+  resolveWorkspacesDir,
+} from './main';
 
 const validLiveEnv: NodeJS.ProcessEnv = {
   AGENT_RUNNER_IMAGE: 'gitactions.est1908.top/agentic-ops/agent-runner:abc123',
@@ -24,7 +29,10 @@ describe('assertLiveBackendConfig', () => {
 
   it('throws when AGENT_RUNNER_IMAGE is still the placeholder', () => {
     expect(() =>
-      assertLiveBackendConfig({ ...validLiveEnv, AGENT_RUNNER_IMAGE: 'ghcr.io/CHANGEME/agentops-engine/agent-runner:CHANGEME' }),
+      assertLiveBackendConfig({
+        ...validLiveEnv,
+        AGENT_RUNNER_IMAGE: 'ghcr.io/CHANGEME/agentops-engine/agent-runner:CHANGEME',
+      }),
     ).toThrow(/AGENT_RUNNER_IMAGE/);
   });
 
@@ -49,7 +57,15 @@ describe('assertLiveBackendConfig', () => {
   });
 });
 
-const registry = [{ project: 'demo', repo: 'octocat/demo', trackerType: 'github' as const, token: 'fake-token' }];
+const registry = [
+  {
+    project: 'demo',
+    repo: 'octocat/demo',
+    trackerType: 'github' as const,
+    token: 'fake-token',
+    readRepositories: [],
+  },
+];
 
 describe('buildActivityDependencies', () => {
   it('uses in-memory ports and workspace manager when the registry is empty (local, requireRegistry=false)', () => {
@@ -88,6 +104,7 @@ describe('buildActivityDependencies', () => {
         linearTriggerLabelId: 'label-uuid',
         token: 'ghp_fake',
         linearToken: 'lin_fake',
+        readRepositories: [],
       },
     ];
 
@@ -115,7 +132,9 @@ describe('buildActivityDependencies', () => {
       },
     ] as unknown as Parameters<typeof buildActivityDependencies>[0];
 
-    expect(() => buildActivityDependencies(linearRegistryWithoutToken)).toThrow(/no resolved linearToken/);
+    expect(() => buildActivityDependencies(linearRegistryWithoutToken)).toThrow(
+      /no resolved linearToken/,
+    );
   });
 
   describe('workspacesDir wiring', () => {
@@ -149,6 +168,30 @@ describe('buildActivityDependencies', () => {
         rmSync(defaultScratchDir, { recursive: true, force: true });
       }
     });
+
+    it.each([false, true])(
+      'uses activity cancellation for real session managers inCluster=%s',
+      async (inCluster) => {
+        const controller = new AbortController();
+        controller.abort();
+        const workspacesDir = join(root, `workspace-tasks-${String(inCluster)}`);
+        const deps = buildActivityDependencies(
+          registry,
+          workspacesDir,
+          join(root, 'cache'),
+          false,
+          inCluster,
+          () => controller.signal,
+        );
+
+        await expect(
+          deps.workspaces.prepareRepositorySession('demo', {
+            taskId: 'cancelled',
+            repositories: [{ repo: 'octocat/demo' }],
+          }),
+        ).rejects.toThrow(/cancelled/);
+      },
+    );
   });
 });
 

@@ -7,6 +7,7 @@ export * from './load-project-config';
 export * from './workspace/spawn-git-command-runner';
 export * from './workspace/spawn-command-runner';
 export * from './workspace/workspace-manager';
+export * from './workspace/repository-session-coordinator';
 export * from './workspace/memory-workspace-manager';
 export * from './file-managed-project-store';
 export * from './kube-token-resolver';

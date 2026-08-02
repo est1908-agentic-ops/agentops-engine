@@ -1,4 +1,28 @@
-import type { PreparedWorkspace, Workspaces } from './workspace-manager';
+import type { CreateRepositorySessionRequest, RepositorySession } from '@agentops/contracts';
+import { WorkspaceError } from './workspace-error';
+import {
+  repositorySessionIdentity,
+  repositorySessionRequestIdentity,
+  isRepositorySessionIdentity,
+  type PreparedWorkspace,
+  type Workspaces,
+} from './workspace-manager';
+
+export interface MemoryWorkspaceManagerOptions {
+  now?: () => number;
+  repositorySessionIdleMs?: number;
+}
+
+interface MemoryRepositorySession {
+  ownerProject: string;
+  taskId: string;
+  createdAt: number;
+  lastUsedAt: number;
+  repositories: RepositorySession['repositories'];
+  requestIdentity: string;
+}
+
+const REPOSITORY_SESSION_IDLE_MS = 86_400_000;
 
 export class MemoryWorkspaceManager implements Workspaces {
   private readonly prepared = new Set<string>();
@@ -8,6 +32,14 @@ export class MemoryWorkspaceManager implements Workspaces {
   private readonly scratchPrepared = new Set<string>();
   private readonly scratchCleanedUp = new Set<string>();
   private readonly files = new Map<string, Map<string, string>>(); // workspaceRef -> relPath -> content
+  private readonly repositorySessions = new Map<string, MemoryRepositorySession>();
+  private readonly now: () => number;
+  private readonly repositorySessionIdleMs: number;
+
+  constructor(opts: MemoryWorkspaceManagerOptions = {}) {
+    this.now = opts.now ?? Date.now;
+    this.repositorySessionIdleMs = opts.repositorySessionIdleMs ?? REPOSITORY_SESSION_IDLE_MS;
+  }
 
   seedFile(workspaceRef: string, relativePath: string, content: string) {
     if (!this.files.has(workspaceRef)) this.files.set(workspaceRef, new Map());
@@ -54,9 +86,100 @@ export class MemoryWorkspaceManager implements Workspaces {
     return this.cleanedUp.has(workspaceRef);
   }
 
-  // No real filesystem in the in-memory manager -- nothing to prune.
-  async pruneOrphans(_liveRepos: string[]): Promise<{ removed: string[] }> {
-    return { removed: [] };
+  async prepareRepositorySession(
+    ownerProject: string,
+    req: CreateRepositorySessionRequest,
+  ): Promise<RepositorySession> {
+    const workspaceRef = `memory://repository-session/${repositorySessionIdentity(ownerProject)}/${repositorySessionIdentity(req.taskId)}`;
+    const existing = this.repositorySessions.get(workspaceRef);
+    if (existing) {
+      if (
+        existing.ownerProject !== ownerProject ||
+        existing.taskId !== req.taskId ||
+        existing.requestIdentity !== repositorySessionRequestIdentity(req)
+      ) {
+        throw new Error('repository session request does not match existing session');
+      }
+      return { workspaceRef, repositories: existing.repositories };
+    }
+    const now = this.now();
+    const repositories = req.repositories.map((input) => ({
+      repo: input.repo,
+      relativePath: `repositories/${input.repo}`,
+      commit: '0'.repeat(40),
+    }));
+    this.repositorySessions.set(workspaceRef, {
+      ownerProject,
+      taskId: req.taskId,
+      createdAt: now,
+      lastUsedAt: now,
+      repositories,
+      requestIdentity: repositorySessionRequestIdentity(req),
+    });
+    return { workspaceRef, repositories };
+  }
+
+  async cleanupRepositorySession(ownerProject: string, workspaceRef: string): Promise<void> {
+    this.assertMemorySessionOwner(ownerProject, workspaceRef);
+    const session = this.repositorySessions.get(workspaceRef);
+    if (!session) return;
+    if (session.ownerProject !== ownerProject)
+      throw new WorkspaceError('repository session belongs to a different owner', true);
+    this.repositorySessions.delete(workspaceRef);
+  }
+
+  async touchRepositorySession(
+    ownerProject: string | undefined,
+    workspaceRef: string,
+  ): Promise<void> {
+    if (!workspaceRef.startsWith('memory://repository-session/')) return;
+    if (!ownerProject) {
+      throw new WorkspaceError('missing caller project context for repository session touch', true);
+    }
+    this.assertMemorySessionOwner(ownerProject, workspaceRef);
+    const session = this.repositorySessions.get(workspaceRef);
+    if (!session) return;
+    if (session.ownerProject !== ownerProject)
+      throw new WorkspaceError('repository session belongs to a different owner', true);
+    session.lastUsedAt = this.now();
+  }
+
+  repositorySessionFor(workspaceRef: string): Readonly<MemoryRepositorySession> | undefined {
+    return this.repositorySessions.get(workspaceRef);
+  }
+
+  private assertMemorySessionOwner(ownerProject: string, workspaceRef: string): void {
+    const parts = workspaceRef.split('/');
+    if (
+      parts.length !== 5 ||
+      parts[0] !== 'memory:' ||
+      parts[1] !== '' ||
+      parts[2] !== 'repository-session' ||
+      !isRepositorySessionIdentity(parts[3] ?? '') ||
+      !isRepositorySessionIdentity(parts[4] ?? '')
+    ) {
+      throw new WorkspaceError(`invalid repository session ref: ${workspaceRef}`, true);
+    }
+    if (parts[3] !== repositorySessionIdentity(ownerProject))
+      throw new WorkspaceError('repository session belongs to a different owner', true);
+  }
+
+  async pruneOrphans(
+    _liveRepos: string[],
+    liveProjects?: string[],
+  ): Promise<{ removed: string[] }> {
+    const live = new Set(liveProjects ?? []);
+    const removed: string[] = [];
+    for (const [workspaceRef, session] of this.repositorySessions) {
+      if (
+        (liveProjects !== undefined && !live.has(session.ownerProject)) ||
+        this.now() - session.lastUsedAt > this.repositorySessionIdleMs
+      ) {
+        this.repositorySessions.delete(workspaceRef);
+        removed.push(workspaceRef);
+      }
+    }
+    return { removed };
   }
 
   async prepareScratch(taskId: string): Promise<{ workspaceRef: string }> {

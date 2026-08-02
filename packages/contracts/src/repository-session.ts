@@ -1,0 +1,120 @@
+import { z } from 'zod';
+import { GitRefNameSchema } from './git-ref';
+
+const isSafeRepositoryPathSegment = (segment: string): boolean =>
+  /^[A-Za-z0-9_.-]+$/.test(segment) && segment !== '.' && segment !== '..';
+
+const RepositorySessionIdentitySchema = /^[a-zA-Z0-9_-]{1,48}-[0-9a-f]{16}$/;
+
+export type RepositorySessionWorkspaceSubPathKind =
+  'repository-session' | 'malformed-repository-session' | 'legacy';
+
+// Repository sessions are intentionally standalone clones, not linked
+// worktrees. Keep their exact directory shape in the shared contracts layer so
+// backend runners can make security decisions without trusting a caller-owned
+// path prefix.
+export function repositorySessionWorkspaceSubPathKind(
+  workspaceSubPath: string,
+): RepositorySessionWorkspaceSubPathKind {
+  const segments = workspaceSubPath.split('/');
+  if (segments[0] !== 'repository-sessions') return 'legacy';
+  return segments.length === 3 &&
+    segments.slice(1).every((segment) => RepositorySessionIdentitySchema.test(segment))
+    ? 'repository-session'
+    : 'malformed-repository-session';
+}
+
+const ShortRepositorySchema = z
+  .string()
+  .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'Repository must be in owner/name form.')
+  .refine((repo) => repo.split('/').every(isSafeRepositoryPathSegment), {
+    message: 'Repository owner and name must not be . or ..',
+  });
+
+const RepositoryRelativePathSchema = z
+  .string()
+  .regex(
+    /^repositories\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/,
+    'Repository checkout path must be under repositories/owner/name.',
+  )
+  .refine((relativePath) => relativePath.split('/').slice(1).every(isSafeRepositoryPathSegment), {
+    message: 'Repository checkout path segments must not be . or ..',
+  });
+
+export const RepositorySessionRepositoryInputSchema = z
+  .object({
+    repo: ShortRepositorySchema,
+    ref: GitRefNameSchema.optional(),
+  })
+  .strict();
+export type RepositorySessionRepositoryInput = z.infer<
+  typeof RepositorySessionRepositoryInputSchema
+>;
+
+export const CreateRepositorySessionRequestSchema = z
+  .object({
+    taskId: z.string().min(1).max(200),
+    repositories: z.array(RepositorySessionRepositoryInputSchema).min(1).max(5),
+  })
+  .strict()
+  .superRefine(({ repositories }, context) => {
+    const seen = new Set<string>();
+
+    repositories.forEach(({ repo }, index) => {
+      const normalizedRepo = repo.toLowerCase();
+      if (seen.has(normalizedRepo)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Repositories must be distinct, ignoring case.',
+          path: ['repositories', index, 'repo'],
+        });
+      }
+      seen.add(normalizedRepo);
+    });
+  });
+export type CreateRepositorySessionRequest = z.infer<typeof CreateRepositorySessionRequestSchema>;
+
+export const RepositorySessionRepositorySchema = z
+  .object({
+    repo: ShortRepositorySchema,
+    relativePath: RepositoryRelativePathSchema,
+    commit: z.string().regex(/^[0-9a-f]{40}$/),
+  })
+  .strict();
+export type RepositorySessionRepository = z.infer<typeof RepositorySessionRepositorySchema>;
+
+export const RepositorySessionSchema = z
+  .object({
+    workspaceRef: z.string().min(1),
+    repositories: z.array(RepositorySessionRepositorySchema).min(1).max(5),
+  })
+  .strict()
+  .superRefine(({ repositories }, context) => {
+    const seen = new Set<string>();
+
+    repositories.forEach(({ repo, relativePath }, index) => {
+      if (relativePath !== `repositories/${repo}`) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Repository checkout path must match its repository.',
+          path: ['repositories', index, 'relativePath'],
+        });
+      }
+
+      const normalizedRepo = repo.toLowerCase();
+      if (seen.has(normalizedRepo)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Repositories must be distinct, ignoring case.',
+          path: ['repositories', index, 'repo'],
+        });
+      }
+      seen.add(normalizedRepo);
+    });
+  });
+export type RepositorySession = z.infer<typeof RepositorySessionSchema>;
+
+export const CleanupRepositorySessionRequestSchema = z
+  .object({ workspaceRef: z.string().min(1) })
+  .strict();
+export type CleanupRepositorySessionRequest = z.infer<typeof CleanupRepositorySessionRequestSchema>;

@@ -545,6 +545,14 @@ describe('createActivities — workspace lifecycle', () => {
           return { workspaceRef: 'ref', branch: 'b', baseBranch: 'main' };
         },
         cleanup: async () => {},
+        prepareRepositorySession: async () => ({
+          workspaceRef: 'session-ref',
+          repositories: [
+            { repo: 'owner/repo', relativePath: 'repositories/owner/repo', commit: '0'.repeat(40) },
+          ],
+        }),
+        cleanupRepositorySession: async () => {},
+        touchRepositorySession: async () => {},
         prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
         cleanupScratch: async () => {},
         pruneOrphans: async () => ({ removed: [] }),
@@ -564,6 +572,96 @@ describe('createActivities — workspace lifecycle', () => {
 });
 
 describe('createActivities — prompt rendering', () => {
+  it.each([
+    ['instructions', 'x'.repeat(32 * 1024 + 1)],
+    ['instructions', '😀'.repeat(8193)],
+    ['outputContract', 'x'.repeat(16 * 1024 + 1)],
+  ])('rejects oversized generic prompt %s before backend dispatch', async (field, value) => {
+    const run = vi.fn<AgentBackend['run']>();
+    const activities = createActivities({
+      ...buildDeps(),
+      backends: { stub: { run } },
+    });
+
+    const error = await activities
+      .runAgent({
+        taskId: 't1',
+        stage: 'implement',
+        attempt: 1,
+        callIndex: 1,
+        backend: 'stub',
+        model: 'stub-v1',
+        promptRef: 'generic-task.md',
+        promptContext: {
+          taskId: 't1',
+          instructions: 'inspect',
+          outputContract: '{"ok":true}',
+          [field]: value,
+        },
+        workspaceRef: 'demo/repo',
+        limits: { maxTokens: 1000, timeoutMs: 60_000 },
+      })
+      .catch((cause: unknown) => cause);
+
+    expect(error).toMatchObject({ type: 'GenericPromptValidationError', nonRetryable: true });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it.each([null, [], 'not an object'])(
+    'rejects non-object generic prompt context before tier, workspace, rendering, or backend work',
+    async (promptContext) => {
+      const run = vi.fn<AgentBackend['run']>();
+      const deps = buildDeps();
+      deps.backends = { stub: { run } };
+      const touchRepositorySession = vi.spyOn(deps.workspaces, 'touchRepositorySession');
+      const render = vi.spyOn(deps.prompts, 'render');
+      const activities = createActivities(deps);
+
+      const error = await activities
+        .runAgent({
+          taskId: 't1',
+          stage: 'implement',
+          attempt: 1,
+          callIndex: 1,
+          tier: 'missing-tier',
+          projectTiers: {},
+          promptRef: 'generic-task.md',
+          promptContext: promptContext as unknown as Record<string, unknown>,
+          workspaceRef: 'demo/repo',
+          limits: { maxTokens: 1000, timeoutMs: 60_000 },
+        })
+        .catch((cause: unknown) => cause);
+
+      expect(error).toMatchObject({ type: 'GenericPromptValidationError', nonRetryable: true });
+      expect(touchRepositorySession).not.toHaveBeenCalled();
+      expect(render).not.toHaveBeenCalled();
+      expect(run).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects malformed generic prompt fields before backend dispatch', async () => {
+    const run = vi.fn<AgentBackend['run']>();
+    const activities = createActivities({ ...buildDeps(), backends: { stub: { run } } });
+
+    const error = await activities
+      .runAgent({
+        taskId: 't1',
+        stage: 'implement',
+        attempt: 1,
+        callIndex: 1,
+        backend: 'stub',
+        model: 'stub-v1',
+        promptRef: 'generic-task.md',
+        promptContext: { taskId: '', instructions: 1, outputContract: null },
+        workspaceRef: 'demo/repo',
+        limits: { maxTokens: 1000, timeoutMs: 60_000 },
+      })
+      .catch((cause: unknown) => cause);
+
+    expect(error).toMatchObject({ type: 'GenericPromptValidationError', nonRetryable: true });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it('renders promptRef/promptContext into prompt text before calling the backend', async () => {
     let receivedPrompt = '';
     const fakeBackend: AgentBackend = {
@@ -625,6 +723,14 @@ describe('createActivities — workspace error translation', () => {
         throw new WorkspaceError('git clone failed for owner/repo: spawn git ENOENT', true);
       },
       cleanup: async () => {},
+      prepareRepositorySession: async () => ({
+        workspaceRef: 'session-ref',
+        repositories: [
+          { repo: 'owner/repo', relativePath: 'repositories/owner/repo', commit: '0'.repeat(40) },
+        ],
+      }),
+      cleanupRepositorySession: async () => {},
+      touchRepositorySession: async () => {},
       prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
       cleanupScratch: async () => {},
       pruneOrphans: async () => ({ removed: [] }),
@@ -651,6 +757,14 @@ describe('createActivities — workspace error translation', () => {
         throw new WorkspaceError('git fetch failed for owner/repo: network unreachable', false);
       },
       cleanup: async () => {},
+      prepareRepositorySession: async () => ({
+        workspaceRef: 'session-ref',
+        repositories: [
+          { repo: 'owner/repo', relativePath: 'repositories/owner/repo', commit: '0'.repeat(40) },
+        ],
+      }),
+      cleanupRepositorySession: async () => {},
+      touchRepositorySession: async () => {},
       prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
       cleanupScratch: async () => {},
       pruneOrphans: async () => ({ removed: [] }),
@@ -674,6 +788,14 @@ describe('createActivities — workspace error translation', () => {
       cleanup: async () => {
         throw new WorkspaceError('git worktree remove failed: spawn git ENOENT', true);
       },
+      prepareRepositorySession: async () => ({
+        workspaceRef: 'session-ref',
+        repositories: [
+          { repo: 'owner/repo', relativePath: 'repositories/owner/repo', commit: '0'.repeat(40) },
+        ],
+      }),
+      cleanupRepositorySession: async () => {},
+      touchRepositorySession: async () => {},
       prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
       cleanupScratch: async () => {},
       pruneOrphans: async () => ({ removed: [] }),
@@ -970,6 +1092,7 @@ describe('createActivities — resolveRepoConfig', () => {
         repo: 'est1908/agentops-engine',
         trackerType: 'github',
         token: 'fake',
+        readRepositories: [],
       },
     ];
     const activities = createActivities(deps);
@@ -1003,7 +1126,15 @@ describe('createActivities — resolveRepoConfig', () => {
     const deps = {
       ...buildDeps(),
       tracker,
-      registry: [{ project: 'acme', repo: 'acme/web', trackerType: 'github' as const, token: 't' }],
+      registry: [
+        {
+          project: 'acme',
+          repo: 'acme/web',
+          trackerType: 'github' as const,
+          token: 't',
+          readRepositories: [],
+        },
+      ],
     };
     const activities = createActivities(deps);
     await expect(
@@ -1030,7 +1161,15 @@ describe('createActivities — resolveRepoConfig', () => {
   it('listManagedProjects returns registry {project,repo} pairs', async () => {
     const deps = {
       ...buildDeps(),
-      registry: [{ project: 'acme', repo: 'acme/web', token: 't', trackerType: 'github' as const }],
+      registry: [
+        {
+          project: 'acme',
+          repo: 'acme/web',
+          token: 't',
+          trackerType: 'github' as const,
+          readRepositories: [],
+        },
+      ],
     };
     const activities = createActivities(deps);
     expect(await activities.listManagedProjects()).toEqual([{ project: 'acme', repo: 'acme/web' }]);
@@ -1333,5 +1472,369 @@ describe('createActivities — scratch workspace lifecycle', () => {
 
     await activities.cleanupScratchWorkspace(workspaceRef);
     expect((deps.workspaces as MemoryWorkspaceManager).isScratchCleanedUp(workspaceRef)).toBe(true);
+  });
+});
+
+describe('createActivities — repository sessions', () => {
+  const repositorySession = {
+    workspaceRef: 'session-ref',
+    repositories: [
+      { repo: 'acme/app', relativePath: 'repositories/acme/app', commit: 'a'.repeat(40) },
+    ],
+  };
+  const registry: ResolvedProjectEntry[] = [
+    {
+      project: 'acme',
+      repo: 'acme/app',
+      readRepositories: ['acme/shared'],
+      trackerType: 'github',
+      token: 'not-a-real-token',
+    },
+  ];
+
+  it('records only operational repository-session create attributes', async () => {
+    const { projectContext } = await import('./project-context');
+    const exporter = new InMemorySpanExporter();
+    const provider = new NodeTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(exporter)],
+    });
+    provider.register();
+    const span = provider.getTracer('test').startSpan('CreateRepositorySession');
+    const commit = 'b'.repeat(40);
+    const activities = createActivities({
+      ...buildDeps(),
+      registry: [{ ...registry[0], readRepositories: ['acme/shared', 'acme/private-repo'] }],
+      workspaces: {
+        ...buildDeps().workspaces,
+        prepareRepositorySession: vi.fn().mockResolvedValue({
+          workspaceRef: 'session-ref',
+          repositories: [
+            { repo: 'acme/private-repo', relativePath: 'repositories/acme/private-repo', commit },
+          ],
+        }),
+      } as Workspaces,
+    });
+
+    await context.with(trace.setSpan(context.active(), span), () =>
+      projectContext.run({ project: 'acme' }, () =>
+        activities.createRepositorySession({
+          taskId: 'safe-task',
+          repositories: [{ repo: 'acme/private-repo', ref: 'private-ref' }],
+        }),
+      ),
+    );
+    span.end();
+    const [recorded] = exporter.getFinishedSpans();
+    await provider.shutdown();
+
+    expect(recorded.attributes).toMatchObject({
+      'agentops.project': 'acme',
+      'agentops.task_id': 'safe-task',
+      'agentops.repository.count': 1,
+      'agentops.workspace.kind': 'repository-session',
+      'agentops.workspace.operation': 'create',
+      'agentops.workspace.outcome': 'success',
+    });
+    expect(Object.values(recorded.attributes).join(' ')).not.toContain('acme/private-repo');
+    expect(Object.values(recorded.attributes).join(' ')).not.toContain('private-ref');
+    expect(Object.values(recorded.attributes).join(' ')).not.toContain(commit);
+    expect(Object.keys(recorded.attributes)).not.toContain('agentops.repository.names');
+    expect(Object.keys(recorded.attributes)).not.toContain('agentops.repository.commits');
+  });
+
+  it.each([
+    { taskId: 'task', repositories: [], label: 'an empty repository list' },
+    {
+      taskId: 'task',
+      repositories: Array.from({ length: 6 }, () => ({ repo: 'acme/app' })),
+      label: 'too many repositories',
+    },
+    { taskId: 'task', repositories: [{ repo: 'acme/not a repo' }], label: 'an invalid name' },
+    {
+      taskId: 'task',
+      repositories: [{ repo: 'acme/app', ref: 'bad ref' }],
+      label: 'an invalid ref',
+    },
+    {
+      taskId: 'task',
+      repositories: [{ repo: 'acme/app' }, { repo: 'ACME/APP' }],
+      label: 'a case-insensitive duplicate',
+    },
+  ])(
+    'rejects $label before authorization or workspace access',
+    async ({ label: _label, ...raw }) => {
+      const prepareRepositorySession = vi.fn();
+      const activities = createActivities({
+        ...buildDeps(),
+        registry,
+        workspaces: { ...buildDeps().workspaces, prepareRepositorySession } as Workspaces,
+      });
+
+      const error = await activities.createRepositorySession(raw as never).catch((e) => e);
+      expect(error).toMatchObject({ type: 'RepositorySessionValidationError', nonRetryable: true });
+      expect(prepareRepositorySession).not.toHaveBeenCalled();
+    },
+  );
+
+  it('validates and authorizes a complete create request before preparing a session', async () => {
+    const { projectContext } = await import('./project-context');
+    const prepareRepositorySession = vi.fn().mockResolvedValue(repositorySession);
+    const deps = {
+      ...buildDeps(),
+      registry,
+      workspaces: { ...buildDeps().workspaces, prepareRepositorySession } as Workspaces,
+    };
+    const activities = createActivities(deps);
+
+    const malformed: unknown = {
+      taskId: 'task',
+      repositories: [{ repo: 'acme/app' }],
+      unexpected: true,
+    };
+    const validationError = await activities
+      .createRepositorySession(malformed as never)
+      .catch((e) => e);
+    expect(validationError).toMatchObject({
+      type: 'RepositorySessionValidationError',
+      nonRetryable: true,
+    });
+    expect(prepareRepositorySession).not.toHaveBeenCalled();
+
+    const unknownCallerError = await projectContext
+      .run({ project: 'unknown' }, () =>
+        activities.createRepositorySession({
+          taskId: 'task',
+          repositories: [{ repo: 'acme/app' }],
+        }),
+      )
+      .catch((e) => e);
+    expect(unknownCallerError).toMatchObject({
+      type: 'ProjectAuthorizationError',
+      nonRetryable: true,
+    });
+    expect(prepareRepositorySession).not.toHaveBeenCalled();
+
+    const authorizationError = await projectContext
+      .run({ project: 'acme' }, () =>
+        activities.createRepositorySession({
+          taskId: 'task',
+          repositories: [{ repo: 'acme/app' }, { repo: 'other/private' }],
+        }),
+      )
+      .catch((e) => e);
+    expect(authorizationError).toMatchObject({
+      type: 'ProjectAuthorizationError',
+      nonRetryable: true,
+    });
+    expect(prepareRepositorySession).not.toHaveBeenCalled();
+
+    await projectContext.run({ project: 'acme' }, () =>
+      activities.createRepositorySession({
+        taskId: 'task',
+        repositories: [{ repo: 'acme/app' }, { repo: 'acme/shared', ref: 'feature/session' }],
+      }),
+    );
+    expect(prepareRepositorySession).toHaveBeenCalledWith('acme', {
+      taskId: 'task',
+      repositories: [{ repo: 'acme/app' }, { repo: 'acme/shared', ref: 'feature/session' }],
+    });
+  });
+
+  it('requires a caller for create and cleanup', async () => {
+    const prepareRepositorySession = vi
+      .fn()
+      .mockResolvedValue({ workspaceRef: 'bad', repositories: [] });
+    const cleanupRepositorySession = vi.fn().mockRejectedValue(new WorkspaceError('gone', true));
+    const deps = {
+      ...buildDeps(),
+      registry,
+      workspaces: {
+        ...buildDeps().workspaces,
+        prepareRepositorySession,
+        cleanupRepositorySession,
+      } as Workspaces,
+    };
+    const activities = createActivities(deps);
+
+    const createError = await activities
+      .createRepositorySession({ taskId: 'task', repositories: [{ repo: 'acme/app' }] })
+      .catch((e) => e);
+    expect(createError).toMatchObject({ type: 'ProjectAuthorizationError', nonRetryable: true });
+    expect(prepareRepositorySession).not.toHaveBeenCalled();
+
+    const cleanupError = await activities
+      .cleanupRepositorySession({ workspaceRef: 'session-ref' })
+      .catch((e) => e);
+    expect(cleanupError).toMatchObject({ type: 'ProjectAuthorizationError', nonRetryable: true });
+    expect(cleanupRepositorySession).not.toHaveBeenCalled();
+  });
+
+  it('validates session manager output and maps cleanup workspace errors with the caller project', async () => {
+    const { projectContext } = await import('./project-context');
+    const prepareRepositorySession = vi
+      .fn()
+      .mockResolvedValue({ workspaceRef: 'bad', repositories: [] });
+    const cleanupRepositorySession = vi
+      .fn()
+      .mockRejectedValue(new WorkspaceError('wrong owner', true));
+    const activities = createActivities({
+      ...buildDeps(),
+      registry,
+      workspaces: {
+        ...buildDeps().workspaces,
+        prepareRepositorySession,
+        cleanupRepositorySession,
+      } as Workspaces,
+    });
+
+    const outputError = await projectContext
+      .run({ project: 'acme' }, () =>
+        activities.createRepositorySession({
+          taskId: 'task',
+          repositories: [{ repo: 'acme/app' }],
+        }),
+      )
+      .catch((e) => e);
+    expect(outputError).toMatchObject({
+      type: 'RepositorySessionResultValidationError',
+      nonRetryable: false,
+    });
+
+    const cleanupError = await projectContext
+      .run({ project: 'acme' }, () =>
+        activities.cleanupRepositorySession({ workspaceRef: 'session-ref' }),
+      )
+      .catch((e) => e);
+    expect(cleanupRepositorySession).toHaveBeenCalledWith('acme', 'session-ref');
+    expect(cleanupError).toMatchObject({ type: 'WorkspaceError', nonRetryable: true });
+
+    const malformedError = await projectContext
+      .run({ project: 'acme' }, () =>
+        activities.cleanupRepositorySession({ workspaceRef: '', extra: true } as never),
+      )
+      .catch((e) => e);
+    expect(malformedError).toMatchObject({
+      type: 'RepositorySessionValidationError',
+      nonRetryable: true,
+    });
+    expect(cleanupRepositorySession).toHaveBeenCalledTimes(1);
+  });
+
+  it('touches a repository session before rendering or dispatching, and maps touch failures', async () => {
+    const { projectContext } = await import('./project-context');
+    const events: string[] = [];
+    const backend: AgentBackend = {
+      run: async () => {
+        events.push('backend');
+        return { output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 };
+      },
+    };
+    const touchRepositorySession = vi.fn(async () => {
+      events.push('touch');
+    });
+    const prompts = new PromptPack();
+    const render = vi.spyOn(prompts, 'render').mockImplementation((...args) => {
+      events.push('render');
+      return PromptPack.prototype.render.apply(prompts, args);
+    });
+    const activities = createActivities({
+      ...buildDeps(),
+      backends: { stub: backend },
+      prompts,
+      workspaces: { ...buildDeps().workspaces, touchRepositorySession } as Workspaces,
+    });
+    const req = {
+      taskId: 'task',
+      stage: 'implement' as const,
+      attempt: 1,
+      callIndex: 1,
+      backend: 'stub',
+      model: 'stub-v1',
+      promptRef: 'implement.md',
+      promptContext: {
+        taskId: 'task',
+        goal: 'g',
+        fullVerifyFindings: '',
+        reviewFindings: '',
+        prReviewFeedback: '',
+      },
+      workspaceRef: 'session-ref',
+      limits: { maxTokens: 1000, timeoutMs: 60_000 },
+    };
+
+    await projectContext.run({ project: 'acme' }, () => activities.runAgent(req));
+    await projectContext.run({ project: 'acme' }, () => activities.runAgent(req));
+    expect(touchRepositorySession).toHaveBeenCalledTimes(2);
+    expect(touchRepositorySession).toHaveBeenLastCalledWith('acme', 'session-ref');
+    expect(events).toEqual(['touch', 'render', 'backend', 'touch', 'render', 'backend']);
+    expect(render).toHaveBeenCalledTimes(2);
+
+    touchRepositorySession.mockRejectedValueOnce(new WorkspaceError('wrong owner', true));
+    const error = await projectContext.run({ project: 'acme' }, () =>
+      activities.runAgent(req).catch((e) => e),
+    );
+    expect(error).toMatchObject({ type: 'WorkspaceError', nonRetryable: true });
+    expect(events).toHaveLength(6);
+  });
+
+  it('fails closed for a repository session without caller context while keeping legacy refs compatible', async () => {
+    const workspaceManager = new MemoryWorkspaceManager();
+    const session = await workspaceManager.prepareRepositorySession('acme', {
+      taskId: 'task',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    const backend = {
+      run: vi.fn().mockResolvedValue({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }),
+    };
+    const activities = createActivities({
+      ...buildDeps(),
+      backends: { stub: backend },
+      workspaces: workspaceManager,
+    });
+    const req = {
+      taskId: 'task',
+      stage: 'implement' as const,
+      attempt: 1,
+      callIndex: 1,
+      backend: 'stub',
+      model: 'stub-v1',
+      promptRef: 'implement.md',
+      promptContext: {
+        taskId: 'task',
+        goal: 'g',
+        fullVerifyFindings: '',
+        reviewFindings: '',
+        prReviewFeedback: '',
+      },
+      workspaceRef: session.workspaceRef,
+      limits: { maxTokens: 1000, timeoutMs: 60_000 },
+    };
+    const error = await activities.runAgent(req).catch((e) => e);
+    expect(error).toMatchObject({ type: 'WorkspaceError', nonRetryable: true });
+    expect(backend.run).not.toHaveBeenCalled();
+
+    await activities.runAgent({ ...req, workspaceRef: 'memory://scratch/legacy' });
+    expect(backend.run).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces a cross-owner repository-session cleanup rejection as non-retryable', async () => {
+    const { projectContext } = await import('./project-context');
+    const workspaces = new MemoryWorkspaceManager();
+    const session = await workspaces.prepareRepositorySession('acme', {
+      taskId: 'task',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    const activities = createActivities({
+      ...buildDeps(),
+      registry: [...registry, { ...registry[0], project: 'other', repo: 'other/app' }],
+      workspaces,
+    });
+
+    const error = await projectContext
+      .run({ project: 'other' }, () =>
+        activities.cleanupRepositorySession({ workspaceRef: session.workspaceRef }),
+      )
+      .catch((e) => e);
+    expect(error).toMatchObject({ type: 'WorkspaceError', nonRetryable: true });
   });
 });

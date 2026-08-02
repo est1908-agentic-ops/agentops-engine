@@ -1,5 +1,7 @@
 import { trace } from '@opentelemetry/api';
+import { Buffer } from 'node:buffer';
 import {
+  K8sWorkspaceConfigurationError,
   ProcessCliAuthError,
   RateLimitError,
   RateWindowExceededError,
@@ -19,6 +21,8 @@ import {
 import type {
   AgentRunRequest,
   AgentRunResult,
+  CleanupRepositorySessionRequest,
+  CreateRepositorySessionRequest,
   ExecutePlatformActionRequest,
   ExecutePlatformActionResult,
   MergePrRequest,
@@ -32,8 +36,11 @@ import type {
 } from '@agentops/contracts';
 import {
   MergePrResultSchema,
+  CleanupRepositorySessionRequestSchema,
+  CreateRepositorySessionRequestSchema,
   parseProjectConfig,
   PrSnapshotSchema,
+  RepositorySessionSchema,
   sha256,
   type AgentSpec,
   type AgentsManifest,
@@ -54,7 +61,11 @@ import {
 import { loadProjectConfig } from './load-project-config';
 import { ApplicationFailure } from '@temporalio/common';
 import { Context } from '@temporalio/activity';
-import { assertProjectOwnsRepo, getCallerProject } from './project-context';
+import {
+  assertProjectCanReadRepositories,
+  assertProjectOwnsRepo,
+  getCallerProject,
+} from './project-context';
 
 export interface ActivityDependencies {
   backends: Record<string, AgentBackend>;
@@ -84,6 +95,16 @@ export interface WorkflowClientLike {
   };
 }
 
+// Kept at the activities boundary so pure workspace code has no Temporal
+// dependency while a production coordinator can stop waiting on cancellation.
+export function getActivityCancellationSignal(): AbortSignal | undefined {
+  try {
+    return Context.current().cancellationSignal;
+  } catch {
+    return undefined;
+  }
+}
+
 function rethrowWorkspaceError(err: unknown): never {
   if (err instanceof WorkspaceError) {
     throw ApplicationFailure.create({
@@ -95,10 +116,58 @@ function rethrowWorkspaceError(err: unknown): never {
   throw err;
 }
 
+type SessionInputSchema<T> = {
+  safeParse(
+    input: unknown,
+  ): { success: true; data: T } | { success: false; error: { message: string } };
+};
+
+function parseSessionInput<T>(schema: SessionInputSchema<T>, raw: unknown): T {
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    throw ApplicationFailure.nonRetryable(parsed.error.message, 'RepositorySessionValidationError');
+  }
+  return parsed.data;
+}
+
 // Fixed backoff for a self-clearing provider 429 (RateLimitError). The CLI
 // doesn't reliably surface a Retry-After, so a fixed wait lets Temporal's
 // activity retry absorb the cooldown. Chart/operator-tunable later (SP3).
 const RATE_LIMIT_RETRY_DELAY_MS = 60_000;
+const MAX_GENERIC_INSTRUCTIONS_BYTES = 32 * 1024;
+const MAX_GENERIC_OUTPUT_CONTRACT_BYTES = 16 * 1024;
+const GENERIC_PROMPT_VALIDATION_MESSAGE =
+  'generic-task.md requires a non-empty string taskId plus string instructions (at most 32 KiB UTF-8) and outputContract (at most 16 KiB UTF-8)';
+
+function validateGenericPromptContext(req: AgentRunRequest): void {
+  if (req.promptRef !== 'generic-task.md') {
+    return;
+  }
+
+  const context: unknown = req.promptContext;
+  if (typeof context !== 'object' || context === null || Array.isArray(context)) {
+    throw ApplicationFailure.nonRetryable(
+      GENERIC_PROMPT_VALIDATION_MESSAGE,
+      'GenericPromptValidationError',
+    );
+  }
+
+  const { taskId, instructions, outputContract } = context as Record<string, unknown>;
+  const valid =
+    typeof taskId === 'string' &&
+    taskId.trim().length > 0 &&
+    typeof instructions === 'string' &&
+    typeof outputContract === 'string' &&
+    Buffer.byteLength(instructions, 'utf8') <= MAX_GENERIC_INSTRUCTIONS_BYTES &&
+    Buffer.byteLength(outputContract, 'utf8') <= MAX_GENERIC_OUTPUT_CONTRACT_BYTES;
+
+  if (!valid) {
+    throw ApplicationFailure.nonRetryable(
+      GENERIC_PROMPT_VALIDATION_MESSAGE,
+      'GenericPromptValidationError',
+    );
+  }
+}
 
 export function createActivities(deps: ActivityDependencies) {
   const heartbeat = deps.heartbeat ?? ((details: unknown) => Context.current().heartbeat(details));
@@ -106,6 +175,8 @@ export function createActivities(deps: ActivityDependencies) {
     async runAgent(
       req: AgentRunRequest,
     ): Promise<AgentRunResult & { promptHash: string; promptSource: string }> {
+      validateGenericPromptContext(req);
+
       // Resolve the model: either via a tier ref (the normal path -- the
       // workflow sends a tier name, the activity resolves it to an ordered
       // ModelRef[] whose [0] is the primary and the rest is the
@@ -155,6 +226,28 @@ export function createActivities(deps: ActivityDependencies) {
           'project workflows may not route runAgent through the platform backend',
           'ProjectAuthorizationError',
         );
+      }
+
+      // The workspace manager treats ordinary/scratch refs as a no-op, while
+      // repository-session refs require their owning project. Keep that
+      // distinction at the manager boundary so activity code never infers it
+      // from a caller-controlled path string.
+      try {
+        await deps.workspaces.touchRepositorySession(getCallerProject(), req.workspaceRef);
+        trace.getActiveSpan()?.setAttributes({
+          'agentops.workspace.kind': 'repository-session-or-legacy',
+          'agentops.workspace.operation': 'touch',
+          'agentops.workspace.outcome': 'success',
+          ...(getCallerProject() ? { 'agentops.project': getCallerProject() } : {}),
+        });
+      } catch (err) {
+        trace.getActiveSpan()?.setAttributes({
+          'agentops.workspace.kind': 'repository-session-or-legacy',
+          'agentops.workspace.operation': 'touch',
+          'agentops.workspace.outcome': 'failure',
+          ...(getCallerProject() ? { 'agentops.project': getCallerProject() } : {}),
+        });
+        rethrowWorkspaceError(err);
       }
 
       const prompt = deps.prompts.render(req.promptRef, req.promptContext);
@@ -221,6 +314,9 @@ export function createActivities(deps: ActivityDependencies) {
           promptSource,
         };
       } catch (err) {
+        if (err instanceof K8sWorkspaceConfigurationError) {
+          throw ApplicationFailure.nonRetryable(err.message, 'K8sWorkspaceConfigurationError');
+        }
         // A rejected credential (bad/expired/revoked token, placeholder key) is
         // definitive, not transient -- retrying just burns the activity's retry
         // budget and delays surfacing the real cause. Fail fast with a clearly
@@ -311,10 +407,7 @@ export function createActivities(deps: ActivityDependencies) {
       assertProjectOwnsRepo(req.repo, deps.registry);
       const filedFindings = deps.filedFindings;
       if (req.dedupeFingerprint && filedFindings) {
-        const { won, issueRef } = await filedFindings.reserve(
-          req.project,
-          req.dedupeFingerprint,
-        );
+        const { won, issueRef } = await filedFindings.reserve(req.project, req.dedupeFingerprint);
         if (!won) {
           return { ref: issueRef, url: '', deduped: true };
         }
@@ -428,7 +521,10 @@ export function createActivities(deps: ActivityDependencies) {
     },
 
     async pruneOrphanWorkspaces(liveRepos: string[]): Promise<{ removed: string[] }> {
-      return deps.workspaces.pruneOrphans(liveRepos);
+      return deps.workspaces.pruneOrphans(
+        liveRepos,
+        deps.registry.map((entry) => entry.project),
+      );
     },
 
     async loadAgentsManifest(project: string, repo: string): Promise<AgentsManifest> {
@@ -439,9 +535,7 @@ export function createActivities(deps: ActivityDependencies) {
       return { agents: config.agents ?? [], worker: config.worker };
     },
 
-    async listAgentSchedules(
-      project: string,
-    ): Promise<
+    async listAgentSchedules(project: string): Promise<
       Array<{
         id: string;
         scheduleSpec: string;
@@ -659,6 +753,68 @@ export function createActivities(deps: ActivityDependencies) {
       try {
         await deps.workspaces.cleanupScratch(workspaceRef);
       } catch (err) {
+        rethrowWorkspaceError(err);
+      }
+    },
+    async createRepositorySession(raw: CreateRepositorySessionRequest) {
+      const req = parseSessionInput(CreateRepositorySessionRequestSchema, raw);
+      const caller = assertProjectCanReadRepositories(
+        req.repositories.map((repository) => repository.repo),
+        deps.registry,
+      );
+      try {
+        const result = await deps.workspaces.prepareRepositorySession(caller.project, req);
+        const parsed = RepositorySessionSchema.safeParse(result);
+        if (!parsed.success) {
+          throw ApplicationFailure.create({
+            message: parsed.error.message,
+            type: 'RepositorySessionResultValidationError',
+            nonRetryable: false,
+          });
+        }
+        trace.getActiveSpan()?.setAttributes({
+          'agentops.project': caller.project,
+          'agentops.task_id': req.taskId,
+          'agentops.repository.count': req.repositories.length,
+          'agentops.workspace.kind': 'repository-session',
+          'agentops.workspace.operation': 'create',
+          'agentops.workspace.outcome': 'success',
+        });
+        return parsed.data;
+      } catch (err) {
+        trace.getActiveSpan()?.setAttributes({
+          'agentops.project': caller.project,
+          'agentops.workspace.kind': 'repository-session',
+          'agentops.workspace.operation': 'create',
+          'agentops.workspace.outcome': 'failure',
+        });
+        rethrowWorkspaceError(err);
+      }
+    },
+    async cleanupRepositorySession(raw: CleanupRepositorySessionRequest): Promise<void> {
+      const req = parseSessionInput(CleanupRepositorySessionRequestSchema, raw);
+      const caller = getCallerProject();
+      if (!caller) {
+        throw ApplicationFailure.nonRetryable(
+          'missing caller project context for repository session cleanup',
+          'ProjectAuthorizationError',
+        );
+      }
+      try {
+        await deps.workspaces.cleanupRepositorySession(caller, req.workspaceRef);
+        trace.getActiveSpan()?.setAttributes({
+          'agentops.project': caller,
+          'agentops.workspace.kind': 'repository-session',
+          'agentops.workspace.operation': 'cleanup',
+          'agentops.workspace.outcome': 'success',
+        });
+      } catch (err) {
+        trace.getActiveSpan()?.setAttributes({
+          'agentops.project': caller,
+          'agentops.workspace.kind': 'repository-session',
+          'agentops.workspace.operation': 'cleanup',
+          'agentops.workspace.outcome': 'failure',
+        });
         rethrowWorkspaceError(err);
       }
     },

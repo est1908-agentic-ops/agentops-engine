@@ -4,6 +4,8 @@ import { BatchV1Api, KubeConfig } from '@kubernetes/client-node';
 import { Pool } from 'pg';
 import {
   createActivities,
+  FlockRepositorySessionCoordinator,
+  getActivityCancellationSignal,
   FileManagedProjectStore,
   InMemoryFiledFindingStore,
   InMemoryStageResultStore,
@@ -78,6 +80,8 @@ export function buildActivityDependencies(
   // history. Callers in production (boot, in-cluster) pass requireRegistry=true
   // so this fails fast instead. Defaults false to preserve the local/test path.
   requireRegistry = false,
+  inCluster = false,
+  getAbortSignal: () => AbortSignal | undefined = getActivityCancellationSignal,
 ): ActivityWiring {
   if (registry.length === 0) {
     if (requireRegistry) {
@@ -88,7 +92,11 @@ export function buildActivityDependencies(
           'history. Fix the ConfigMap/mount (or onboard at least one project) and restart.',
       );
     }
-    return { scm: new MemoryScmPort(), tracker: new MemoryTrackerPort(), workspaces: new MemoryWorkspaceManager() };
+    return {
+      scm: new MemoryScmPort(),
+      tracker: new MemoryTrackerPort(),
+      workspaces: new MemoryWorkspaceManager(),
+    };
   }
   const entries = registry.map((entry) => {
     const git = new SpawnGitCommandRunner({ authToken: () => entry.token });
@@ -97,16 +105,43 @@ export function buildActivityDependencies(
     // design doc). Only the tracker implementation varies per entry.
     const { scm, tracker: githubTracker } = createGithubPorts(entry.token, git);
     if (entry.trackerType !== 'linear') {
-      return { repo: entry.repo, scm, tracker: githubTracker, git };
+      return { project: entry.project, repo: entry.repo, scm, tracker: githubTracker, git };
     }
     if (!entry.linearToken) {
-      throw new Error(`buildActivityDependencies: project "${entry.project}" is linear-tracked but has no resolved linearToken`);
+      throw new Error(
+        `buildActivityDependencies: project "${entry.project}" is linear-tracked but has no resolved linearToken`,
+      );
     }
     const tracker = createLinearTracker(entry.linearToken);
-    return { repo: entry.repo, linearTeamKey: entry.linearTeamKey, scm, tracker, git };
+    return {
+      project: entry.project,
+      repo: entry.repo,
+      linearTeamKey: entry.linearTeamKey,
+      scm,
+      tracker,
+      git,
+    };
   });
   const { scm, tracker, resolveGit } = createProjectScopedPorts(entries);
-  return { scm, tracker, workspaces: new WorkspaceManager({ resolveGit, cloneUrl: githubCloneUrl, workspacesDir, cacheDir }) };
+  const gitByProject = new Map(entries.map((entry) => [entry.project, entry.git]));
+  return {
+    scm,
+    tracker,
+    workspaces: new WorkspaceManager({
+      resolveGit,
+      resolveGitForProject: (project) => {
+        const git = gitByProject.get(project);
+        if (!git)
+          throw new Error(`no project registered for repository session owner "${project}"`);
+        return git;
+      },
+      cloneUrl: githubCloneUrl,
+      workspacesDir,
+      cacheDir,
+      repositorySessionCoordinator: inCluster ? new FlockRepositorySessionCoordinator() : undefined,
+      getAbortSignal,
+    }),
+  };
 }
 
 // Per-project tokens, read from a mounted managed-projects ConfigMap dir and
@@ -135,8 +170,9 @@ export function workspaceMountPath(): string {
 // WorkspaceManager creates each task workspace as a `git worktree` of a shared
 // per-repo base clone kept under this cache dir. Two things depend on it being
 // a persistent, shared PVC mounted at the SAME path in both the engine-worker
-// pod and every K8s Job pod (charts/engine/templates/deployment.yaml mounts the
-// workspace-cache PVC here, and buildJobRunnerOptions mounts it into Job pods):
+// pod and ordinary linked-worktree Job pods (charts/engine/templates/deployment.yaml
+// mounts the workspace-cache PVC here, and buildJobRunnerOptions supplies it to
+// those Job pods). Repository sessions are standalone clones and do not mount it:
 //   1. Persistence -- the base clone must survive a worker redeploy. It used to
 //      default to the worker's ephemeral home (~/.agentops/cache), so shipping
 //      any new worker image wiped every base clone and orphaned every worktree
@@ -166,15 +202,19 @@ export function resolveCacheDir(inCluster: boolean): string | undefined {
 
 export function buildJobRunnerOptions(
   batchApi: BatchV1ApiLike,
-  opts: { authSecretName?: string; serviceAccountName?: string; additionalSecretNames?: string[]; podLabels?: Record<string, string> } = {},
+  opts: {
+    authSecretName?: string;
+    serviceAccountName?: string;
+    additionalSecretNames?: string[];
+    podLabels?: Record<string, string>;
+  } = {},
 ): K8sJobRunnerOptions {
   return {
     namespace: process.env.AGENT_NAMESPACE ?? 'dev-agents',
     workspacePvcName: process.env.WORKSPACE_PVC_NAME ?? 'workspace-tasks',
     workspaceMountPath: workspaceMountPath(),
-    // The base clone a worktree links back to lives here; the agent commits in
-    // the Job pod, so it needs the same cache PVC mounted at the same path the
-    // worker created the worktree under (see cacheMountPath above).
+    // Ordinary linked worktrees resolve their gitdir through this shared base
+    // clone cache. buildAgentJob omits it for standalone repository sessions.
     cachePvcName: process.env.CACHE_PVC_NAME ?? 'workspace-cache',
     cacheMountPath: cacheMountPath(),
     authSecretName: opts.authSecretName,
@@ -252,10 +292,18 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
     const claudeRateWindowLimiter = buildRateWindowLimiter('CLAUDE');
     return {
       stub: new StubBackend(),
-      claude: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), claudeRateWindowLimiter, 'claude'),
+      claude: wrapWithRateWindow(
+        new ProcessCliRunner(claudeSpec),
+        claudeRateWindowLimiter,
+        'claude',
+      ),
       pi: wrapWithRateWindow(new ProcessCliRunner(piSpec), buildRateWindowLimiter('PI'), 'pi'),
       // Same CLI/model/rate window as claude (see the in-cluster branch below for why).
-      platform: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), claudeRateWindowLimiter, 'platform'),
+      platform: wrapWithRateWindow(
+        new ProcessCliRunner(claudeSpec),
+        claudeRateWindowLimiter,
+        'platform',
+      ),
     };
   }
 
@@ -271,12 +319,18 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
     // its env vars are provider-dependent (images/agent-runner/Dockerfile),
     // not guaranteed to be the same shape as claude's.
     claude: wrapWithRateWindow(
-      new K8sJobRunner(claudeSpec, buildJobRunnerOptions(batchApi, { authSecretName: process.env.CLAUDE_AUTH_SECRET_NAME })),
+      new K8sJobRunner(
+        claudeSpec,
+        buildJobRunnerOptions(batchApi, { authSecretName: process.env.CLAUDE_AUTH_SECRET_NAME }),
+      ),
       claudeRateWindowLimiter,
       'claude',
     ),
     pi: wrapWithRateWindow(
-      new K8sJobRunner(piSpec, buildJobRunnerOptions(batchApi, { authSecretName: process.env.PI_AUTH_SECRET_NAME })),
+      new K8sJobRunner(
+        piSpec,
+        buildJobRunnerOptions(batchApi, { authSecretName: process.env.PI_AUTH_SECRET_NAME }),
+      ),
       buildRateWindowLimiter('PI'),
       'pi',
     ),
@@ -295,7 +349,9 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
         buildJobRunnerOptions(batchApi, {
           authSecretName: process.env.CLAUDE_AUTH_SECRET_NAME,
           serviceAccountName: process.env.PLATFORM_AGENT_SERVICE_ACCOUNT,
-          additionalSecretNames: process.env.PLATFORM_AGENT_SECRET_NAME ? [process.env.PLATFORM_AGENT_SECRET_NAME] : undefined,
+          additionalSecretNames: process.env.PLATFORM_AGENT_SECRET_NAME
+            ? [process.env.PLATFORM_AGENT_SECRET_NAME]
+            : undefined,
           podLabels: { 'agentops/role': 'platform-agent' },
         }),
       ),
@@ -348,9 +404,10 @@ export async function buildFiledFindingStore(): Promise<FiledFindingStore> {
 // undefined and resolveTier falls back to DEFAULT_TIERS (the hardcoded seed).
 const TIER_REFRESH_INTERVAL_MS = 60_000;
 
-export async function buildGlobalTiers(
-  pool: Pool | undefined,
-): Promise<{ tiers: Record<string, import('@agentops/contracts').ModelRef[]> | undefined; stop: () => void }> {
+export async function buildGlobalTiers(pool: Pool | undefined): Promise<{
+  tiers: Record<string, import('@agentops/contracts').ModelRef[]> | undefined;
+  stop: () => void;
+}> {
   if (!pool) {
     return { tiers: undefined, stop: () => {} };
   }
@@ -409,6 +466,7 @@ async function main(): Promise<void> {
     resolveWorkspacesDir(inCluster),
     resolveCacheDir(inCluster),
     inCluster,
+    inCluster,
   );
   console.log(
     registry.length > 0
@@ -462,10 +520,18 @@ async function main(): Promise<void> {
     // boot. A failure here isn't fatal (the worker can still serve devCycle);
     // warn so a genuinely broken namespace surfaces without blocking startup.
     try {
-      await ensureSearchAttributes(c as unknown as OperatorConnectionLike, process.env.TEMPORAL_NAMESPACE);
-      console.log('agentops worker: custom search attributes ensured (project, agentName, workflowType)');
+      await ensureSearchAttributes(
+        c as unknown as OperatorConnectionLike,
+        process.env.TEMPORAL_NAMESPACE,
+      );
+      console.log(
+        'agentops worker: custom search attributes ensured (project, agentName, workflowType)',
+      );
     } catch (err) {
-      console.warn('agentops worker: failed to ensure search attributes — reconcile may reject Schedule creates', err);
+      console.warn(
+        'agentops worker: failed to ensure search attributes — reconcile may reject Schedule creates',
+        err,
+      );
     }
     try {
       await ensureReconcileSchedule(tc.schedule as unknown as ScheduleClientLike, ENGINE_QUEUE);
@@ -475,7 +541,9 @@ async function main(): Promise<void> {
     }
     try {
       if (!enginePool) {
-        console.log('agentops worker: self-heal schedule skipped (no ENGINE_DB_HOST — settings live in DB only)');
+        console.log(
+          'agentops worker: self-heal schedule skipped (no ENGINE_DB_HOST — settings live in DB only)',
+        );
       } else {
         const engineSettingsStore = new PostgresEngineSettingsStore(enginePool);
         await engineSettingsStore.ensureSchema();
@@ -484,8 +552,14 @@ async function main(): Promise<void> {
           console.log('agentops worker: engine_settings seeded with defaults (first boot)');
         }
         const selfHealOpts = await engineSettingsStore.getSelfHeal();
-        await ensureSelfHealSchedule(tc.schedule as unknown as SelfHealScheduleClient, ENGINE_QUEUE, selfHealOpts);
-        console.log(`agentops worker: self-heal schedule ensured (enabled=${selfHealOpts.enabled})`);
+        await ensureSelfHealSchedule(
+          tc.schedule as unknown as SelfHealScheduleClient,
+          ENGINE_QUEUE,
+          selfHealOpts,
+        );
+        console.log(
+          `agentops worker: self-heal schedule ensured (enabled=${selfHealOpts.enabled})`,
+        );
       }
     } catch (err) {
       console.warn('agentops worker: failed to ensure self-heal schedule', err);
@@ -517,9 +591,23 @@ async function main(): Promise<void> {
       : 'agentops worker: tracing disabled (OTEL_EXPORTER_OTLP_ENDPOINT not set)',
   );
 
-  const worker = await createWorker({ taskQueue: ENGINE_QUEUE, activities, connection, namespace: process.env.TEMPORAL_NAMESPACE, tracing });
-  const legacyWorker = await createWorker({ taskQueue: LEGACY_ENGINE_QUEUE, activities, connection, namespace: process.env.TEMPORAL_NAMESPACE, tracing });
-  console.log(`agentops worker started on "${ENGINE_QUEUE}" (+ legacy "${LEGACY_ENGINE_QUEUE}" during cutover)`);
+  const worker = await createWorker({
+    taskQueue: ENGINE_QUEUE,
+    activities,
+    connection,
+    namespace: process.env.TEMPORAL_NAMESPACE,
+    tracing,
+  });
+  const legacyWorker = await createWorker({
+    taskQueue: LEGACY_ENGINE_QUEUE,
+    activities,
+    connection,
+    namespace: process.env.TEMPORAL_NAMESPACE,
+    tracing,
+  });
+  console.log(
+    `agentops worker started on "${ENGINE_QUEUE}" (+ legacy "${LEGACY_ENGINE_QUEUE}" during cutover)`,
+  );
   try {
     await Promise.all([worker.run(), legacyWorker.run()]);
   } finally {

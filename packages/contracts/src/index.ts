@@ -24,6 +24,7 @@ export * from './agents-manifest';
 export * from './whitebox-finding';
 export * from './sha256';
 export * from './git-ref';
+export * from './repository-session';
 export * from './engine-queue';
 export * from './project-identity';
 export * from './tracker-types';

@@ -5,6 +5,7 @@ const BaseManagedProjectFields = {
   id: z.string().uuid(),
   project: z.string().min(1),
   repo: z.string().min(1),
+  readRepositories: z.array(z.string()).default([]),
   credentialSet: z.boolean(), // GitHub token set? never the token itself
   config: ProjectConfigSchema.nullable(),
   createdAt: z.string(),
