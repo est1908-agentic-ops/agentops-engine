@@ -74,3 +74,52 @@ describe('MemoryWorkspaceManager — scratch workspaces', () => {
     );
   });
 });
+
+describe('MemoryWorkspaceManager — repository sessions', () => {
+  it('tracks deterministic owned sessions, touch, cleanup, and pruning', async () => {
+    let time = 0;
+    const manager = new MemoryWorkspaceManager({ now: () => time });
+    const session = await manager.prepareRepositorySession('hub', {
+      taskId: 'task/one',
+      repositories: [{ repo: 'acme/app' }, { repo: 'acme/shared', ref: 'main' }],
+    });
+    expect(session.workspaceRef).toBe('memory://repository-session/hub/task-one');
+    expect(session.repositories.map((repository) => repository.relativePath)).toEqual([
+      'repositories/acme/app',
+      'repositories/acme/shared',
+    ]);
+    time = 2;
+    await manager.touchRepositorySession('hub', session.workspaceRef);
+    expect(manager.repositorySessionFor(session.workspaceRef)?.lastUsedAt).toBe(2);
+    await expect(manager.touchRepositorySession('other', session.workspaceRef)).rejects.toThrow(
+      /owner/,
+    );
+    await expect(manager.cleanupRepositorySession('other', session.workspaceRef)).rejects.toThrow(
+      /owner/,
+    );
+    await manager.cleanupRepositorySession('hub', session.workspaceRef);
+    await expect(
+      manager.cleanupRepositorySession('hub', session.workspaceRef),
+    ).resolves.toBeUndefined();
+  });
+
+  it('prunes expired and non-live sessions but not sessions at the TTL boundary', async () => {
+    let time = 0;
+    const manager = new MemoryWorkspaceManager({ now: () => time });
+    const active = await manager.prepareRepositorySession('live', {
+      taskId: 'active',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    const gone = await manager.prepareRepositorySession('gone', {
+      taskId: 'gone',
+      repositories: [{ repo: 'acme/gone' }],
+    });
+    time = 86_400_000;
+    const first = await manager.pruneOrphans([], ['live']);
+    expect(first.removed).toContain(gone.workspaceRef);
+    expect(manager.repositorySessionFor(active.workspaceRef)).toBeDefined();
+    time++;
+    await manager.pruneOrphans([], ['live']);
+    expect(manager.repositorySessionFor(active.workspaceRef)).toBeUndefined();
+  });
+});

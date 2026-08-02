@@ -545,6 +545,14 @@ describe('createActivities — workspace lifecycle', () => {
           return { workspaceRef: 'ref', branch: 'b', baseBranch: 'main' };
         },
         cleanup: async () => {},
+        prepareRepositorySession: async () => ({
+          workspaceRef: 'session-ref',
+          repositories: [
+            { repo: 'owner/repo', relativePath: 'repositories/owner/repo', commit: '0'.repeat(40) },
+          ],
+        }),
+        cleanupRepositorySession: async () => {},
+        touchRepositorySession: async () => {},
         prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
         cleanupScratch: async () => {},
         pruneOrphans: async () => ({ removed: [] }),
@@ -625,6 +633,14 @@ describe('createActivities — workspace error translation', () => {
         throw new WorkspaceError('git clone failed for owner/repo: spawn git ENOENT', true);
       },
       cleanup: async () => {},
+      prepareRepositorySession: async () => ({
+        workspaceRef: 'session-ref',
+        repositories: [
+          { repo: 'owner/repo', relativePath: 'repositories/owner/repo', commit: '0'.repeat(40) },
+        ],
+      }),
+      cleanupRepositorySession: async () => {},
+      touchRepositorySession: async () => {},
       prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
       cleanupScratch: async () => {},
       pruneOrphans: async () => ({ removed: [] }),
@@ -651,6 +667,14 @@ describe('createActivities — workspace error translation', () => {
         throw new WorkspaceError('git fetch failed for owner/repo: network unreachable', false);
       },
       cleanup: async () => {},
+      prepareRepositorySession: async () => ({
+        workspaceRef: 'session-ref',
+        repositories: [
+          { repo: 'owner/repo', relativePath: 'repositories/owner/repo', commit: '0'.repeat(40) },
+        ],
+      }),
+      cleanupRepositorySession: async () => {},
+      touchRepositorySession: async () => {},
       prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
       cleanupScratch: async () => {},
       pruneOrphans: async () => ({ removed: [] }),
@@ -674,6 +698,14 @@ describe('createActivities — workspace error translation', () => {
       cleanup: async () => {
         throw new WorkspaceError('git worktree remove failed: spawn git ENOENT', true);
       },
+      prepareRepositorySession: async () => ({
+        workspaceRef: 'session-ref',
+        repositories: [
+          { repo: 'owner/repo', relativePath: 'repositories/owner/repo', commit: '0'.repeat(40) },
+        ],
+      }),
+      cleanupRepositorySession: async () => {},
+      touchRepositorySession: async () => {},
       prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
       cleanupScratch: async () => {},
       pruneOrphans: async () => ({ removed: [] }),

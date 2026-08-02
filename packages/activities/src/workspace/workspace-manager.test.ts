@@ -507,3 +507,168 @@ describe('WorkspaceManager — git ref validation', () => {
     expect(existsSync(result.workspaceRef)).toBe(true);
   });
 });
+
+describe('WorkspaceManager — repository sessions', () => {
+  it('creates confined one- and multi-repository sessions using the owner project runner', async () => {
+    const remoteB = join(root, 'remote-b');
+    execFileSync('git', ['clone', remoteDir, remoteB]);
+    const ownerCalls: string[][] = [];
+    const targetCalls: string[][] = [];
+    const real = new SpawnGitCommandRunner();
+    const ownerRunner = {
+      run: (args: string[], opts: { cwd: string }) => {
+        ownerCalls.push(args);
+        return real.run(args, opts);
+      },
+    };
+    const targetRunner = {
+      run: (args: string[], opts: { cwd: string }) => {
+        targetCalls.push(args);
+        return real.run(args, opts);
+      },
+    };
+    const manager = new WorkspaceManager({
+      resolveGit: () => targetRunner,
+      resolveGitForProject: (project) => (project === 'hub' ? ownerRunner : targetRunner),
+      cacheDir,
+      workspacesDir,
+      cloneUrl: (repo) => (repo === 'acme/app' ? remoteDir : remoteB),
+    });
+
+    const session = await manager.prepareRepositorySession('hub', {
+      taskId: 'rollbar-123',
+      repositories: [{ repo: 'acme/app' }, { repo: 'acme/shared', ref: 'main' }],
+    });
+
+    expect(session.workspaceRef).toBe(
+      join(workspacesDir, 'repository-sessions', 'hub', 'rollbar-123'),
+    );
+    expect(session.repositories.map((repository) => repository.relativePath)).toEqual([
+      'repositories/acme/app',
+      'repositories/acme/shared',
+    ]);
+    expect(
+      session.repositories.every((repository) => /^[0-9a-f]{40}$/.test(repository.commit)),
+    ).toBe(true);
+    expect(
+      session.repositories.every((repository) =>
+        existsSync(join(session.workspaceRef, repository.relativePath)),
+      ),
+    ).toBe(true);
+    expect(ownerCalls.filter((args) => args[0] === 'clone')).toHaveLength(2);
+    expect(targetCalls).toEqual([]);
+    expect(
+      JSON.parse(readFileSync(join(session.workspaceRef, '.agentops-session.json'), 'utf8')),
+    ).toMatchObject({
+      ownerProject: 'hub',
+      taskId: 'rollbar-123',
+      repositories: session.repositories,
+    });
+  });
+
+  it('cleans up only owned session roots and is idempotent once absent', async () => {
+    const { manager } = buildManager();
+    const session = await manager.prepareRepositorySession('hub', {
+      taskId: 'one',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    await expect(
+      manager.cleanupRepositorySession('other', session.workspaceRef),
+    ).rejects.toMatchObject({ nonRetryable: true });
+    expect(existsSync(session.workspaceRef)).toBe(true);
+    await manager.cleanupRepositorySession('hub', session.workspaceRef);
+    await expect(
+      manager.cleanupRepositorySession('hub', session.workspaceRef),
+    ).resolves.toBeUndefined();
+    await expect(
+      manager.cleanupRepositorySession('hub', join(root, 'outside')),
+    ).rejects.toMatchObject({ nonRetryable: true });
+  });
+
+  it('removes only the generated session root when a sequential clone fails', async () => {
+    let cloneCount = 0;
+    const git = {
+      run: async (args: string[]) => {
+        if (args[0] === 'clone' && ++cloneCount === 2)
+          return { stdout: '', stderr: 'nope', exitCode: 1 };
+        if (args[0] === 'rev-parse') return { stdout: 'a'.repeat(40), stderr: '', exitCode: 0 };
+        return { stdout: '', stderr: '', exitCode: 0 };
+      },
+    };
+    const manager = new WorkspaceManager({
+      resolveGit: () => git,
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+    });
+    const expected = join(workspacesDir, 'repository-sessions', 'hub', 'partial');
+
+    await expect(
+      manager.prepareRepositorySession('hub', {
+        taskId: 'partial',
+        repositories: [{ repo: 'acme/app' }, { repo: 'acme/shared' }],
+      }),
+    ).rejects.toThrow(/nope/);
+    expect(existsSync(expected)).toBe(false);
+  });
+
+  it('touches owned sessions and skips legacy workspace refs', async () => {
+    let time = 100;
+    const manager = new WorkspaceManager({
+      resolveGit: () => new SpawnGitCommandRunner(),
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+      now: () => time,
+    });
+    const session = await manager.prepareRepositorySession('hub', {
+      taskId: 'one',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    time = 101;
+    await manager.touchRepositorySession('hub', session.workspaceRef);
+    expect(
+      JSON.parse(readFileSync(join(session.workspaceRef, '.agentops-session.json'), 'utf8'))
+        .lastUsedAt,
+    ).toBe(101);
+    await expect(
+      manager.touchRepositorySession('other', session.workspaceRef),
+    ).rejects.toMatchObject({ nonRetryable: true });
+    await expect(
+      manager.touchRepositorySession('hub', join(workspacesDir, 'legacy')),
+    ).resolves.toBeUndefined();
+  });
+
+  it('prunes only expired or non-live repository sessions and skips their directory as a legacy worktree', async () => {
+    let time = 0;
+    const manager = new WorkspaceManager({
+      resolveGit: () => new SpawnGitCommandRunner(),
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+      now: () => time,
+    });
+    const active = await manager.prepareRepositorySession('live', {
+      taskId: 'active',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    const expired = await manager.prepareRepositorySession('live', {
+      taskId: 'expired',
+      repositories: [{ repo: 'acme/shared' }],
+    });
+    const gone = await manager.prepareRepositorySession('gone', {
+      taskId: 'gone',
+      repositories: [{ repo: 'acme/gone' }],
+    });
+    time = 86_400_000;
+    await manager.touchRepositorySession('live', active.workspaceRef);
+    const { removed } = await manager.pruneOrphans([], ['live']);
+    expect(existsSync(active.workspaceRef)).toBe(true);
+    expect(existsSync(expired.workspaceRef)).toBe(true); // exact TTL boundary is active
+    expect(existsSync(gone.workspaceRef)).toBe(false);
+    expect(removed).toContain(gone.workspaceRef);
+    time++;
+    await manager.pruneOrphans([], ['live']);
+    expect(existsSync(expired.workspaceRef)).toBe(false);
+  });
+});
