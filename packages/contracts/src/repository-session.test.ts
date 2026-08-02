@@ -2,8 +2,21 @@ import { describe, expect, it } from 'vitest';
 import {
   CleanupRepositorySessionRequestSchema,
   CreateRepositorySessionRequestSchema,
+  repositorySessionWorkspaceSubPathKind,
   RepositorySessionSchema,
 } from './repository-session';
+
+describe('repositorySessionWorkspaceSubPathKind', () => {
+  it.each([
+    ['repository-sessions/project-0123456789abcdef/session-fedcba9876543210', 'repository-session'],
+    ['owner-repo/task-1', 'legacy'],
+    ['scratch/project/task-1', 'legacy'],
+    ['repository-sessions/project/session', 'malformed-repository-session'],
+    ['repository-sessions/project-0123456789abcdef', 'malformed-repository-session'],
+  ] as const)('classifies %s as %s', (workspaceSubPath, kind) => {
+    expect(repositorySessionWorkspaceSubPathKind(workspaceSubPath)).toBe(kind);
+  });
+});
 
 describe('CreateRepositorySessionRequestSchema', () => {
   it('accepts one to five distinct short-form repositories', () => {

@@ -271,6 +271,37 @@ describe('buildAgentJob', () => {
     ]);
   });
 
+  it('does not expose the shared base-clone cache to a repository-session Job', () => {
+    const req = {
+      ...baseRequest,
+      workspaceRef:
+        '/workspace/tasks/repository-sessions/project-0123456789abcdef/session-fedcba9876543210',
+    };
+    const job = buildAgentJob(
+      req,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+        cachePvcName: 'workspace-cache',
+        cacheMountPath: '/workspace/cache',
+      },
+      agentOpsArtifactPaths(req),
+    );
+
+    expect(job.spec?.template?.spec?.volumes).toEqual([
+      { name: 'workspace-tasks', persistentVolumeClaim: { claimName: 'workspace-tasks' } },
+    ]);
+    expect(job.spec?.template?.spec?.containers?.[0]?.volumeMounts).toEqual([
+      {
+        name: 'workspace-tasks',
+        mountPath: req.workspaceRef,
+        subPath: 'repository-sessions/project-0123456789abcdef/session-fedcba9876543210',
+      },
+    ]);
+  });
+
   it('omits the cache volume when only one of cachePvcName/cacheMountPath is set', () => {
     const paths = agentOpsArtifactPaths(baseRequest);
     const job = buildAgentJob(
@@ -294,7 +325,10 @@ describe('buildAgentJob', () => {
   });
 
   it.each([
-    ['/workspace/tasks/repository-sessions/owner/session', 'repository-sessions/owner/session'],
+    [
+      '/workspace/tasks/repository-sessions/owner-0123456789abcdef/session-fedcba9876543210',
+      'repository-sessions/owner-0123456789abcdef/session-fedcba9876543210',
+    ],
     ['/workspace/tasks/owner-repo/task-1', 'owner-repo/task-1'],
     ['/workspace/tasks/scratch/project/task-1', 'scratch/project/task-1'],
   ])('mounts only the requested workspace subPath for %s', (workspaceRef, subPath) => {
@@ -313,6 +347,28 @@ describe('buildAgentJob', () => {
     expect(job.spec?.template?.spec?.containers?.[0]?.volumeMounts).toEqual([
       { name: 'workspace-tasks', mountPath: workspaceRef, subPath },
     ]);
+  });
+
+  it('rejects a malformed repository-session workspace ref instead of treating it as legacy', () => {
+    const req = {
+      ...baseRequest,
+      workspaceRef: '/workspace/tasks/repository-sessions/owner/session',
+    };
+
+    expect(() =>
+      buildAgentJob(
+        req,
+        createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+        {
+          namespace: 'dev-agents',
+          workspacePvcName: 'workspace-tasks',
+          workspaceMountPath: '/workspace/tasks',
+          cachePvcName: 'workspace-cache',
+          cacheMountPath: '/workspace/cache',
+        },
+        agentOpsArtifactPaths(req),
+      ),
+    ).toThrow(/repository session workspaceRef must use the canonical owner\/task path/);
   });
 
   it.each([

@@ -170,8 +170,9 @@ export function workspaceMountPath(): string {
 // WorkspaceManager creates each task workspace as a `git worktree` of a shared
 // per-repo base clone kept under this cache dir. Two things depend on it being
 // a persistent, shared PVC mounted at the SAME path in both the engine-worker
-// pod and every K8s Job pod (charts/engine/templates/deployment.yaml mounts the
-// workspace-cache PVC here, and buildJobRunnerOptions mounts it into Job pods):
+// pod and ordinary linked-worktree Job pods (charts/engine/templates/deployment.yaml
+// mounts the workspace-cache PVC here, and buildJobRunnerOptions supplies it to
+// those Job pods). Repository sessions are standalone clones and do not mount it:
 //   1. Persistence -- the base clone must survive a worker redeploy. It used to
 //      default to the worker's ephemeral home (~/.agentops/cache), so shipping
 //      any new worker image wiped every base clone and orphaned every worktree
@@ -212,9 +213,8 @@ export function buildJobRunnerOptions(
     namespace: process.env.AGENT_NAMESPACE ?? 'dev-agents',
     workspacePvcName: process.env.WORKSPACE_PVC_NAME ?? 'workspace-tasks',
     workspaceMountPath: workspaceMountPath(),
-    // The base clone a worktree links back to lives here; the agent commits in
-    // the Job pod, so it needs the same cache PVC mounted at the same path the
-    // worker created the worktree under (see cacheMountPath above).
+    // Ordinary linked worktrees resolve their gitdir through this shared base
+    // clone cache. buildAgentJob omits it for standalone repository sessions.
     cachePvcName: process.env.CACHE_PVC_NAME ?? 'workspace-cache',
     cacheMountPath: cacheMountPath(),
     authSecretName: opts.authSecretName,

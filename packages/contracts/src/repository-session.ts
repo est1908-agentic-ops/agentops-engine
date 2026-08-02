@@ -4,6 +4,26 @@ import { GitRefNameSchema } from './git-ref';
 const isSafeRepositoryPathSegment = (segment: string): boolean =>
   /^[A-Za-z0-9_.-]+$/.test(segment) && segment !== '.' && segment !== '..';
 
+const RepositorySessionIdentitySchema = /^[a-zA-Z0-9_-]{1,48}-[0-9a-f]{16}$/;
+
+export type RepositorySessionWorkspaceSubPathKind =
+  'repository-session' | 'malformed-repository-session' | 'legacy';
+
+// Repository sessions are intentionally standalone clones, not linked
+// worktrees. Keep their exact directory shape in the shared contracts layer so
+// backend runners can make security decisions without trusting a caller-owned
+// path prefix.
+export function repositorySessionWorkspaceSubPathKind(
+  workspaceSubPath: string,
+): RepositorySessionWorkspaceSubPathKind {
+  const segments = workspaceSubPath.split('/');
+  if (segments[0] !== 'repository-sessions') return 'legacy';
+  return segments.length === 3 &&
+    segments.slice(1).every((segment) => RepositorySessionIdentitySchema.test(segment))
+    ? 'repository-session'
+    : 'malformed-repository-session';
+}
+
 const ShortRepositorySchema = z
   .string()
   .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'Repository must be in owner/name form.')
