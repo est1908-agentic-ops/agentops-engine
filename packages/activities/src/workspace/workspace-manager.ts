@@ -303,7 +303,8 @@ export class WorkspaceManager implements Workspaces {
   ): Promise<RepositorySession> {
     const workspaceRef = this.repositorySessionPath(ownerProject, req.taskId);
     this.assertSessionPath(workspaceRef);
-    return this.withSessionLock(workspaceRef, async () => {
+    return this.withSessionLock(workspaceRef, async (signal) => {
+      this.throwIfSessionCancelled(signal);
       await this.assertSessionCreationPath(workspaceRef);
       const existing = existsSync(workspaceRef)
         ? this.readMatchingRepositorySession(workspaceRef, ownerProject, req)
@@ -323,7 +324,9 @@ export class WorkspaceManager implements Workspaces {
       const repositories: RepositorySession['repositories'] = [];
       let stagingPath: string | undefined;
       try {
+        this.throwIfSessionCancelled(signal);
         stagingPath = await this.createSessionStagingPath(workspaceRef);
+        this.throwIfSessionCancelled(signal);
         await this.writeStagingMetadata(stagingPath, {
           ownerProject,
           taskId: req.taskId,
@@ -332,20 +335,25 @@ export class WorkspaceManager implements Workspaces {
           workspaceRef,
         });
         for (const input of req.repositories) {
+          this.throwIfSessionCancelled(signal);
           const target = join(stagingPath, 'repositories', input.repo);
           this.assertPathInside(stagingPath, target);
           await mkdir(join(target, '..'), { recursive: true });
           const clone = await git.run(['clone', this.cloneUrl(input.repo), target], {
             cwd: stagingPath,
           });
+          this.throwIfSessionCancelled(signal);
           this.assertGitSuccess(clone, `git clone failed for ${input.repo}`);
           if (input.ref) {
             const fetch = await git.run(['fetch', 'origin', input.ref], { cwd: target });
+            this.throwIfSessionCancelled(signal);
             this.assertGitSuccess(fetch, `git fetch origin ${input.ref} failed for ${input.repo}`);
             const checkout = await git.run(['checkout', '--detach', 'FETCH_HEAD'], { cwd: target });
+            this.throwIfSessionCancelled(signal);
             this.assertGitSuccess(checkout, `git checkout failed for ${input.repo}`);
           }
           const head = await git.run(['rev-parse', 'HEAD'], { cwd: target });
+          this.throwIfSessionCancelled(signal);
           this.assertGitSuccess(head, `git rev-parse HEAD failed for ${input.repo}`);
           const commit = head.stdout.trim();
           if (!/^[0-9a-f]{40}$/.test(commit)) {
@@ -361,6 +369,7 @@ export class WorkspaceManager implements Workspaces {
           });
         }
         const now = this.now();
+        this.throwIfSessionCancelled(signal);
         await this.writeSessionMetadata(stagingPath, {
           ownerProject,
           taskId: req.taskId,
@@ -373,6 +382,7 @@ export class WorkspaceManager implements Workspaces {
         await this.assertSessionCreationPath(workspaceRef);
         if (existsSync(workspaceRef))
           return this.readMatchingRepositorySession(workspaceRef, ownerProject, req);
+        this.throwIfSessionCancelled(signal);
         await rename(stagingPath, workspaceRef);
         stagingPath = undefined;
         return { workspaceRef, repositories };
@@ -386,13 +396,14 @@ export class WorkspaceManager implements Workspaces {
   async cleanupRepositorySession(ownerProject: string, workspaceRef: string): Promise<void> {
     this.assertSessionPath(workspaceRef);
     this.assertSessionOwnerPath(ownerProject, workspaceRef);
-    await this.withSessionLock(workspaceRef, async () => {
+    await this.withSessionLock(workspaceRef, async (signal) => {
       if (!existsSync(workspaceRef)) return;
       await this.assertExistingSessionDirectory(workspaceRef);
       const metadata = await this.readSessionMetadata(workspaceRef, true);
       if (metadata.ownerProject !== ownerProject) {
         throw new WorkspaceError('repository session belongs to a different project', true);
       }
+      this.throwIfSessionCancelled(signal);
       await this.removeSessionDirectory(workspaceRef);
     });
   }
@@ -400,7 +411,7 @@ export class WorkspaceManager implements Workspaces {
   async touchRepositorySession(ownerProject: string, workspaceRef: string): Promise<void> {
     if (!this.isUnderSessionRoot(workspaceRef)) return; // compatibility for ordinary workspaces
     this.assertSessionPath(workspaceRef);
-    await this.withSessionLock(workspaceRef, async () => {
+    await this.withSessionLock(workspaceRef, async (signal) => {
       if (!existsSync(workspaceRef)) return;
       await this.assertExistingSessionDirectory(workspaceRef);
       const metadata = await this.readSessionMetadata(workspaceRef, true);
@@ -408,6 +419,7 @@ export class WorkspaceManager implements Workspaces {
         throw new WorkspaceError('repository session belongs to a different project', true);
       }
       await this.assertExistingSessionDirectory(workspaceRef);
+      this.throwIfSessionCancelled(signal);
       await this.writeSessionMetadata(workspaceRef, { ...metadata, lastUsedAt: this.now() });
     });
   }
@@ -451,7 +463,7 @@ export class WorkspaceManager implements Workspaces {
         const workspaceRef = join(sessionsRoot, owner, task);
         if (!this.isSessionPath(workspaceRef)) continue;
         try {
-          const deleted = await this.withSessionLock(workspaceRef, async () => {
+          const deleted = await this.withSessionLock(workspaceRef, async (signal) => {
             await this.assertExistingSessionDirectory(workspaceRef);
             const metadata = await this.readSessionMetadata(workspaceRef, true);
             if (
@@ -460,6 +472,7 @@ export class WorkspaceManager implements Workspaces {
             ) {
               // This is deliberately the metadata read used for the decision:
               // another worker can only touch before or after the kernel lock.
+              this.throwIfSessionCancelled(signal);
               await this.removeSessionDirectory(workspaceRef);
               return true;
             }
@@ -797,12 +810,13 @@ export class WorkspaceManager implements Workspaces {
             continue;
           }
           try {
-            await this.withSessionLock(metadata.workspaceRef, async () => {
+            await this.withSessionLock(metadata.workspaceRef, async (signal) => {
               const fresh = await this.readStagingMetadata(stagingPath);
               if (
                 (hasLiveProjects && !live.has(fresh.ownerProject)) ||
                 this.now() - fresh.createdAt > this.repositorySessionStagingIdleMs
               ) {
+                this.throwIfSessionCancelled(signal);
                 await this.removeOwnedStagingPath(stagingPath);
                 removed.push(stagingPath);
               }
@@ -911,7 +925,10 @@ export class WorkspaceManager implements Workspaces {
     }
   }
 
-  private async withSessionLock<T>(workspaceRef: string, operation: () => Promise<T>): Promise<T> {
+  private async withSessionLock<T>(
+    workspaceRef: string,
+    operation: (signal?: AbortSignal) => Promise<T>,
+  ): Promise<T> {
     // Validate mutable session-root components before creating anything in the
     // parallel lock namespace. The coordinator owns the stable lock inode and
     // deliberately never removes it.
@@ -920,6 +937,10 @@ export class WorkspaceManager implements Workspaces {
     return this.repositorySessionCoordinator.withLock(this.lockPath(workspaceRef), operation, {
       signal: this.getAbortSignal?.(),
     });
+  }
+
+  private throwIfSessionCancelled(signal?: AbortSignal): void {
+    signal?.throwIfAborted();
   }
 
   private lockPath(workspaceRef: string): string {

@@ -204,4 +204,42 @@ describe('FlockRepositorySessionCoordinator', () => {
       expect(lstatSync(lock).isFile()).toBe(true);
     },
   );
+
+  it.skipIf(process.platform !== 'linux' || !existsSync('/usr/bin/flock'))(
+    'keeps flock held when an acquired operation ignores cancellation',
+    async () => {
+      const lock = join(root(), 'locks', 'session.lock');
+      const holderCoordinator = new FlockRepositorySessionCoordinator();
+      const successorCoordinator = new FlockRepositorySessionCoordinator();
+      const controller = new AbortController();
+      let release!: () => void;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let entered!: () => void;
+      const acquired = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      let successorEntered = false;
+      const holder = holderCoordinator.withLock(
+        lock,
+        async () => {
+          entered();
+          await held;
+        },
+        { signal: controller.signal },
+      );
+      await acquired;
+      const successor = successorCoordinator.withLock(lock, async () => {
+        successorEntered = true;
+      });
+      controller.abort();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(successorEntered).toBe(false);
+      release();
+      await Promise.all([holder, successor]);
+      expect(successorEntered).toBe(true);
+      expect(lstatSync(lock).isFile()).toBe(true);
+    },
+  );
 });

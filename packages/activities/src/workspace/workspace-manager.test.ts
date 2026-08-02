@@ -630,6 +630,57 @@ describe('WorkspaceManager — repository sessions', () => {
     expect(existsSync(join(expectedPath, '.agentops-session.json'))).toBe(true);
   });
 
+  it('holds the session lock through a cancelled clone and lets the successor publish', async () => {
+    const coordinator = new LocalRepositorySessionCoordinator();
+    const controller = new AbortController();
+    let releaseClone!: () => void;
+    const cloneReleased = new Promise<void>((resolve) => {
+      releaseClone = resolve;
+    });
+    let firstCloneStarted!: () => void;
+    const firstClone = new Promise<void>((resolve) => {
+      firstCloneStarted = resolve;
+    });
+    let cloneCount = 0;
+    const git = {
+      run: async (args: string[]) => {
+        if (args[0] === 'clone' && cloneCount++ === 0) {
+          firstCloneStarted();
+          await cloneReleased;
+        }
+        return { stdout: args[0] === 'rev-parse' ? 'c'.repeat(40) : '', stderr: '', exitCode: 0 };
+      },
+    };
+    const cancelledManager = new WorkspaceManager({
+      resolveGit: () => git,
+      resolveGitForProject: () => git,
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+      repositorySessionCoordinator: coordinator,
+      getAbortSignal: () => controller.signal,
+    });
+    const successorManager = new WorkspaceManager({
+      resolveGit: () => git,
+      resolveGitForProject: () => git,
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+      repositorySessionCoordinator: coordinator,
+    });
+    const request = { taskId: 'cancelled-clone', repositories: [{ repo: 'acme/app' }] };
+    const cancelled = cancelledManager.prepareRepositorySession('hub', request);
+    await firstClone;
+    const successor = successorManager.prepareRepositorySession('hub', request);
+    controller.abort();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(cloneCount).toBe(1);
+    releaseClone();
+    await expect(cancelled).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(successor).resolves.toMatchObject({ workspaceRef: expect.any(String) });
+    expect(cloneCount).toBe(2);
+  });
+
   it('keeps the winner intact when concurrent creators have different requests', async () => {
     let releaseClones: () => void;
     const clonesReleased = new Promise<void>((resolve) => {

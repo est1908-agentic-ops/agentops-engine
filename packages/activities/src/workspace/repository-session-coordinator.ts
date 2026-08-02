@@ -109,13 +109,10 @@ export class FlockRepositorySessionCoordinator implements RepositorySessionCoord
       options.signal,
     );
     try {
-      const killOnAbort = () => child.kill();
-      options.signal?.addEventListener('abort', killOnAbort, { once: true });
-      try {
-        return await operation(options.signal);
-      } finally {
-        options.signal?.removeEventListener('abort', killOnAbort);
-      }
+      // Once acquired, cancellation is deliberately only propagated to the
+      // operation. Releasing here would let a clone that ignores cancellation
+      // continue without its kernel lock.
+      return await operation(options.signal);
     } finally {
       const exited =
         child.exitCode !== null
