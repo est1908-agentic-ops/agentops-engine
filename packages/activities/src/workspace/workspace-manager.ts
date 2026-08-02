@@ -68,7 +68,7 @@ export interface Workspaces {
     req: CreateRepositorySessionRequest,
   ): Promise<RepositorySession>;
   cleanupRepositorySession(ownerProject: string, workspaceRef: string): Promise<void>;
-  touchRepositorySession(ownerProject: string, workspaceRef: string): Promise<void>;
+  touchRepositorySession(ownerProject: string | undefined, workspaceRef: string): Promise<void>;
   pruneOrphans(liveRepos: string[], liveProjects?: string[]): Promise<{ removed: string[] }>;
   readFile(workspaceRef: string, relativePath: string): Promise<string | null>;
 }
@@ -410,8 +410,14 @@ export class WorkspaceManager implements Workspaces {
     });
   }
 
-  async touchRepositorySession(ownerProject: string, workspaceRef: string): Promise<void> {
+  async touchRepositorySession(
+    ownerProject: string | undefined,
+    workspaceRef: string,
+  ): Promise<void> {
     if (!this.isUnderSessionRoot(workspaceRef)) return; // compatibility for ordinary workspaces
+    if (!ownerProject) {
+      throw new WorkspaceError('missing caller project context for repository session touch', true);
+    }
     this.assertSessionPath(workspaceRef);
     await this.withSessionLock(workspaceRef, async (signal) => {
       if (!existsSync(workspaceRef)) return;

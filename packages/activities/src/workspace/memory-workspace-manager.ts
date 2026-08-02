@@ -1,4 +1,5 @@
 import type { CreateRepositorySessionRequest, RepositorySession } from '@agentops/contracts';
+import { WorkspaceError } from './workspace-error';
 import {
   repositorySessionIdentity,
   repositorySessionRequestIdentity,
@@ -123,17 +124,23 @@ export class MemoryWorkspaceManager implements Workspaces {
     const session = this.repositorySessions.get(workspaceRef);
     if (!session) return;
     if (session.ownerProject !== ownerProject)
-      throw new Error('repository session belongs to a different owner');
+      throw new WorkspaceError('repository session belongs to a different owner', true);
     this.repositorySessions.delete(workspaceRef);
   }
 
-  async touchRepositorySession(ownerProject: string, workspaceRef: string): Promise<void> {
+  async touchRepositorySession(
+    ownerProject: string | undefined,
+    workspaceRef: string,
+  ): Promise<void> {
     if (!workspaceRef.startsWith('memory://repository-session/')) return;
+    if (!ownerProject) {
+      throw new WorkspaceError('missing caller project context for repository session touch', true);
+    }
     this.assertMemorySessionOwner(ownerProject, workspaceRef);
     const session = this.repositorySessions.get(workspaceRef);
     if (!session) return;
     if (session.ownerProject !== ownerProject)
-      throw new Error('repository session belongs to a different owner');
+      throw new WorkspaceError('repository session belongs to a different owner', true);
     session.lastUsedAt = this.now();
   }
 
@@ -151,10 +158,10 @@ export class MemoryWorkspaceManager implements Workspaces {
       !isRepositorySessionIdentity(parts[3] ?? '') ||
       !isRepositorySessionIdentity(parts[4] ?? '')
     ) {
-      throw new Error(`invalid repository session ref: ${workspaceRef}`);
+      throw new WorkspaceError(`invalid repository session ref: ${workspaceRef}`, true);
     }
     if (parts[3] !== repositorySessionIdentity(ownerProject))
-      throw new Error('repository session belongs to a different owner');
+      throw new WorkspaceError('repository session belongs to a different owner', true);
   }
 
   async pruneOrphans(

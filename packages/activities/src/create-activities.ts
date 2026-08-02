@@ -20,6 +20,8 @@ import {
 import type {
   AgentRunRequest,
   AgentRunResult,
+  CleanupRepositorySessionRequest,
+  CreateRepositorySessionRequest,
   ExecutePlatformActionRequest,
   ExecutePlatformActionResult,
   MergePrRequest,
@@ -33,8 +35,11 @@ import type {
 } from '@agentops/contracts';
 import {
   MergePrResultSchema,
+  CleanupRepositorySessionRequestSchema,
+  CreateRepositorySessionRequestSchema,
   parseProjectConfig,
   PrSnapshotSchema,
+  RepositorySessionSchema,
   sha256,
   type AgentSpec,
   type AgentsManifest,
@@ -55,7 +60,11 @@ import {
 import { loadProjectConfig } from './load-project-config';
 import { ApplicationFailure } from '@temporalio/common';
 import { Context } from '@temporalio/activity';
-import { assertProjectOwnsRepo, getCallerProject } from './project-context';
+import {
+  assertProjectCanReadRepositories,
+  assertProjectOwnsRepo,
+  getCallerProject,
+} from './project-context';
 
 export interface ActivityDependencies {
   backends: Record<string, AgentBackend>;
@@ -104,6 +113,20 @@ function rethrowWorkspaceError(err: unknown): never {
     });
   }
   throw err;
+}
+
+type SessionInputSchema<T> = {
+  safeParse(
+    input: unknown,
+  ): { success: true; data: T } | { success: false; error: { message: string } };
+};
+
+function parseSessionInput<T>(schema: SessionInputSchema<T>, raw: unknown): T {
+  const parsed = schema.safeParse(raw);
+  if (!parsed.success) {
+    throw ApplicationFailure.nonRetryable(parsed.error.message, 'RepositorySessionValidationError');
+  }
+  return parsed.data;
 }
 
 // Fixed backoff for a self-clearing provider 429 (RateLimitError). The CLI
@@ -166,6 +189,28 @@ export function createActivities(deps: ActivityDependencies) {
           'project workflows may not route runAgent through the platform backend',
           'ProjectAuthorizationError',
         );
+      }
+
+      // The workspace manager treats ordinary/scratch refs as a no-op, while
+      // repository-session refs require their owning project. Keep that
+      // distinction at the manager boundary so activity code never infers it
+      // from a caller-controlled path string.
+      try {
+        await deps.workspaces.touchRepositorySession(getCallerProject(), req.workspaceRef);
+        trace.getActiveSpan()?.setAttributes({
+          'agentops.workspace.kind': 'repository-session-or-legacy',
+          'agentops.workspace.operation': 'touch',
+          'agentops.workspace.outcome': 'success',
+          ...(getCallerProject() ? { 'agentops.project': getCallerProject() } : {}),
+        });
+      } catch (err) {
+        trace.getActiveSpan()?.setAttributes({
+          'agentops.workspace.kind': 'repository-session-or-legacy',
+          'agentops.workspace.operation': 'touch',
+          'agentops.workspace.outcome': 'failure',
+          ...(getCallerProject() ? { 'agentops.project': getCallerProject() } : {}),
+        });
+        rethrowWorkspaceError(err);
       }
 
       const prompt = deps.prompts.render(req.promptRef, req.promptContext);
@@ -671,6 +716,72 @@ export function createActivities(deps: ActivityDependencies) {
       try {
         await deps.workspaces.cleanupScratch(workspaceRef);
       } catch (err) {
+        rethrowWorkspaceError(err);
+      }
+    },
+    async createRepositorySession(raw: CreateRepositorySessionRequest) {
+      const req = parseSessionInput(CreateRepositorySessionRequestSchema, raw);
+      const caller = assertProjectCanReadRepositories(
+        req.repositories.map((repository) => repository.repo),
+        deps.registry,
+      );
+      try {
+        const result = await deps.workspaces.prepareRepositorySession(caller.project, req);
+        const parsed = RepositorySessionSchema.safeParse(result);
+        if (!parsed.success) {
+          throw ApplicationFailure.create({
+            message: parsed.error.message,
+            type: 'RepositorySessionResultValidationError',
+            nonRetryable: false,
+          });
+        }
+        trace.getActiveSpan()?.setAttributes({
+          'agentops.project': caller.project,
+          'agentops.task_id': req.taskId,
+          'agentops.repository.count': req.repositories.length,
+          'agentops.repository.names': req.repositories.map((repository) => repository.repo),
+          'agentops.repository.commits': parsed.data.repositories.map(
+            (repository) => repository.commit,
+          ),
+          'agentops.workspace.kind': 'repository-session',
+          'agentops.workspace.operation': 'create',
+          'agentops.workspace.outcome': 'success',
+        });
+        return parsed.data;
+      } catch (err) {
+        trace.getActiveSpan()?.setAttributes({
+          'agentops.project': caller.project,
+          'agentops.workspace.kind': 'repository-session',
+          'agentops.workspace.operation': 'create',
+          'agentops.workspace.outcome': 'failure',
+        });
+        rethrowWorkspaceError(err);
+      }
+    },
+    async cleanupRepositorySession(raw: CleanupRepositorySessionRequest): Promise<void> {
+      const req = parseSessionInput(CleanupRepositorySessionRequestSchema, raw);
+      const caller = getCallerProject();
+      if (!caller) {
+        throw ApplicationFailure.nonRetryable(
+          'missing caller project context for repository session cleanup',
+          'ProjectAuthorizationError',
+        );
+      }
+      try {
+        await deps.workspaces.cleanupRepositorySession(caller, req.workspaceRef);
+        trace.getActiveSpan()?.setAttributes({
+          'agentops.project': caller,
+          'agentops.workspace.kind': 'repository-session',
+          'agentops.workspace.operation': 'cleanup',
+          'agentops.workspace.outcome': 'success',
+        });
+      } catch (err) {
+        trace.getActiveSpan()?.setAttributes({
+          'agentops.project': caller,
+          'agentops.workspace.kind': 'repository-session',
+          'agentops.workspace.operation': 'cleanup',
+          'agentops.workspace.outcome': 'failure',
+        });
         rethrowWorkspaceError(err);
       }
     },
