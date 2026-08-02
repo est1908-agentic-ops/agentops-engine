@@ -607,7 +607,39 @@ describe('createActivities — prompt rendering', () => {
     expect(run).not.toHaveBeenCalled();
   });
 
-  it('rejects malformed generic prompt context before backend dispatch', async () => {
+  it.each([null, [], 'not an object'])(
+    'rejects non-object generic prompt context before tier, workspace, rendering, or backend work',
+    async (promptContext) => {
+      const run = vi.fn<AgentBackend['run']>();
+      const deps = buildDeps();
+      deps.backends = { stub: { run } };
+      const touchRepositorySession = vi.spyOn(deps.workspaces, 'touchRepositorySession');
+      const render = vi.spyOn(deps.prompts, 'render');
+      const activities = createActivities(deps);
+
+      const error = await activities
+        .runAgent({
+          taskId: 't1',
+          stage: 'implement',
+          attempt: 1,
+          callIndex: 1,
+          tier: 'missing-tier',
+          projectTiers: {},
+          promptRef: 'generic-task.md',
+          promptContext: promptContext as unknown as Record<string, unknown>,
+          workspaceRef: 'demo/repo',
+          limits: { maxTokens: 1000, timeoutMs: 60_000 },
+        })
+        .catch((cause: unknown) => cause);
+
+      expect(error).toMatchObject({ type: 'GenericPromptValidationError', nonRetryable: true });
+      expect(touchRepositorySession).not.toHaveBeenCalled();
+      expect(render).not.toHaveBeenCalled();
+      expect(run).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects malformed generic prompt fields before backend dispatch', async () => {
     const run = vi.fn<AgentBackend['run']>();
     const activities = createActivities({ ...buildDeps(), backends: { stub: { run } } });
 

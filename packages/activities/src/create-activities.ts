@@ -136,13 +136,23 @@ function parseSessionInput<T>(schema: SessionInputSchema<T>, raw: unknown): T {
 const RATE_LIMIT_RETRY_DELAY_MS = 60_000;
 const MAX_GENERIC_INSTRUCTIONS_BYTES = 32 * 1024;
 const MAX_GENERIC_OUTPUT_CONTRACT_BYTES = 16 * 1024;
+const GENERIC_PROMPT_VALIDATION_MESSAGE =
+  'generic-task.md requires a non-empty string taskId plus string instructions (at most 32 KiB UTF-8) and outputContract (at most 16 KiB UTF-8)';
 
 function validateGenericPromptContext(req: AgentRunRequest): void {
   if (req.promptRef !== 'generic-task.md') {
     return;
   }
 
-  const { taskId, instructions, outputContract } = req.promptContext;
+  const context: unknown = req.promptContext;
+  if (typeof context !== 'object' || context === null || Array.isArray(context)) {
+    throw ApplicationFailure.nonRetryable(
+      GENERIC_PROMPT_VALIDATION_MESSAGE,
+      'GenericPromptValidationError',
+    );
+  }
+
+  const { taskId, instructions, outputContract } = context as Record<string, unknown>;
   const valid =
     typeof taskId === 'string' &&
     taskId.trim().length > 0 &&
@@ -153,7 +163,7 @@ function validateGenericPromptContext(req: AgentRunRequest): void {
 
   if (!valid) {
     throw ApplicationFailure.nonRetryable(
-      'generic-task.md requires a non-empty string taskId plus string instructions (at most 32 KiB UTF-8) and outputContract (at most 16 KiB UTF-8)',
+      GENERIC_PROMPT_VALIDATION_MESSAGE,
       'GenericPromptValidationError',
     );
   }
