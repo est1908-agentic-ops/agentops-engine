@@ -520,6 +520,159 @@ describe('WorkspaceManager — git ref validation', () => {
 });
 
 describe('WorkspaceManager — repository sessions', () => {
+  it('returns an existing matching session without running git again', async () => {
+    const { manager, gitCalls } = buildManager();
+    const request = { taskId: 'retry', repositories: [{ repo: 'acme/app' }] };
+
+    const first = await manager.prepareRepositorySession('hub', request);
+    const callsAfterFirst = gitCalls.length;
+    const second = await manager.prepareRepositorySession('hub', request);
+
+    expect(second).toEqual(first);
+    expect(gitCalls).toHaveLength(callsAfterFirst);
+  });
+
+  it('rejects a different request without mutating an existing session', async () => {
+    const { manager } = buildManager();
+    const first = await manager.prepareRepositorySession('hub', {
+      taskId: 'request-mismatch',
+      repositories: [{ repo: 'acme/app' }],
+    });
+
+    await expect(
+      manager.prepareRepositorySession('hub', {
+        taskId: 'request-mismatch',
+        repositories: [{ repo: 'acme/app', ref: 'main' }],
+      }),
+    ).rejects.toMatchObject({ nonRetryable: true, message: expect.stringContaining('request') });
+    expect(existsSync(join(first.workspaceRef, '.agentops-session.json'))).toBe(true);
+  });
+
+  it('atomically publishes one matching session for concurrent creators', async () => {
+    let clonesStarted = 0;
+    let releaseClones: () => void;
+    const clonesReleased = new Promise<void>((resolve) => {
+      releaseClones = resolve;
+    });
+    let bothCloning: () => void;
+    const bothStarted = new Promise<void>((resolve) => {
+      bothCloning = resolve;
+    });
+    const git = {
+      run: async (args: string[]) => {
+        if (args[0] === 'clone') {
+          clonesStarted++;
+          if (clonesStarted === 2) bothCloning();
+          await clonesReleased;
+        }
+        return {
+          stdout: args[0] === 'rev-parse' ? 'a'.repeat(40) : '',
+          stderr: '',
+          exitCode: 0,
+        };
+      },
+    };
+    const manager = new WorkspaceManager({
+      resolveGit: () => git,
+      resolveGitForProject: () => git,
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+    });
+    const request = { taskId: 'concurrent', repositories: [{ repo: 'acme/app' }] };
+    const expectedPath = join(
+      workspacesDir,
+      'repository-sessions',
+      repositorySessionIdentity('hub'),
+      repositorySessionIdentity(request.taskId),
+    );
+    const first = manager.prepareRepositorySession('hub', request);
+    const second = manager.prepareRepositorySession('hub', request);
+
+    await bothStarted;
+    expect(existsSync(join(expectedPath, '.agentops-session.json'))).toBe(false);
+    releaseClones!();
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ workspaceRef: expectedPath }),
+      expect.objectContaining({ workspaceRef: expectedPath }),
+    ]);
+    expect(existsSync(join(expectedPath, '.agentops-session.json'))).toBe(true);
+  });
+
+  it('keeps the winner intact when concurrent creators have different requests', async () => {
+    let clonesStarted = 0;
+    let releaseClones: () => void;
+    const clonesReleased = new Promise<void>((resolve) => {
+      releaseClones = resolve;
+    });
+    let bothCloning: () => void;
+    const bothStarted = new Promise<void>((resolve) => {
+      bothCloning = resolve;
+    });
+    const git = {
+      run: async (args: string[]) => {
+        if (args[0] === 'clone') {
+          clonesStarted++;
+          if (clonesStarted === 2) bothCloning();
+          await clonesReleased;
+        }
+        return {
+          stdout: args[0] === 'rev-parse' ? 'b'.repeat(40) : '',
+          stderr: '',
+          exitCode: 0,
+        };
+      },
+    };
+    const manager = new WorkspaceManager({
+      resolveGit: () => git,
+      resolveGitForProject: () => git,
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+    });
+    const firstRequest = { taskId: 'concurrent-mismatch', repositories: [{ repo: 'acme/app' }] };
+    const secondRequest = {
+      taskId: 'concurrent-mismatch',
+      repositories: [{ repo: 'acme/app', ref: 'main' }],
+    };
+    const first = manager.prepareRepositorySession('hub', firstRequest);
+    const second = manager.prepareRepositorySession('hub', secondRequest);
+
+    await bothStarted;
+    releaseClones!();
+    const results = await Promise.allSettled([first, second]);
+    const winnerIndex = results.findIndex((result) => result.status === 'fulfilled');
+    const loser = results.find((result) => result.status === 'rejected');
+    expect(winnerIndex).not.toBe(-1);
+    expect(loser).toMatchObject({
+      reason: { nonRetryable: true, message: expect.stringContaining('request') },
+    });
+    const winnerRequest = winnerIndex === 0 ? firstRequest : secondRequest;
+    await expect(manager.prepareRepositorySession('hub', winnerRequest)).resolves.toMatchObject({
+      workspaceRef: expect.any(String),
+    });
+  });
+
+  it('does not let an orphan staging directory occupy the final session path', async () => {
+    const { manager } = buildManager();
+    const ownerPath = join(
+      workspacesDir,
+      'repository-sessions',
+      repositorySessionIdentity('hub'),
+      '.staging',
+    );
+    mkdirSync(join(ownerPath, 'orphan'), { recursive: true });
+
+    await expect(
+      manager.prepareRepositorySession('hub', {
+        taskId: 'orphan-safe',
+        repositories: [{ repo: 'acme/app' }],
+      }),
+    ).resolves.toMatchObject({
+      workspaceRef: expect.stringContaining(repositorySessionIdentity('orphan-safe')),
+    });
+  });
+
   it('uses collision-resistant owner and task path components', async () => {
     const { manager } = buildManager();
     const first = await manager.prepareRepositorySession('a/b', {
@@ -693,9 +846,14 @@ describe('WorkspaceManager — repository sessions', () => {
       }),
     ).rejects.toThrow(/nope/);
     const taskRoots = existsSync(sessionsRoot)
-      ? readdirSync(sessionsRoot).flatMap((owner) => readdirSync(join(sessionsRoot, owner)))
+      ? readdirSync(sessionsRoot).flatMap((owner) =>
+          readdirSync(join(sessionsRoot, owner)).filter((entry) => entry !== '.staging'),
+        )
       : [];
     expect(taskRoots).toEqual([]);
+    expect(readdirSync(join(sessionsRoot, repositorySessionIdentity('hub'), '.staging'))).toEqual(
+      [],
+    );
   });
 
   it('rejects malformed and symlinked metadata without deleting the session', async () => {

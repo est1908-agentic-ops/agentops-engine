@@ -1,6 +1,16 @@
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rename,
+  rm,
+  stat,
+  writeFile,
+} from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import type { GitCommandRunner } from '@agentops/ports';
@@ -57,6 +67,7 @@ interface RepositorySessionMetadata {
   createdAt: number;
   lastUsedAt: number;
   repositories: RepositorySession['repositories'];
+  requestIdentity: string;
 }
 
 const REPOSITORY_SESSION_IDLE_MS = 86_400_000;
@@ -95,6 +106,19 @@ export function repositorySessionIdentity(value: string): string {
 
 export function isRepositorySessionIdentity(value: string): boolean {
   return /^[a-zA-Z0-9_-]{1,48}-[0-9a-f]{16}$/.test(value);
+}
+
+export function repositorySessionRequestIdentity(req: CreateRepositorySessionRequest): string {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        taskId: req.taskId,
+        repositories: req.repositories.map(({ repo, ref }) =>
+          ref === undefined ? { repo } : { repo, ref },
+        ),
+      }),
+    )
+    .digest('hex');
 }
 
 export class WorkspaceManager implements Workspaces {
@@ -256,23 +280,24 @@ export class WorkspaceManager implements Workspaces {
   ): Promise<RepositorySession> {
     const workspaceRef = this.repositorySessionPath(ownerProject, req.taskId);
     this.assertSessionPath(workspaceRef);
-    await this.assertSessionCreationPath(workspaceRef);
     if (existsSync(workspaceRef)) {
-      throw new WorkspaceError(`repository session already exists: ${workspaceRef}`, true);
+      return this.readMatchingRepositorySession(workspaceRef, ownerProject, req);
     }
     if (!this.resolveGitForProject) {
       throw new WorkspaceError('repository sessions require a project Git runner resolver', true);
     }
     const git = this.resolveGitForProject(ownerProject);
+    const requestIdentity = repositorySessionRequestIdentity(req);
     const repositories: RepositorySession['repositories'] = [];
+    let stagingPath: string | undefined;
     try {
-      await mkdir(workspaceRef, { recursive: true });
+      stagingPath = await this.createSessionStagingPath(workspaceRef);
       for (const input of req.repositories) {
-        const target = join(workspaceRef, 'repositories', input.repo);
-        this.assertPathInside(workspaceRef, target);
+        const target = join(stagingPath, 'repositories', input.repo);
+        this.assertPathInside(stagingPath, target);
         await mkdir(join(target, '..'), { recursive: true });
         const clone = await git.run(['clone', this.cloneUrl(input.repo), target], {
-          cwd: workspaceRef,
+          cwd: stagingPath,
         });
         this.assertGitSuccess(clone, `git clone failed for ${input.repo}`);
         if (input.ref) {
@@ -293,17 +318,33 @@ export class WorkspaceManager implements Workspaces {
         repositories.push({ repo: input.repo, relativePath: `repositories/${input.repo}`, commit });
       }
       const now = this.now();
-      await this.writeSessionMetadata(workspaceRef, {
+      await this.writeSessionMetadata(stagingPath, {
         ownerProject,
         taskId: req.taskId,
         createdAt: now,
         lastUsedAt: now,
         repositories,
+        requestIdentity,
       });
+      await this.readSessionMetadata(stagingPath, true, workspaceRef);
+      try {
+        await rename(stagingPath, workspaceRef);
+        stagingPath = undefined;
+      } catch (error) {
+        if (
+          (error as { code?: string }).code !== 'EEXIST' &&
+          (error as { code?: string }).code !== 'ENOTEMPTY'
+        ) {
+          throw error;
+        }
+        const lostStagingPath = stagingPath;
+        if (lostStagingPath) await rm(lostStagingPath, { recursive: true, force: true });
+        stagingPath = undefined;
+        return await this.readMatchingRepositorySession(workspaceRef, ownerProject, req);
+      }
       return { workspaceRef, repositories };
     } catch (error) {
-      // workspaceRef is generated and confined above; no caller path is ever removed here.
-      await rm(workspaceRef, { recursive: true, force: true }).catch(() => {});
+      if (stagingPath) await rm(stagingPath, { recursive: true, force: true }).catch(() => {});
       throw error;
     }
   }
@@ -558,6 +599,42 @@ export class WorkspaceManager implements Workspaces {
     }
   }
 
+  private async createSessionStagingPath(workspaceRef: string): Promise<string> {
+    this.assertSessionPath(workspaceRef);
+    await this.assertSessionCreationPath(workspaceRef);
+    const ownerPath = join(
+      this.workspacesDir,
+      'repository-sessions',
+      resolve(workspaceRef).split(sep).at(-2)!,
+    );
+    const stagingRoot = join(ownerPath, '.staging');
+    await mkdir(stagingRoot, { recursive: true });
+    const stagingEntry = await lstat(stagingRoot);
+    if (stagingEntry.isSymbolicLink() || !stagingEntry.isDirectory()) {
+      throw new WorkspaceError('repository session staging root is not a real directory', true);
+    }
+    const stagingPath = await mkdtemp(join(stagingRoot, 'session-'));
+    this.assertPathInside(stagingRoot, stagingPath);
+    return stagingPath;
+  }
+
+  private async readMatchingRepositorySession(
+    workspaceRef: string,
+    ownerProject: string,
+    req: CreateRepositorySessionRequest,
+  ): Promise<RepositorySession> {
+    await this.assertExistingSessionDirectory(workspaceRef);
+    const metadata = await this.readSessionMetadata(workspaceRef, true);
+    if (
+      metadata.ownerProject !== ownerProject ||
+      metadata.taskId !== req.taskId ||
+      metadata.requestIdentity !== repositorySessionRequestIdentity(req)
+    ) {
+      throw new WorkspaceError('repository session request does not match existing session', true);
+    }
+    return { workspaceRef, repositories: metadata.repositories };
+  }
+
   private assertPathInside(root: string, target: string): void {
     if (!resolve(target).startsWith(resolve(root) + sep)) {
       throw new WorkspaceError(`path escapes repository session root: ${target}`, true);
@@ -575,8 +652,8 @@ export class WorkspaceManager implements Workspaces {
   private async readSessionMetadata(
     workspaceRef: string,
     required: boolean,
+    expectedWorkspaceRef: string = workspaceRef,
   ): Promise<RepositorySessionMetadata> {
-    this.assertSessionPath(workspaceRef);
     try {
       const metadataPath = join(workspaceRef, SESSION_METADATA_FILE);
       const metadataFile = await lstat(metadataPath);
@@ -593,12 +670,16 @@ export class WorkspaceManager implements Workspaces {
         metadata.taskId.length === 0 ||
         !Number.isFinite(metadata.createdAt) ||
         !Number.isFinite(metadata.lastUsedAt) ||
-        !RepositorySessionSchema.safeParse({ workspaceRef, repositories: metadata.repositories })
-          .success
+        !/^[0-9a-f]{64}$/.test(metadata.requestIdentity) ||
+        !RepositorySessionSchema.safeParse({
+          workspaceRef: expectedWorkspaceRef,
+          repositories: metadata.repositories,
+        }).success
       )
         throw new Error('invalid metadata');
       if (
-        this.repositorySessionPath(metadata.ownerProject, metadata.taskId) !== resolve(workspaceRef)
+        this.repositorySessionPath(metadata.ownerProject, metadata.taskId) !==
+        resolve(expectedWorkspaceRef)
       ) {
         throw new Error('metadata does not match session path');
       }
@@ -613,7 +694,6 @@ export class WorkspaceManager implements Workspaces {
     workspaceRef: string,
     metadata: RepositorySessionMetadata,
   ): Promise<void> {
-    this.assertSessionPath(workspaceRef);
     const temporary = join(
       workspaceRef,
       `${SESSION_METADATA_FILE}.${process.pid}.${this.now()}.tmp`,

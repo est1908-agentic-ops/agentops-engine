@@ -1,6 +1,7 @@
 import type { CreateRepositorySessionRequest, RepositorySession } from '@agentops/contracts';
 import {
   repositorySessionIdentity,
+  repositorySessionRequestIdentity,
   isRepositorySessionIdentity,
   type PreparedWorkspace,
   type Workspaces,
@@ -17,6 +18,7 @@ interface MemoryRepositorySession {
   createdAt: number;
   lastUsedAt: number;
   repositories: RepositorySession['repositories'];
+  requestIdentity: string;
 }
 
 const REPOSITORY_SESSION_IDLE_MS = 86_400_000;
@@ -88,8 +90,17 @@ export class MemoryWorkspaceManager implements Workspaces {
     req: CreateRepositorySessionRequest,
   ): Promise<RepositorySession> {
     const workspaceRef = `memory://repository-session/${repositorySessionIdentity(ownerProject)}/${repositorySessionIdentity(req.taskId)}`;
-    if (this.repositorySessions.has(workspaceRef))
-      throw new Error(`repository session already exists: ${workspaceRef}`);
+    const existing = this.repositorySessions.get(workspaceRef);
+    if (existing) {
+      if (
+        existing.ownerProject !== ownerProject ||
+        existing.taskId !== req.taskId ||
+        existing.requestIdentity !== repositorySessionRequestIdentity(req)
+      ) {
+        throw new Error('repository session request does not match existing session');
+      }
+      return { workspaceRef, repositories: existing.repositories };
+    }
     const now = this.now();
     const repositories = req.repositories.map((input) => ({
       repo: input.repo,
@@ -102,6 +113,7 @@ export class MemoryWorkspaceManager implements Workspaces {
       createdAt: now,
       lastUsedAt: now,
       repositories,
+      requestIdentity: repositorySessionRequestIdentity(req),
     });
     return { workspaceRef, repositories };
   }

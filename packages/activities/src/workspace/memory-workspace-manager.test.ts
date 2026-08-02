@@ -77,7 +77,21 @@ describe('MemoryWorkspaceManager — scratch workspaces', () => {
 });
 
 describe('MemoryWorkspaceManager — repository sessions', () => {
-  it('uses collision-resistant owner and task identities and rejects duplicate sessions', async () => {
+  it('returns a matching existing session and rejects a different request', async () => {
+    const manager = new MemoryWorkspaceManager();
+    const request = { taskId: 'retry', repositories: [{ repo: 'acme/app' }] };
+    const first = await manager.prepareRepositorySession('hub', request);
+
+    await expect(manager.prepareRepositorySession('hub', request)).resolves.toEqual(first);
+    await expect(
+      manager.prepareRepositorySession('hub', {
+        taskId: 'retry',
+        repositories: [{ repo: 'acme/app', ref: 'main' }],
+      }),
+    ).rejects.toThrow(/request/);
+  });
+
+  it('uses collision-resistant owner and task identities and retries matching sessions', async () => {
     const manager = new MemoryWorkspaceManager();
     const first = await manager.prepareRepositorySession('a/b', {
       taskId: 'c/d',
@@ -93,7 +107,7 @@ describe('MemoryWorkspaceManager — repository sessions', () => {
         taskId: 'c/d',
         repositories: [{ repo: 'acme/app' }],
       }),
-    ).rejects.toThrow(/already exists/);
+    ).resolves.toEqual(first);
     await expect(manager.cleanupRepositorySession('a-b', first.workspaceRef)).rejects.toThrow(
       /different owner/,
     );
