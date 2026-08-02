@@ -93,6 +93,8 @@ interface RepositorySessionStagingMetadata {
 const REPOSITORY_SESSION_IDLE_MS = 86_400_000;
 const SESSION_METADATA_FILE = '.agentops-session.json';
 const STAGING_METADATA_FILE = '.agentops-staging.json';
+const STAGING_METADATA_TEMP_FILE =
+  /^\.agentops-staging\.json\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp$/;
 
 function sanitizeRepoSlug(repo: string): string {
   return repo.replace(/[^a-zA-Z0-9-]/g, '-');
@@ -793,10 +795,11 @@ export class WorkspaceManager implements Workspaces {
           try {
             metadata = await this.readStagingMetadata(stagingPath);
           } catch {
+            const entries = await readdir(stagingPath);
             if (
               /^session-[A-Za-z0-9]{6}$/.test(entry) &&
               this.now() - directory.mtimeMs > this.repositorySessionStagingIdleMs &&
-              (await readdir(stagingPath)).length === 0
+              entries.length === 0
             ) {
               await this.assertTrustedStagingPath(
                 resolve(sessionsRoot),
@@ -806,6 +809,21 @@ export class WorkspaceManager implements Workspaces {
               );
               await rmdir(stagingPath).catch(() => {});
               if (!existsSync(stagingPath)) removed.push(stagingPath);
+            } else if (
+              /^session-[A-Za-z0-9]{6}$/.test(entry) &&
+              this.now() - directory.mtimeMs > this.repositorySessionStagingIdleMs &&
+              entries.length === 1 &&
+              STAGING_METADATA_TEMP_FILE.test(entries[0]!)
+            ) {
+              const markerTemp = await lstat(join(stagingPath, entries[0]!));
+              if (
+                !markerTemp.isSymbolicLink() &&
+                markerTemp.isFile() &&
+                this.now() - markerTemp.mtimeMs > this.repositorySessionStagingIdleMs
+              ) {
+                await this.removeOwnedStagingPath(stagingPath);
+                removed.push(stagingPath);
+              }
             }
             continue;
           }

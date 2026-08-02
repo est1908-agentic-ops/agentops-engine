@@ -9,6 +9,7 @@ import {
   renameSync,
   symlinkSync,
   statSync,
+  utimesSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -815,6 +816,104 @@ describe('WorkspaceManager — repository sessions', () => {
     await manager.pruneOrphans([]);
 
     expect(existsSync(staging)).toBe(false);
+  });
+
+  it('reclaims an old generated staging directory containing only its old marker temporary file', async () => {
+    const time = Date.now();
+    const manager = new WorkspaceManager({
+      resolveGit: () => new SpawnGitCommandRunner(),
+      resolveGitForProject: () => new SpawnGitCommandRunner(),
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+      now: () => time,
+      repositorySessionStagingIdleMs: 20,
+    });
+    const staging = join(
+      workspacesDir,
+      'repository-sessions',
+      repositorySessionIdentity('gone'),
+      '.staging',
+      'session-Tm9pQ2',
+    );
+    const markerTemp = join(
+      staging,
+      '.agentops-staging.json.01234567-89ab-4cde-8fab-0123456789ab.tmp',
+    );
+    mkdirSync(staging, { recursive: true });
+    writeFileSync(markerTemp, '{"ownerProject":"gone"');
+    const old = new Date(time - 100);
+    utimesSync(markerTemp, old, old);
+    utimesSync(staging, old, old);
+
+    const { removed } = await manager.pruneOrphans([]);
+
+    expect(existsSync(staging)).toBe(false);
+    expect(removed).toContain(staging);
+  });
+
+  it('keeps unmarked staging entries unless they exactly match the safe marker-temp crash shape', async () => {
+    const time = Date.now();
+    const manager = new WorkspaceManager({
+      resolveGit: () => new SpawnGitCommandRunner(),
+      resolveGitForProject: () => new SpawnGitCommandRunner(),
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+      now: () => time,
+      repositorySessionStagingIdleMs: 20,
+    });
+    const stagingRoot = join(
+      workspacesDir,
+      'repository-sessions',
+      repositorySessionIdentity('gone'),
+      '.staging',
+    );
+    const unexpected = join(stagingRoot, 'session-Aa1Bb2');
+    const multiple = join(stagingRoot, 'session-Cc3Dd4');
+    const symlinked = join(stagingRoot, 'session-Ee5Ff6');
+    const content = join(stagingRoot, 'session-Gg7Hh8');
+    const youngFile = join(stagingRoot, 'session-Ii9Jj0');
+    const youngDirectory = join(stagingRoot, 'session-Kk1Ll2');
+    const malformedDirectory = join(stagingRoot, 'session-too-long');
+    const outside = join(root, 'outside-marker-temp');
+    const markerName = '.agentops-staging.json.01234567-89ab-4cde-8fab-0123456789ab.tmp';
+    mkdirSync(unexpected, { recursive: true });
+    writeFileSync(join(unexpected, '.agentops-staging.json.not-a-uuid.tmp'), 'keep');
+    mkdirSync(multiple);
+    writeFileSync(join(multiple, markerName), 'marker');
+    writeFileSync(join(multiple, 'extra'), 'keep');
+    mkdirSync(symlinked);
+    writeFileSync(outside, 'outside sentinel');
+    symlinkSync(outside, join(symlinked, markerName));
+    mkdirSync(join(content, 'repositories'), { recursive: true });
+    mkdirSync(youngFile);
+    writeFileSync(join(youngFile, markerName), 'young');
+    mkdirSync(youngDirectory);
+    writeFileSync(join(youngDirectory, markerName), 'old');
+    mkdirSync(malformedDirectory);
+    writeFileSync(join(malformedDirectory, markerName), 'old');
+    const old = new Date(time - 100);
+    for (const file of [
+      join(unexpected, '.agentops-staging.json.not-a-uuid.tmp'),
+      join(multiple, markerName),
+      join(multiple, 'extra'),
+      join(youngDirectory, markerName),
+      join(malformedDirectory, markerName),
+    ])
+      utimesSync(file, old, old);
+    for (const staging of [unexpected, multiple, symlinked, content, youngFile, malformedDirectory])
+      utimesSync(staging, old, old);
+
+    await manager.pruneOrphans([]);
+
+    expect(existsSync(unexpected)).toBe(true);
+    expect(existsSync(join(multiple, 'extra'))).toBe(true);
+    expect(readFileSync(outside, 'utf8')).toBe('outside sentinel');
+    expect(existsSync(join(content, 'repositories'))).toBe(true);
+    expect(existsSync(youngFile)).toBe(true);
+    expect(existsSync(youngDirectory)).toBe(true);
+    expect(existsSync(malformedDirectory)).toBe(true);
   });
 
   it('never recursively removes an unmarked nonempty, malformed, or symlinked staging entry', async () => {
