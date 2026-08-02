@@ -8,7 +8,7 @@ const ShortRepositorySchema = z
   .string()
   .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'Repository must be in owner/name form.')
   .refine((repo) => repo.split('/').every(isSafeRepositoryPathSegment), {
-    message: 'Repository owner and name must not be . or ...',
+    message: 'Repository owner and name must not be . or ..',
   });
 
 const RepositoryRelativePathSchema = z
@@ -18,7 +18,7 @@ const RepositoryRelativePathSchema = z
     'Repository checkout path must be under repositories/owner/name.',
   )
   .refine((relativePath) => relativePath.split('/').slice(1).every(isSafeRepositoryPathSegment), {
-    message: 'Repository checkout path segments must not be . or ...',
+    message: 'Repository checkout path segments must not be . or ..',
   });
 
 export const RepositorySessionRepositoryInputSchema = z

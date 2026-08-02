@@ -107,6 +107,20 @@ describe('CreateRepositorySessionRequestSchema', () => {
     ).toBe(false);
   });
 
+  it('describes rejected dot path segments accurately', () => {
+    const result = CreateRepositorySessionRequestSchema.safeParse({
+      taskId: 'rollbar-123',
+      repositories: [{ repo: '../app' }],
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.message)).toContain(
+        'Repository owner and name must not be . or ..',
+      );
+    }
+  });
+
   it('rejects unknown top-level request fields', () => {
     expect(
       CreateRepositorySessionRequestSchema.safeParse({
@@ -179,6 +193,22 @@ describe('RepositorySessionSchema', () => {
         repositories: [{ repo, relativePath, commit: 'a'.repeat(40) }],
       }).success,
     ).toBe(false);
+  });
+
+  it('describes rejected checkout dot segments accurately', () => {
+    const result = RepositorySessionSchema.safeParse({
+      workspaceRef: '/workspace/task',
+      repositories: [
+        { repo: 'acme/app', relativePath: 'repositories/../victim', commit: 'a'.repeat(40) },
+      ],
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.map((issue) => issue.message)).toContain(
+        'Repository checkout path segments must not be . or ..',
+      );
+    }
   });
 
   it('requires each checkout path to match its repository exactly', () => {
