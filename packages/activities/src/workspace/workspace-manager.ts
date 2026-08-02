@@ -22,8 +22,9 @@ export interface WorkspaceManagerOptions {
   commandRunner?: CommandRunner;
   now?: () => number;
   repositorySessionIdleMs?: number;
-  /** Test/instrumentation seam invoked after prune discovers a session, before its locked recheck. */
-  onRepositorySessionPruneCandidate?: (workspaceRef: string) => Promise<void> | void;
+  repositorySessionLockRetryMs?: number;
+  repositorySessionLockStaleMs?: number;
+  repositorySessionStagingIdleMs?: number;
 }
 
 export interface PreparedWorkspace {
@@ -62,8 +63,25 @@ interface RepositorySessionMetadata {
   requestIdentity: string;
 }
 
+interface RepositorySessionStagingMetadata {
+  ownerProject: string;
+  taskId: string;
+  requestIdentity: string;
+  createdAt: number;
+  workspaceRef: string;
+}
+
+interface RepositorySessionLease {
+  token: string;
+  acquiredAt: number;
+}
+
 const REPOSITORY_SESSION_IDLE_MS = 86_400_000;
+const REPOSITORY_SESSION_LOCK_STALE_MS = 7_200_000;
+const REPOSITORY_SESSION_LOCK_RETRY_MS = 100;
 const SESSION_METADATA_FILE = '.agentops-session.json';
+const STAGING_METADATA_FILE = '.agentops-staging.json';
+const LOCK_METADATA_FILE = 'lease.json';
 
 export class WorkspaceError extends Error {
   constructor(
@@ -122,9 +140,9 @@ export class WorkspaceManager implements Workspaces {
   private readonly resolveGitForProject?: (project: string) => GitCommandRunner;
   private readonly now: () => number;
   private readonly repositorySessionIdleMs: number;
-  private readonly onRepositorySessionPruneCandidate?: (
-    workspaceRef: string,
-  ) => Promise<void> | void;
+  private readonly repositorySessionLockRetryMs: number;
+  private readonly repositorySessionLockStaleMs: number;
+  private readonly repositorySessionStagingIdleMs: number;
   // These paths are engine-owned trusted roots.  We still lstat every mutable
   // component before destructive operations; Node has no portable openat/
   // O_NOFOLLOW API, so this is practical TOCTOU hardening rather than a claim
@@ -140,7 +158,12 @@ export class WorkspaceManager implements Workspaces {
     this.resolveGitForProject = opts.resolveGitForProject;
     this.now = opts.now ?? Date.now;
     this.repositorySessionIdleMs = opts.repositorySessionIdleMs ?? REPOSITORY_SESSION_IDLE_MS;
-    this.onRepositorySessionPruneCandidate = opts.onRepositorySessionPruneCandidate;
+    this.repositorySessionLockRetryMs =
+      opts.repositorySessionLockRetryMs ?? REPOSITORY_SESSION_LOCK_RETRY_MS;
+    this.repositorySessionLockStaleMs =
+      opts.repositorySessionLockStaleMs ?? REPOSITORY_SESSION_LOCK_STALE_MS;
+    this.repositorySessionStagingIdleMs =
+      opts.repositorySessionStagingIdleMs ?? REPOSITORY_SESSION_LOCK_STALE_MS;
   }
 
   async prepare(
@@ -281,77 +304,84 @@ export class WorkspaceManager implements Workspaces {
   ): Promise<RepositorySession> {
     const workspaceRef = this.repositorySessionPath(ownerProject, req.taskId);
     this.assertSessionPath(workspaceRef);
-    const existing = await this.withSessionLock(workspaceRef, async () => {
+    return this.withSessionLock(workspaceRef, async () => {
       await this.assertSessionCreationPath(workspaceRef);
-      return existsSync(workspaceRef)
+      const existing = existsSync(workspaceRef)
         ? this.readMatchingRepositorySession(workspaceRef, ownerProject, req)
         : undefined;
-    });
-    if (existing) return existing;
-    if (!this.resolveGitForProject) {
-      throw new WorkspaceError('repository sessions require a project Git runner resolver', true);
-    }
-    const git = this.resolveGitForProject(ownerProject);
-    const requestIdentity = repositorySessionRequestIdentity(req);
-    const repositories: RepositorySession['repositories'] = [];
-    let stagingPath: string | undefined;
-    try {
-      stagingPath = await this.createSessionStagingPath(workspaceRef);
-      for (const input of req.repositories) {
-        const target = join(stagingPath, 'repositories', input.repo);
-        this.assertPathInside(stagingPath, target);
-        await mkdir(join(target, '..'), { recursive: true });
-        const clone = await git.run(['clone', this.cloneUrl(input.repo), target], {
-          cwd: stagingPath,
-        });
-        this.assertGitSuccess(clone, `git clone failed for ${input.repo}`);
-        if (input.ref) {
-          const fetch = await git.run(['fetch', 'origin', input.ref], { cwd: target });
-          this.assertGitSuccess(fetch, `git fetch origin ${input.ref} failed for ${input.repo}`);
-          const checkout = await git.run(['checkout', '--detach', 'FETCH_HEAD'], { cwd: target });
-          this.assertGitSuccess(checkout, `git checkout failed for ${input.repo}`);
-        }
-        const head = await git.run(['rev-parse', 'HEAD'], { cwd: target });
-        this.assertGitSuccess(head, `git rev-parse HEAD failed for ${input.repo}`);
-        const commit = head.stdout.trim();
-        if (!/^[0-9a-f]{40}$/.test(commit)) {
-          throw new WorkspaceError(
-            `git rev-parse HEAD returned an invalid commit for ${input.repo}`,
-            true,
-          );
-        }
-        repositories.push({ repo: input.repo, relativePath: `repositories/${input.repo}`, commit });
+      if (existing) return await existing;
+      if (!this.resolveGitForProject) {
+        throw new WorkspaceError('repository sessions require a project Git runner resolver', true);
       }
-      const now = this.now();
-      await this.writeSessionMetadata(stagingPath, {
-        ownerProject,
-        taskId: req.taskId,
-        createdAt: now,
-        lastUsedAt: now,
-        repositories,
-        requestIdentity,
-      });
-      await this.readSessionMetadata(stagingPath, true, workspaceRef);
-      return await this.withSessionLock(workspaceRef, async () => {
-        await this.assertSessionCreationPath(workspaceRef);
-        if (existsSync(workspaceRef)) {
-          const matching = await this.readMatchingRepositorySession(
-            workspaceRef,
-            ownerProject,
-            req,
-          );
-          await rm(stagingPath!, { recursive: true, force: true });
-          stagingPath = undefined;
-          return matching;
+      let git: GitCommandRunner;
+      try {
+        git = this.resolveGitForProject(ownerProject);
+      } catch (error) {
+        if (error instanceof WorkspaceError) throw error;
+        throw new WorkspaceError('repository session owner project is not registered', true);
+      }
+      const requestIdentity = repositorySessionRequestIdentity(req);
+      const repositories: RepositorySession['repositories'] = [];
+      let stagingPath: string | undefined;
+      try {
+        stagingPath = await this.createSessionStagingPath(workspaceRef);
+        await this.writeStagingMetadata(stagingPath, {
+          ownerProject,
+          taskId: req.taskId,
+          requestIdentity,
+          createdAt: this.now(),
+          workspaceRef,
+        });
+        for (const input of req.repositories) {
+          const target = join(stagingPath, 'repositories', input.repo);
+          this.assertPathInside(stagingPath, target);
+          await mkdir(join(target, '..'), { recursive: true });
+          const clone = await git.run(['clone', this.cloneUrl(input.repo), target], {
+            cwd: stagingPath,
+          });
+          this.assertGitSuccess(clone, `git clone failed for ${input.repo}`);
+          if (input.ref) {
+            const fetch = await git.run(['fetch', 'origin', input.ref], { cwd: target });
+            this.assertGitSuccess(fetch, `git fetch origin ${input.ref} failed for ${input.repo}`);
+            const checkout = await git.run(['checkout', '--detach', 'FETCH_HEAD'], { cwd: target });
+            this.assertGitSuccess(checkout, `git checkout failed for ${input.repo}`);
+          }
+          const head = await git.run(['rev-parse', 'HEAD'], { cwd: target });
+          this.assertGitSuccess(head, `git rev-parse HEAD failed for ${input.repo}`);
+          const commit = head.stdout.trim();
+          if (!/^[0-9a-f]{40}$/.test(commit)) {
+            throw new WorkspaceError(
+              `git rev-parse HEAD returned an invalid commit for ${input.repo}`,
+              true,
+            );
+          }
+          repositories.push({
+            repo: input.repo,
+            relativePath: `repositories/${input.repo}`,
+            commit,
+          });
         }
-        await rename(stagingPath!, workspaceRef);
+        const now = this.now();
+        await this.writeSessionMetadata(stagingPath, {
+          ownerProject,
+          taskId: req.taskId,
+          createdAt: now,
+          lastUsedAt: now,
+          repositories,
+          requestIdentity,
+        });
+        await this.readSessionMetadata(stagingPath, true, workspaceRef);
+        await this.assertSessionCreationPath(workspaceRef);
+        if (existsSync(workspaceRef))
+          return this.readMatchingRepositorySession(workspaceRef, ownerProject, req);
+        await rename(stagingPath, workspaceRef);
         stagingPath = undefined;
         return { workspaceRef, repositories };
-      });
-    } catch (error) {
-      if (stagingPath) await rm(stagingPath, { recursive: true, force: true }).catch(() => {});
-      throw error;
-    }
+      } catch (error) {
+        if (stagingPath) await this.removeOwnedStagingPath(stagingPath).catch(() => {});
+        throw error;
+      }
+    });
   }
 
   async cleanupRepositorySession(ownerProject: string, workspaceRef: string): Promise<void> {
@@ -364,9 +394,7 @@ export class WorkspaceManager implements Workspaces {
       if (metadata.ownerProject !== ownerProject) {
         throw new WorkspaceError('repository session belongs to a different project', true);
       }
-      await this.assertExistingSessionDirectory(workspaceRef);
-      await this.readSessionMetadata(workspaceRef, true);
-      await rm(workspaceRef, { recursive: true, force: true });
+      await this.removeSessionDirectory(workspaceRef);
     });
   }
 
@@ -419,11 +447,11 @@ export class WorkspaceManager implements Workspaces {
     const sessionsRoot = join(this.workspacesDir, 'repository-sessions');
     const live = new Set(liveProjects ?? []);
     for (const owner of await readdir(sessionsRoot).catch(() => [] as string[])) {
+      if (owner === '.locks') continue;
       for (const task of await readdir(join(sessionsRoot, owner)).catch(() => [] as string[])) {
         const workspaceRef = join(sessionsRoot, owner, task);
         if (!this.isSessionPath(workspaceRef)) continue;
         try {
-          await this.onRepositorySessionPruneCandidate?.(workspaceRef);
           const deleted = await this.withSessionLock(workspaceRef, async () => {
             await this.assertExistingSessionDirectory(workspaceRef);
             const metadata = await this.readSessionMetadata(workspaceRef, true);
@@ -431,9 +459,9 @@ export class WorkspaceManager implements Workspaces {
               (liveProjects !== undefined && !live.has(metadata.ownerProject)) ||
               this.now() - metadata.lastUsedAt > this.repositorySessionIdleMs
             ) {
-              await this.assertExistingSessionDirectory(workspaceRef);
-              await this.readSessionMetadata(workspaceRef, true);
-              await rm(workspaceRef, { recursive: true, force: true });
+              // This is deliberately the metadata read used for the decision:
+              // another PVC worker can only touch before or after this lease.
+              await this.removeSessionDirectory(workspaceRef);
               return true;
             }
             return false;
@@ -444,6 +472,7 @@ export class WorkspaceManager implements Workspaces {
         }
       }
     }
+    await this.pruneSessionStaging(sessionsRoot, live, liveProjects !== undefined, removed);
 
     // Base clones: <cacheDir>/<sanitizeRepoSlug(repo)>.
     const cached = await readdir(this.cacheDir).catch(() => [] as string[]);
@@ -638,6 +667,102 @@ export class WorkspaceManager implements Workspaces {
     return stagingPath;
   }
 
+  private async writeStagingMetadata(
+    stagingPath: string,
+    metadata: RepositorySessionStagingMetadata,
+  ): Promise<void> {
+    await this.writeRegularJson(join(stagingPath, STAGING_METADATA_FILE), metadata);
+  }
+
+  private async readStagingMetadata(
+    stagingPath: string,
+  ): Promise<RepositorySessionStagingMetadata> {
+    const metadata = await this.readRegularJson<RepositorySessionStagingMetadata>(
+      join(stagingPath, STAGING_METADATA_FILE),
+    );
+    if (
+      !metadata ||
+      typeof metadata.ownerProject !== 'string' ||
+      typeof metadata.taskId !== 'string' ||
+      !/^[0-9a-f]{64}$/.test(metadata.requestIdentity) ||
+      !Number.isFinite(metadata.createdAt) ||
+      typeof metadata.workspaceRef !== 'string' ||
+      this.repositorySessionPath(metadata.ownerProject, metadata.taskId) !==
+        resolve(metadata.workspaceRef)
+    )
+      throw new WorkspaceError('repository session staging marker is invalid', true);
+    return metadata;
+  }
+
+  private async removeOwnedStagingPath(stagingPath: string): Promise<void> {
+    const root = resolve(stagingPath).split(sep).slice(0, -1).join(sep);
+    const moved = join(root, `.removed-${randomUUID()}`);
+    this.assertPathInside(root, stagingPath);
+    await rename(stagingPath, moved);
+    await rm(moved, { recursive: true, force: true });
+  }
+
+  private async removeSessionDirectory(workspaceRef: string): Promise<void> {
+    await this.assertExistingSessionDirectory(workspaceRef);
+    const ownerPath = resolve(workspaceRef).split(sep).slice(0, -1).join(sep);
+    const stagingRoot = join(ownerPath, '.staging');
+    await mkdir(stagingRoot, { recursive: true });
+    const moved = join(stagingRoot, `.removed-${randomUUID()}`);
+    await rename(workspaceRef, moved);
+    await rm(moved, { recursive: true, force: true });
+  }
+
+  private async pruneSessionStaging(
+    sessionsRoot: string,
+    live: Set<string>,
+    hasLiveProjects: boolean,
+    removed: string[],
+  ): Promise<void> {
+    for (const owner of await readdir(sessionsRoot).catch(() => [] as string[])) {
+      if (!isRepositorySessionIdentity(owner)) continue;
+      const ownerPath = join(sessionsRoot, owner);
+      const stagingRoot = join(ownerPath, '.staging');
+      try {
+        const ownerEntry = await lstat(ownerPath);
+        const stagingEntry = await lstat(stagingRoot);
+        if (
+          ownerEntry.isSymbolicLink() ||
+          !ownerEntry.isDirectory() ||
+          stagingEntry.isSymbolicLink() ||
+          !stagingEntry.isDirectory()
+        )
+          continue;
+      } catch {
+        continue;
+      }
+      for (const entry of await readdir(stagingRoot).catch(() => [] as string[])) {
+        if (!entry.startsWith('session-')) continue;
+        const stagingPath = join(stagingRoot, entry);
+        try {
+          const directory = await lstat(stagingPath);
+          if (directory.isSymbolicLink() || !directory.isDirectory()) continue;
+          const metadata = await this.readStagingMetadata(stagingPath);
+          const lock = await this.acquireFilesystemSessionLock(metadata.workspaceRef, false);
+          if (!lock) continue;
+          try {
+            const fresh = await this.readStagingMetadata(stagingPath);
+            if (
+              (hasLiveProjects && !live.has(fresh.ownerProject)) ||
+              this.now() - fresh.createdAt > this.repositorySessionStagingIdleMs
+            ) {
+              await this.removeOwnedStagingPath(stagingPath);
+              removed.push(stagingPath);
+            }
+          } finally {
+            await this.releaseFilesystemSessionLock(lock).catch(() => {});
+          }
+        } catch {
+          // A malformed or symlinked marker is evidence, never delete authority.
+        }
+      }
+    }
+  }
+
   private async readMatchingRepositorySession(
     workspaceRef: string,
     ownerProject: string,
@@ -742,11 +867,134 @@ export class WorkspaceManager implements Workspaces {
     this.sessionLocks.set(key, tail);
     await previous.catch(() => {});
     try {
-      return await operation();
+      // Validate mutable session-root components before creating anything in
+      // the parallel lock namespace; this prevents mkdir from following a
+      // substituted owner/root symlink on a shared PVC.
+      await this.assertSessionCreationPath(workspaceRef);
+      const lease = await this.acquireFilesystemSessionLock(workspaceRef);
+      try {
+        return await operation();
+      } finally {
+        await this.releaseFilesystemSessionLock(lease!).catch(() => {});
+      }
     } finally {
       release();
       if (this.sessionLocks.get(key) === tail) this.sessionLocks.delete(key);
     }
+  }
+
+  private lockPath(workspaceRef: string): string {
+    this.assertSessionPath(workspaceRef);
+    const [owner, task] = resolve(workspaceRef).split(sep).slice(-2);
+    return join(this.workspacesDir, 'repository-sessions', '.locks', owner!, `${task!}.lock`);
+  }
+
+  private async acquireFilesystemSessionLock(
+    workspaceRef: string,
+    wait = true,
+  ): Promise<{ path: string; token: string } | undefined> {
+    const lockPath = this.lockPath(workspaceRef);
+    const lockRoot = join(this.workspacesDir, 'repository-sessions', '.locks');
+    await mkdir(lockRoot, { recursive: true });
+    const root = await lstat(lockRoot);
+    if (root.isSymbolicLink() || !root.isDirectory())
+      throw new WorkspaceError('repository session lock root is not a real directory', true);
+    const ownerLocksPath = join(lockRoot, resolve(workspaceRef).split(sep).at(-2)!);
+    await mkdir(ownerLocksPath, { recursive: true });
+    const ownerLocks = await lstat(ownerLocksPath);
+    if (ownerLocks.isSymbolicLink() || !ownerLocks.isDirectory())
+      throw new WorkspaceError('repository session lock owner is not a real directory', true);
+    for (;;) {
+      const token = randomUUID();
+      try {
+        await mkdir(lockPath);
+        try {
+          await this.writeRegularJson(join(lockPath, LOCK_METADATA_FILE), {
+            token,
+            acquiredAt: this.now(),
+          });
+        } catch (error) {
+          await rm(lockPath, { recursive: true, force: true }).catch(() => {});
+          throw error;
+        }
+        return { path: lockPath, token };
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'EEXIST') throw error;
+      }
+      const stale = await this.isStaleLock(lockPath);
+      if (stale) {
+        const reaped = `${lockPath}.reap-${randomUUID()}`;
+        try {
+          await rename(lockPath, reaped);
+          await rm(reaped, { recursive: true, force: true });
+          continue;
+        } catch (error) {
+          if ((error as { code?: string }).code === 'ENOENT') continue;
+          if (!wait) return undefined;
+        }
+      }
+      if (!wait) return undefined;
+      await new Promise<void>((resolveDelay) =>
+        setTimeout(resolveDelay, this.repositorySessionLockRetryMs),
+      );
+    }
+  }
+
+  private async isStaleLock(lockPath: string): Promise<boolean> {
+    try {
+      const lock = await lstat(lockPath);
+      if (lock.isSymbolicLink() || !lock.isDirectory())
+        throw new WorkspaceError('repository session lock is malformed', true);
+      const lease = await this.readRegularJson<RepositorySessionLease>(
+        join(lockPath, LOCK_METADATA_FILE),
+      );
+      if (
+        typeof lease.token !== 'string' ||
+        !/^[0-9a-f-]{36}$/i.test(lease.token) ||
+        !Number.isFinite(lease.acquiredAt)
+      )
+        throw new WorkspaceError('repository session lock lease is malformed', true);
+      return this.now() - lease.acquiredAt > this.repositorySessionLockStaleMs;
+    } catch (error) {
+      if ((error as { code?: string }).code === 'ENOENT') return false;
+      throw error;
+    }
+  }
+
+  private async releaseFilesystemSessionLock(lease: {
+    path: string;
+    token: string;
+  }): Promise<void> {
+    const current = await this.readRegularJson<RepositorySessionLease>(
+      join(lease.path, LOCK_METADATA_FILE),
+    );
+    if (current.token !== lease.token) return;
+    const released = `${lease.path}.release-${lease.token}`;
+    try {
+      await rename(lease.path, released);
+    } catch (error) {
+      if ((error as { code?: string }).code === 'ENOENT') return;
+      throw error;
+    }
+    await rm(released, { recursive: true, force: true });
+  }
+
+  private async writeRegularJson(path: string, value: unknown): Promise<void> {
+    const temporary = `${path}.${randomUUID()}.tmp`;
+    const handle = await open(temporary, 'wx', 0o600);
+    try {
+      await handle.writeFile(JSON.stringify(value), 'utf8');
+    } finally {
+      await handle.close();
+    }
+    await rename(temporary, path);
+  }
+
+  private async readRegularJson<T>(path: string): Promise<T> {
+    const entry = await lstat(path);
+    if (entry.isSymbolicLink() || !entry.isFile())
+      throw new WorkspaceError('unsafe regular file', true);
+    return JSON.parse(await readFile(path, 'utf8')) as T;
   }
 
   private async detectDefaultBranch(git: GitCommandRunner, cachePath: string): Promise<string> {

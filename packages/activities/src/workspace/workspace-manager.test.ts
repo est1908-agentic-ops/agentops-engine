@@ -549,21 +549,21 @@ describe('WorkspaceManager — repository sessions', () => {
     expect(existsSync(join(first.workspaceRef, '.agentops-session.json'))).toBe(true);
   });
 
-  it('atomically publishes one matching session for concurrent creators', async () => {
+  it('serializes matching creators across manager instances for the entire clone', async () => {
     let clonesStarted = 0;
     let releaseClones: () => void;
     const clonesReleased = new Promise<void>((resolve) => {
       releaseClones = resolve;
     });
-    let bothCloning: () => void;
-    const bothStarted = new Promise<void>((resolve) => {
-      bothCloning = resolve;
+    let firstCloneStarted!: () => void;
+    const firstClone = new Promise<void>((resolve) => {
+      firstCloneStarted = resolve;
     });
     const git = {
       run: async (args: string[]) => {
         if (args[0] === 'clone') {
           clonesStarted++;
-          if (clonesStarted === 2) bothCloning();
+          firstCloneStarted();
           await clonesReleased;
         }
         return {
@@ -573,12 +573,20 @@ describe('WorkspaceManager — repository sessions', () => {
         };
       },
     };
-    const manager = new WorkspaceManager({
+    const firstManager = new WorkspaceManager({
       resolveGit: () => git,
       resolveGitForProject: () => git,
       cacheDir,
       workspacesDir,
       cloneUrl: () => remoteDir,
+    });
+    const secondManager = new WorkspaceManager({
+      resolveGit: () => git,
+      resolveGitForProject: () => git,
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+      repositorySessionLockRetryMs: 1,
     });
     const request = { taskId: 'concurrent', repositories: [{ repo: 'acme/app' }] };
     const expectedPath = join(
@@ -587,10 +595,12 @@ describe('WorkspaceManager — repository sessions', () => {
       repositorySessionIdentity('hub'),
       repositorySessionIdentity(request.taskId),
     );
-    const first = manager.prepareRepositorySession('hub', request);
-    const second = manager.prepareRepositorySession('hub', request);
+    const first = firstManager.prepareRepositorySession('hub', request);
+    await firstClone;
+    const second = secondManager.prepareRepositorySession('hub', request);
 
-    await bothStarted;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(clonesStarted).toBe(1);
     expect(existsSync(join(expectedPath, '.agentops-session.json'))).toBe(false);
     releaseClones!();
     await expect(Promise.all([first, second])).resolves.toEqual([
@@ -606,15 +616,15 @@ describe('WorkspaceManager — repository sessions', () => {
     const clonesReleased = new Promise<void>((resolve) => {
       releaseClones = resolve;
     });
-    let bothCloning: () => void;
-    const bothStarted = new Promise<void>((resolve) => {
-      bothCloning = resolve;
+    let firstCloning!: () => void;
+    const firstStarted = new Promise<void>((resolve) => {
+      firstCloning = resolve;
     });
     const git = {
       run: async (args: string[]) => {
         if (args[0] === 'clone') {
           clonesStarted++;
-          if (clonesStarted === 2) bothCloning();
+          firstCloning();
           await clonesReleased;
         }
         return {
@@ -639,7 +649,7 @@ describe('WorkspaceManager — repository sessions', () => {
     const first = manager.prepareRepositorySession('hub', firstRequest);
     const second = manager.prepareRepositorySession('hub', secondRequest);
 
-    await bothStarted;
+    await firstStarted;
     releaseClones!();
     const results = await Promise.allSettled([first, second]);
     const winnerIndex = results.findIndex((result) => result.status === 'fulfilled');
@@ -672,6 +682,53 @@ describe('WorkspaceManager — repository sessions', () => {
     ).resolves.toMatchObject({
       workspaceRef: expect.stringContaining(repositorySessionIdentity('orphan-safe')),
     });
+  });
+
+  it('reclaims stale crashed staging only after its PVC lease expires', async () => {
+    let time = 10;
+    const manager = new WorkspaceManager({
+      resolveGit: () => new SpawnGitCommandRunner(),
+      resolveGitForProject: () => new SpawnGitCommandRunner(),
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+      now: () => time,
+      repositorySessionLockStaleMs: 20,
+      repositorySessionStagingIdleMs: 20,
+    });
+    const owner = repositorySessionIdentity('gone');
+    const task = repositorySessionIdentity('crashed');
+    const staging = join(
+      workspacesDir,
+      'repository-sessions',
+      owner,
+      '.staging',
+      'session-crashed',
+    );
+    mkdirSync(staging, { recursive: true });
+    writeFileSync(
+      join(staging, '.agentops-staging.json'),
+      JSON.stringify({
+        ownerProject: 'gone',
+        taskId: 'crashed',
+        requestIdentity: 'a'.repeat(64),
+        createdAt: 0,
+        workspaceRef: join(workspacesDir, 'repository-sessions', owner, task),
+      }),
+    );
+    const lock = join(workspacesDir, 'repository-sessions', '.locks', owner, `${task}.lock`);
+    mkdirSync(lock, { recursive: true });
+    writeFileSync(
+      join(lock, 'lease.json'),
+      JSON.stringify({ token: crypto.randomUUID(), acquiredAt: 0 }),
+    );
+
+    await manager.pruneOrphans([], []);
+    expect(existsSync(staging)).toBe(true);
+    time = 21;
+    const { removed } = await manager.pruneOrphans([], []);
+    expect(existsSync(staging)).toBe(false);
+    expect(removed).toContain(staging);
   });
 
   it('uses collision-resistant owner and task path components', async () => {
@@ -847,9 +904,11 @@ describe('WorkspaceManager — repository sessions', () => {
       }),
     ).rejects.toThrow(/nope/);
     const taskRoots = existsSync(sessionsRoot)
-      ? readdirSync(sessionsRoot).flatMap((owner) =>
-          readdirSync(join(sessionsRoot, owner)).filter((entry) => entry !== '.staging'),
-        )
+      ? readdirSync(sessionsRoot)
+          .filter((owner) => owner !== '.locks')
+          .flatMap((owner) =>
+            readdirSync(join(sessionsRoot, owner)).filter((entry) => entry !== '.staging'),
+          )
       : [];
     expect(taskRoots).toEqual([]);
     expect(readdirSync(join(sessionsRoot, repositorySessionIdentity('hub'), '.staging'))).toEqual(
@@ -973,46 +1032,6 @@ describe('WorkspaceManager — repository sessions', () => {
     time++;
     await manager.pruneOrphans([], ['live']);
     expect(existsSync(expired.workspaceRef)).toBe(false);
-  });
-
-  it('rechecks session metadata under its lock after a concurrent touch', async () => {
-    let time = 0;
-    let releaseCandidate!: () => void;
-    let candidateSeen!: () => void;
-    const candidate = new Promise<void>((resolveCandidate) => {
-      candidateSeen = resolveCandidate;
-    });
-    const pause = new Promise<void>((resolvePause) => {
-      releaseCandidate = resolvePause;
-    });
-    const manager = new WorkspaceManager({
-      resolveGit: () => new SpawnGitCommandRunner(),
-      resolveGitForProject: () => new SpawnGitCommandRunner(),
-      cacheDir,
-      workspacesDir,
-      cloneUrl: () => remoteDir,
-      now: () => time,
-      onRepositorySessionPruneCandidate: async () => {
-        candidateSeen();
-        await pause;
-      },
-    });
-    const session = await manager.prepareRepositorySession('hub', {
-      taskId: 'racing',
-      repositories: [{ repo: 'acme/app' }],
-    });
-    time = 86_400_001;
-    const pruning = manager.pruneOrphans([], ['hub']);
-    await candidate;
-    time++;
-    await manager.touchRepositorySession('hub', session.workspaceRef);
-    releaseCandidate();
-    await pruning;
-    expect(existsSync(session.workspaceRef)).toBe(true);
-    expect(
-      JSON.parse(readFileSync(join(session.workspaceRef, '.agentops-session.json'), 'utf8'))
-        .lastUsedAt,
-    ).toBe(time);
   });
 
   it('serializes cleanup and touch so the later touch is a no-op', async () => {
