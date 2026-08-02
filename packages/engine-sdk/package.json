@@ -20,7 +20,7 @@
     }
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && bash scripts/bundle-declarations.sh",
     "typecheck": "tsc --noEmit",
     "test": "vitest run --root ../.. packages/engine-sdk/src/workflow.test.ts packages/engine-sdk/src/worker.test.ts"
   },

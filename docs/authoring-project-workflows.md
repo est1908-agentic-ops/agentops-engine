@@ -5,8 +5,12 @@ Tier 1 (agentops.json + built-in workflows) covers most cases. Use Tier 2 when y
 ## Install (in your project)
 
 ```bash
-pnpm add @agentic-ops/engine-sdk @temporalio/workflow @temporalio/worker @temporalio/common @temporalio/client
+pnpm add @agentic-ops/engine-sdk @temporalio/workflow@1.19.0 @temporalio/worker@1.19.0 @temporalio/common@1.19.0 @temporalio/client@1.19.0
+pnpm add -D typescript@5.8.3
 ```
+
+The published SDK is checked against the exact Temporal 1.19.0 peer set and
+TypeScript 5.8.3. Keep those versions aligned when starting a project worker.
 
 ## Project layout
 
@@ -99,7 +103,10 @@ The engine resolves every requested ref to an immutable commit before returning
 the session. Treat the returned checkout paths and commits as an audit record,
 not as branches to publish. A session is for reading and running agents only:
 do not pass a GitHub token to the agent, and do not ask it to create commits,
-branches, pull requests, issues, or comments.
+branches, pull requests, issues, or comments. The SDK does separately expose
+privileged workflow activities such as issue and comment operations; they remain
+explicit workflow calls and are not capabilities granted to a `generic-task.md`
+agent job by a repository session.
 
 ```ts
 import { engineAgent, parseAgentResult } from '@agentic-ops/engine-sdk/workflow';
@@ -119,6 +126,7 @@ export async function compareRepositories() {
       taskId: 'compare-api-contracts',
       stage: 'agent',
       attempt: 1,
+      callIndex: 1,
       backend: 'claude',
       model: 'example-model',
       promptRef: 'generic-task.md',
@@ -138,6 +146,7 @@ export async function compareRepositories() {
       taskId: 'compare-api-contracts',
       stage: 'agent',
       attempt: 2,
+      callIndex: 2,
       backend: 'claude',
       model: 'example-model',
       promptRef: 'generic-task.md',
