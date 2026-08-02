@@ -84,6 +84,16 @@ export interface WorkflowClientLike {
   };
 }
 
+// Kept at the activities boundary so pure workspace code has no Temporal
+// dependency while a production coordinator can stop waiting on cancellation.
+export function getActivityCancellationSignal(): AbortSignal | undefined {
+  try {
+    return Context.current().cancellationSignal;
+  } catch {
+    return undefined;
+  }
+}
+
 function rethrowWorkspaceError(err: unknown): never {
   if (err instanceof WorkspaceError) {
     throw ApplicationFailure.create({

@@ -4,6 +4,8 @@ import { BatchV1Api, KubeConfig } from '@kubernetes/client-node';
 import { Pool } from 'pg';
 import {
   createActivities,
+  FlockRepositorySessionCoordinator,
+  getActivityCancellationSignal,
   FileManagedProjectStore,
   InMemoryFiledFindingStore,
   InMemoryStageResultStore,
@@ -78,6 +80,7 @@ export function buildActivityDependencies(
   // history. Callers in production (boot, in-cluster) pass requireRegistry=true
   // so this fails fast instead. Defaults false to preserve the local/test path.
   requireRegistry = false,
+  inCluster = false,
 ): ActivityWiring {
   if (registry.length === 0) {
     if (requireRegistry) {
@@ -134,6 +137,8 @@ export function buildActivityDependencies(
       cloneUrl: githubCloneUrl,
       workspacesDir,
       cacheDir,
+      repositorySessionCoordinator: inCluster ? new FlockRepositorySessionCoordinator() : undefined,
+      getAbortSignal: inCluster ? getActivityCancellationSignal : undefined,
     }),
   };
 }
@@ -398,9 +403,7 @@ export async function buildFiledFindingStore(): Promise<FiledFindingStore> {
 // undefined and resolveTier falls back to DEFAULT_TIERS (the hardcoded seed).
 const TIER_REFRESH_INTERVAL_MS = 60_000;
 
-export async function buildGlobalTiers(
-  pool: Pool | undefined,
-): Promise<{
+export async function buildGlobalTiers(pool: Pool | undefined): Promise<{
   tiers: Record<string, import('@agentops/contracts').ModelRef[]> | undefined;
   stop: () => void;
 }> {
@@ -461,6 +464,7 @@ async function main(): Promise<void> {
     registry,
     resolveWorkspacesDir(inCluster),
     resolveCacheDir(inCluster),
+    inCluster,
     inCluster,
   );
   console.log(

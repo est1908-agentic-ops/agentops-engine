@@ -12,6 +12,13 @@ import {
   type RepositorySession,
 } from '@agentops/contracts';
 import { SpawnCommandRunner, type CommandRunner } from './spawn-command-runner';
+import { WorkspaceError } from './workspace-error';
+import {
+  LocalRepositorySessionCoordinator,
+  type RepositorySessionCoordinator,
+} from './repository-session-coordinator';
+
+export { WorkspaceError } from './workspace-error';
 
 export interface WorkspaceManagerOptions {
   resolveGit: (repo: string) => GitCommandRunner;
@@ -22,9 +29,9 @@ export interface WorkspaceManagerOptions {
   commandRunner?: CommandRunner;
   now?: () => number;
   repositorySessionIdleMs?: number;
-  repositorySessionLockRetryMs?: number;
-  repositorySessionLockStaleMs?: number;
   repositorySessionStagingIdleMs?: number;
+  repositorySessionCoordinator?: RepositorySessionCoordinator;
+  getAbortSignal?: () => AbortSignal | undefined;
 }
 
 export interface PreparedWorkspace {
@@ -71,27 +78,9 @@ interface RepositorySessionStagingMetadata {
   workspaceRef: string;
 }
 
-interface RepositorySessionLease {
-  token: string;
-  acquiredAt: number;
-}
-
 const REPOSITORY_SESSION_IDLE_MS = 86_400_000;
-const REPOSITORY_SESSION_LOCK_STALE_MS = 7_200_000;
-const REPOSITORY_SESSION_LOCK_RETRY_MS = 100;
 const SESSION_METADATA_FILE = '.agentops-session.json';
 const STAGING_METADATA_FILE = '.agentops-staging.json';
-const LOCK_METADATA_FILE = 'lease.json';
-
-export class WorkspaceError extends Error {
-  constructor(
-    message: string,
-    readonly nonRetryable: boolean = false,
-  ) {
-    super(message);
-    this.name = 'WorkspaceError';
-  }
-}
 
 function sanitizeRepoSlug(repo: string): string {
   return repo.replace(/[^a-zA-Z0-9-]/g, '-');
@@ -140,14 +129,13 @@ export class WorkspaceManager implements Workspaces {
   private readonly resolveGitForProject?: (project: string) => GitCommandRunner;
   private readonly now: () => number;
   private readonly repositorySessionIdleMs: number;
-  private readonly repositorySessionLockRetryMs: number;
-  private readonly repositorySessionLockStaleMs: number;
   private readonly repositorySessionStagingIdleMs: number;
+  private readonly repositorySessionCoordinator: RepositorySessionCoordinator;
+  private readonly getAbortSignal?: () => AbortSignal | undefined;
   // These paths are engine-owned trusted roots.  We still lstat every mutable
   // component before destructive operations; Node has no portable openat/
   // O_NOFOLLOW API, so this is practical TOCTOU hardening rather than a claim
   // of cross-process race-proof filesystem access.
-  private readonly sessionLocks = new Map<string, Promise<void>>();
 
   constructor(opts: WorkspaceManagerOptions) {
     this.resolveGit = opts.resolveGit;
@@ -158,12 +146,11 @@ export class WorkspaceManager implements Workspaces {
     this.resolveGitForProject = opts.resolveGitForProject;
     this.now = opts.now ?? Date.now;
     this.repositorySessionIdleMs = opts.repositorySessionIdleMs ?? REPOSITORY_SESSION_IDLE_MS;
-    this.repositorySessionLockRetryMs =
-      opts.repositorySessionLockRetryMs ?? REPOSITORY_SESSION_LOCK_RETRY_MS;
-    this.repositorySessionLockStaleMs =
-      opts.repositorySessionLockStaleMs ?? REPOSITORY_SESSION_LOCK_STALE_MS;
     this.repositorySessionStagingIdleMs =
-      opts.repositorySessionStagingIdleMs ?? REPOSITORY_SESSION_LOCK_STALE_MS;
+      opts.repositorySessionStagingIdleMs ?? REPOSITORY_SESSION_IDLE_MS;
+    this.repositorySessionCoordinator =
+      opts.repositorySessionCoordinator ?? new LocalRepositorySessionCoordinator();
+    this.getAbortSignal = opts.getAbortSignal;
   }
 
   async prepare(
@@ -460,7 +447,7 @@ export class WorkspaceManager implements Workspaces {
               this.now() - metadata.lastUsedAt > this.repositorySessionIdleMs
             ) {
               // This is deliberately the metadata read used for the decision:
-              // another PVC worker can only touch before or after this lease.
+              // another worker can only touch before or after the kernel lock.
               await this.removeSessionDirectory(workspaceRef);
               return true;
             }
@@ -746,19 +733,20 @@ export class WorkspaceManager implements Workspaces {
           const directory = await lstat(stagingPath);
           if (directory.isSymbolicLink() || !directory.isDirectory()) continue;
           const metadata = await this.readStagingMetadata(stagingPath);
-          const lock = await this.acquireFilesystemSessionLock(metadata.workspaceRef, false);
-          if (!lock) continue;
           try {
-            const fresh = await this.readStagingMetadata(stagingPath);
-            if (
-              (hasLiveProjects && !live.has(fresh.ownerProject)) ||
-              this.now() - fresh.createdAt > this.repositorySessionStagingIdleMs
-            ) {
-              await this.removeOwnedStagingPath(stagingPath);
-              removed.push(stagingPath);
-            }
-          } finally {
-            await this.releaseFilesystemSessionLock(lock).catch(() => {});
+            await this.withSessionLock(metadata.workspaceRef, async () => {
+              const fresh = await this.readStagingMetadata(stagingPath);
+              if (
+                (hasLiveProjects && !live.has(fresh.ownerProject)) ||
+                this.now() - fresh.createdAt > this.repositorySessionStagingIdleMs
+              ) {
+                await this.removeOwnedStagingPath(stagingPath);
+                removed.push(stagingPath);
+              }
+            });
+          } catch {
+            // A concurrent creator owns the staging directory, or it stopped
+            // being a trusted path before the coordinator admitted us.
           }
         } catch {
           // A malformed or symlinked marker is evidence, never delete authority.
@@ -861,126 +849,35 @@ export class WorkspaceManager implements Workspaces {
   }
 
   private async withSessionLock<T>(workspaceRef: string, operation: () => Promise<T>): Promise<T> {
-    const key = resolve(workspaceRef);
-    const previous = this.sessionLocks.get(key) ?? Promise.resolve();
-    let release!: () => void;
-    const gate = new Promise<void>((resolveGate) => {
-      release = resolveGate;
+    // Validate mutable session-root components before creating anything in the
+    // parallel lock namespace. The coordinator owns the stable lock inode and
+    // deliberately never removes it.
+    await this.assertSessionCreationPath(workspaceRef);
+    await this.assertLockCreationPath(workspaceRef);
+    return this.repositorySessionCoordinator.withLock(this.lockPath(workspaceRef), operation, {
+      signal: this.getAbortSignal?.(),
     });
-    const tail = previous.catch(() => {}).then(() => gate);
-    this.sessionLocks.set(key, tail);
-    await previous.catch(() => {});
-    try {
-      // Validate mutable session-root components before creating anything in
-      // the parallel lock namespace; this prevents mkdir from following a
-      // substituted owner/root symlink on a shared PVC.
-      await this.assertSessionCreationPath(workspaceRef);
-      const lease = await this.acquireFilesystemSessionLock(workspaceRef);
-      try {
-        return await operation();
-      } finally {
-        await this.releaseFilesystemSessionLock(lease!).catch(() => {});
-      }
-    } finally {
-      release();
-      if (this.sessionLocks.get(key) === tail) this.sessionLocks.delete(key);
-    }
   }
 
   private lockPath(workspaceRef: string): string {
     this.assertSessionPath(workspaceRef);
     const [owner, task] = resolve(workspaceRef).split(sep).slice(-2);
+    // Lock files are intentionally permanent, tiny safety metadata. Reusing
+    // their inode prevents a former holder from ever releasing a successor.
     return join(this.workspacesDir, 'repository-sessions', '.locks', owner!, `${task!}.lock`);
   }
 
-  private async acquireFilesystemSessionLock(
-    workspaceRef: string,
-    wait = true,
-  ): Promise<{ path: string; token: string } | undefined> {
-    const lockPath = this.lockPath(workspaceRef);
+  private async assertLockCreationPath(workspaceRef: string): Promise<void> {
     const lockRoot = join(this.workspacesDir, 'repository-sessions', '.locks');
-    await mkdir(lockRoot, { recursive: true });
-    const root = await lstat(lockRoot);
-    if (root.isSymbolicLink() || !root.isDirectory())
-      throw new WorkspaceError('repository session lock root is not a real directory', true);
-    const ownerLocksPath = join(lockRoot, resolve(workspaceRef).split(sep).at(-2)!);
-    await mkdir(ownerLocksPath, { recursive: true });
-    const ownerLocks = await lstat(ownerLocksPath);
-    if (ownerLocks.isSymbolicLink() || !ownerLocks.isDirectory())
-      throw new WorkspaceError('repository session lock owner is not a real directory', true);
-    for (;;) {
-      const token = randomUUID();
-      try {
-        await mkdir(lockPath);
-        try {
-          await this.writeRegularJson(join(lockPath, LOCK_METADATA_FILE), {
-            token,
-            acquiredAt: this.now(),
-          });
-        } catch (error) {
-          await rm(lockPath, { recursive: true, force: true }).catch(() => {});
-          throw error;
-        }
-        return { path: lockPath, token };
-      } catch (error) {
-        if ((error as { code?: string }).code !== 'EEXIST') throw error;
+    const owner = resolve(workspaceRef).split(sep).at(-2)!;
+    const ownerLocksPath = join(lockRoot, owner);
+    for (const path of [lockRoot, ownerLocksPath]) {
+      await mkdir(path, { recursive: true });
+      const entry = await lstat(path);
+      if (entry.isSymbolicLink() || !entry.isDirectory()) {
+        throw new WorkspaceError('repository session lock path is not a real directory', true);
       }
-      const stale = await this.isStaleLock(lockPath);
-      if (stale) {
-        const reaped = `${lockPath}.reap-${randomUUID()}`;
-        try {
-          await rename(lockPath, reaped);
-          await rm(reaped, { recursive: true, force: true });
-          continue;
-        } catch (error) {
-          if ((error as { code?: string }).code === 'ENOENT') continue;
-          if (!wait) return undefined;
-        }
-      }
-      if (!wait) return undefined;
-      await new Promise<void>((resolveDelay) =>
-        setTimeout(resolveDelay, this.repositorySessionLockRetryMs),
-      );
     }
-  }
-
-  private async isStaleLock(lockPath: string): Promise<boolean> {
-    try {
-      const lock = await lstat(lockPath);
-      if (lock.isSymbolicLink() || !lock.isDirectory())
-        throw new WorkspaceError('repository session lock is malformed', true);
-      const lease = await this.readRegularJson<RepositorySessionLease>(
-        join(lockPath, LOCK_METADATA_FILE),
-      );
-      if (
-        typeof lease.token !== 'string' ||
-        !/^[0-9a-f-]{36}$/i.test(lease.token) ||
-        !Number.isFinite(lease.acquiredAt)
-      )
-        throw new WorkspaceError('repository session lock lease is malformed', true);
-      return this.now() - lease.acquiredAt > this.repositorySessionLockStaleMs;
-    } catch (error) {
-      if ((error as { code?: string }).code === 'ENOENT') return false;
-      throw error;
-    }
-  }
-
-  private async releaseFilesystemSessionLock(lease: {
-    path: string;
-    token: string;
-  }): Promise<void> {
-    const current = await this.readRegularJson<RepositorySessionLease>(
-      join(lease.path, LOCK_METADATA_FILE),
-    );
-    if (current.token !== lease.token) return;
-    const released = `${lease.path}.release-${lease.token}`;
-    try {
-      await rename(lease.path, released);
-    } catch (error) {
-      if ((error as { code?: string }).code === 'ENOENT') return;
-      throw error;
-    }
-    await rm(released, { recursive: true, force: true });
   }
 
   private async writeRegularJson(path: string, value: unknown): Promise<void> {

@@ -15,6 +15,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SpawnGitCommandRunner } from './spawn-git-command-runner';
 import { repositorySessionIdentity, WorkspaceManager } from './workspace-manager';
+import { LocalRepositorySessionCoordinator } from './repository-session-coordinator';
 
 let root: string;
 let remoteDir: string;
@@ -550,6 +551,7 @@ describe('WorkspaceManager — repository sessions', () => {
   });
 
   it('serializes matching creators across manager instances for the entire clone', async () => {
+    const coordinator = new LocalRepositorySessionCoordinator();
     let clonesStarted = 0;
     let releaseClones: () => void;
     const clonesReleased = new Promise<void>((resolve) => {
@@ -579,6 +581,7 @@ describe('WorkspaceManager — repository sessions', () => {
       cacheDir,
       workspacesDir,
       cloneUrl: () => remoteDir,
+      repositorySessionCoordinator: coordinator,
     });
     const secondManager = new WorkspaceManager({
       resolveGit: () => git,
@@ -586,7 +589,7 @@ describe('WorkspaceManager — repository sessions', () => {
       cacheDir,
       workspacesDir,
       cloneUrl: () => remoteDir,
-      repositorySessionLockRetryMs: 1,
+      repositorySessionCoordinator: coordinator,
     });
     const request = { taskId: 'concurrent', repositories: [{ repo: 'acme/app' }] };
     const expectedPath = join(
@@ -611,7 +614,6 @@ describe('WorkspaceManager — repository sessions', () => {
   });
 
   it('keeps the winner intact when concurrent creators have different requests', async () => {
-    let clonesStarted = 0;
     let releaseClones: () => void;
     const clonesReleased = new Promise<void>((resolve) => {
       releaseClones = resolve;
@@ -623,7 +625,6 @@ describe('WorkspaceManager — repository sessions', () => {
     const git = {
       run: async (args: string[]) => {
         if (args[0] === 'clone') {
-          clonesStarted++;
           firstCloning();
           await clonesReleased;
         }
@@ -684,7 +685,7 @@ describe('WorkspaceManager — repository sessions', () => {
     });
   });
 
-  it('reclaims stale crashed staging only after its PVC lease expires', async () => {
+  it('reclaims stale crashed staging after its staging timeout', async () => {
     let time = 10;
     const manager = new WorkspaceManager({
       resolveGit: () => new SpawnGitCommandRunner(),
@@ -693,7 +694,6 @@ describe('WorkspaceManager — repository sessions', () => {
       workspacesDir,
       cloneUrl: () => remoteDir,
       now: () => time,
-      repositorySessionLockStaleMs: 20,
       repositorySessionStagingIdleMs: 20,
     });
     const owner = repositorySessionIdentity('gone');
@@ -716,17 +716,10 @@ describe('WorkspaceManager — repository sessions', () => {
         workspaceRef: join(workspacesDir, 'repository-sessions', owner, task),
       }),
     );
-    const lock = join(workspacesDir, 'repository-sessions', '.locks', owner, `${task}.lock`);
-    mkdirSync(lock, { recursive: true });
-    writeFileSync(
-      join(lock, 'lease.json'),
-      JSON.stringify({ token: crypto.randomUUID(), acquiredAt: 0 }),
-    );
-
-    await manager.pruneOrphans([], []);
+    await manager.pruneOrphans([]);
     expect(existsSync(staging)).toBe(true);
     time = 21;
-    const { removed } = await manager.pruneOrphans([], []);
+    const { removed } = await manager.pruneOrphans([]);
     expect(existsSync(staging)).toBe(false);
     expect(removed).toContain(staging);
   });
