@@ -1,16 +1,25 @@
 import { z } from 'zod';
 import { GitRefNameSchema } from './git-ref';
 
+const isSafeRepositoryPathSegment = (segment: string): boolean =>
+  /^[A-Za-z0-9_.-]+$/.test(segment) && segment !== '.' && segment !== '..';
+
 const ShortRepositorySchema = z
   .string()
-  .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'Repository must be in owner/name form.');
+  .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'Repository must be in owner/name form.')
+  .refine((repo) => repo.split('/').every(isSafeRepositoryPathSegment), {
+    message: 'Repository owner and name must not be . or ...',
+  });
 
 const RepositoryRelativePathSchema = z
   .string()
   .regex(
     /^repositories\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/,
     'Repository checkout path must be under repositories/owner/name.',
-  );
+  )
+  .refine((relativePath) => relativePath.split('/').slice(1).every(isSafeRepositoryPathSegment), {
+    message: 'Repository checkout path segments must not be . or ...',
+  });
 
 export const RepositorySessionRepositoryInputSchema = z
   .object({
@@ -18,7 +27,9 @@ export const RepositorySessionRepositoryInputSchema = z
     ref: GitRefNameSchema.optional(),
   })
   .strict();
-export type RepositorySessionRepositoryInput = z.infer<typeof RepositorySessionRepositoryInputSchema>;
+export type RepositorySessionRepositoryInput = z.infer<
+  typeof RepositorySessionRepositoryInputSchema
+>;
 
 export const CreateRepositorySessionRequestSchema = z
   .object({
@@ -57,8 +68,33 @@ export const RepositorySessionSchema = z
     workspaceRef: z.string().min(1),
     repositories: z.array(RepositorySessionRepositorySchema).min(1).max(5),
   })
-  .strict();
+  .strict()
+  .superRefine(({ repositories }, context) => {
+    const seen = new Set<string>();
+
+    repositories.forEach(({ repo, relativePath }, index) => {
+      if (relativePath !== `repositories/${repo}`) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Repository checkout path must match its repository.',
+          path: ['repositories', index, 'relativePath'],
+        });
+      }
+
+      const normalizedRepo = repo.toLowerCase();
+      if (seen.has(normalizedRepo)) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'Repositories must be distinct, ignoring case.',
+          path: ['repositories', index, 'repo'],
+        });
+      }
+      seen.add(normalizedRepo);
+    });
+  });
 export type RepositorySession = z.infer<typeof RepositorySessionSchema>;
 
-export const CleanupRepositorySessionRequestSchema = z.object({ workspaceRef: z.string().min(1) }).strict();
+export const CleanupRepositorySessionRequestSchema = z
+  .object({ workspaceRef: z.string().min(1) })
+  .strict();
 export type CleanupRepositorySessionRequest = z.infer<typeof CleanupRepositorySessionRequestSchema>;

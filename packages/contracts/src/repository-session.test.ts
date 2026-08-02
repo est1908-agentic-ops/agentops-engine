@@ -98,6 +98,15 @@ describe('CreateRepositorySessionRequestSchema', () => {
     ).toBe(false);
   });
 
+  it.each(['./app', '../app', 'acme/.', 'acme/..'])('rejects unsafe repository path %s', (repo) => {
+    expect(
+      CreateRepositorySessionRequestSchema.safeParse({
+        taskId: 'rollbar-123',
+        repositories: [{ repo }],
+      }).success,
+    ).toBe(false);
+  });
+
   it('rejects unknown top-level request fields', () => {
     expect(
       CreateRepositorySessionRequestSchema.safeParse({
@@ -154,6 +163,47 @@ describe('RepositorySessionSchema', () => {
       RepositorySessionSchema.safeParse({
         ...session,
         repositories: [{ ...session.repositories[0], relativePath: '../acme/app' }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it.each([
+    { repo: '../app', relativePath: 'repositories/acme/app' },
+    { repo: 'acme/..', relativePath: 'repositories/acme/app' },
+    { repo: 'acme/app', relativePath: 'repositories/../victim' },
+    { repo: 'acme/app', relativePath: 'repositories/acme/..' },
+  ])('rejects unsafe repository and checkout path segments', ({ repo, relativePath }) => {
+    expect(
+      RepositorySessionSchema.safeParse({
+        workspaceRef: '/workspace/task',
+        repositories: [{ repo, relativePath, commit: 'a'.repeat(40) }],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('requires each checkout path to match its repository exactly', () => {
+    expect(
+      RepositorySessionSchema.safeParse({
+        workspaceRef: '/workspace/task',
+        repositories: [
+          {
+            repo: 'acme/app',
+            relativePath: 'repositories/acme/other',
+            commit: 'a'.repeat(40),
+          },
+        ],
+      }).success,
+    ).toBe(false);
+  });
+
+  it('rejects case-insensitive duplicate repositories', () => {
+    expect(
+      RepositorySessionSchema.safeParse({
+        workspaceRef: '/workspace/task',
+        repositories: [
+          { repo: 'Acme/App', relativePath: 'repositories/Acme/App', commit: 'a'.repeat(40) },
+          { repo: 'acme/app', relativePath: 'repositories/acme/app', commit: 'b'.repeat(40) },
+        ],
       }).success,
     ).toBe(false);
   });
