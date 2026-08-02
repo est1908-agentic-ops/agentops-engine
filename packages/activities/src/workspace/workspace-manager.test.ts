@@ -1073,4 +1073,35 @@ describe('WorkspaceManager — repository sessions', () => {
       }),
     ).rejects.toMatchObject({ nonRetryable: true });
   });
+
+  it('never follows a symlinked staging directory while removing a final session', async () => {
+    const { manager } = buildManager();
+    const session = await manager.prepareRepositorySession('hub', {
+      taskId: 'staging-link',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    const prunable = await manager.prepareRepositorySession('hub', {
+      taskId: 'staging-link-prune',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    const outside = join(root, 'outside-staging');
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'sentinel'), 'keep');
+    const staging = join(
+      workspacesDir,
+      'repository-sessions',
+      repositorySessionIdentity('hub'),
+      '.staging',
+    );
+    rmSync(staging, { recursive: true, force: true });
+    symlinkSync(outside, staging);
+
+    await expect(
+      manager.cleanupRepositorySession('hub', session.workspaceRef),
+    ).resolves.toBeUndefined();
+    await manager.pruneOrphans([], []);
+    expect(readFileSync(join(outside, 'sentinel'), 'utf8')).toBe('keep');
+    expect(existsSync(session.workspaceRef)).toBe(false);
+    expect(existsSync(prunable.workspaceRef)).toBe(false);
+  });
 });

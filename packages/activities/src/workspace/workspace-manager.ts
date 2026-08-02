@@ -705,9 +705,13 @@ export class WorkspaceManager implements Workspaces {
   private async removeSessionDirectory(workspaceRef: string): Promise<void> {
     await this.assertExistingSessionDirectory(workspaceRef);
     const ownerPath = resolve(workspaceRef).split(sep).slice(0, -1).join(sep);
-    const stagingRoot = join(ownerPath, '.staging');
-    await mkdir(stagingRoot, { recursive: true });
-    const moved = join(stagingRoot, `.removed-${randomUUID()}`);
+    // Final sessions never use .staging as a trash location: that directory is
+    // intentionally writable during clone creation and must not become a path
+    // traversal boundary for a destructive operation.
+    const owner = await lstat(ownerPath);
+    if (owner.isSymbolicLink() || !owner.isDirectory())
+      throw new WorkspaceError('repository session owner is not a real directory', true);
+    const moved = join(ownerPath, `.agentops-removed-${randomUUID()}`);
     await rename(workspaceRef, moved);
     await rm(moved, { recursive: true, force: true });
   }
