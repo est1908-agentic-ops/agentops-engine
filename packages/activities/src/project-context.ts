@@ -26,6 +26,13 @@ function normalizedRepositoryName(repo: string): string {
 export function assertProjectCanReadRepositories<
   T extends { project: string; repo: string; readRepositories: string[] },
 >(repos: string[], registry: T[]): T {
+  if (repos.length === 0) {
+    throw ApplicationFailure.nonRetryable(
+      'repository read request must include at least one repository',
+      'ProjectAuthorizationError',
+    );
+  }
+
   const callerProject = getCallerProject();
   if (!callerProject) {
     throw ApplicationFailure.nonRetryable(

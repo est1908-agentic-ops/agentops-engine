@@ -69,6 +69,15 @@ function expectAuthorizationFailure(action: () => unknown, message: RegExp): voi
 }
 
 describe('repository-session authorization guard', () => {
+  it('rejects an empty repository request', () => {
+    projectContext.run({ project: 'hub' }, () => {
+      expectAuthorizationFailure(
+        () => assertProjectCanReadRepositories([], resolvedRegistry),
+        /at least one repository/i,
+      );
+    });
+  });
+
   it('allows the calling project to read its primary repository', () => {
     projectContext.run({ project: 'hub' }, () => {
       const entry = assertProjectCanReadRepositories(
