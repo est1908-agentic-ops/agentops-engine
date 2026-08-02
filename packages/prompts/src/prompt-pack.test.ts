@@ -70,6 +70,19 @@ describe('PromptPack', () => {
     expect(rendered).toContain('FINDINGS:');
   });
 
+  it('renders caller instructions and the exact JSON sentinel contract', () => {
+    const rendered = new PromptPack().render('generic-task.md', {
+      taskId: 't1',
+      instructions: 'Inspect both repositories.',
+      outputContract: '{"verdict":"string"}',
+    });
+    expect(rendered).toContain('Inspect both repositories.');
+    expect(rendered).toContain('AGENT_RESULT:');
+    expect(rendered.trimEnd().split('\n').at(-1)).toBe(
+      'AGENT_RESULT: {"replace":"with the required JSON value"}',
+    );
+  });
+
   it('throws a clear error for an unknown template ref', () => {
     const pack = new PromptPack();
     expect(() => pack.render('nonexistent.md', {})).toThrow(/nonexistent\.md/);

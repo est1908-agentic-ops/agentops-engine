@@ -1,4 +1,5 @@
 import { trace } from '@opentelemetry/api';
+import { Buffer } from 'node:buffer';
 import {
   K8sWorkspaceConfigurationError,
   ProcessCliAuthError,
@@ -133,6 +134,30 @@ function parseSessionInput<T>(schema: SessionInputSchema<T>, raw: unknown): T {
 // doesn't reliably surface a Retry-After, so a fixed wait lets Temporal's
 // activity retry absorb the cooldown. Chart/operator-tunable later (SP3).
 const RATE_LIMIT_RETRY_DELAY_MS = 60_000;
+const MAX_GENERIC_INSTRUCTIONS_BYTES = 32 * 1024;
+const MAX_GENERIC_OUTPUT_CONTRACT_BYTES = 16 * 1024;
+
+function validateGenericPromptContext(req: AgentRunRequest): void {
+  if (req.promptRef !== 'generic-task.md') {
+    return;
+  }
+
+  const { taskId, instructions, outputContract } = req.promptContext;
+  const valid =
+    typeof taskId === 'string' &&
+    taskId.trim().length > 0 &&
+    typeof instructions === 'string' &&
+    typeof outputContract === 'string' &&
+    Buffer.byteLength(instructions, 'utf8') <= MAX_GENERIC_INSTRUCTIONS_BYTES &&
+    Buffer.byteLength(outputContract, 'utf8') <= MAX_GENERIC_OUTPUT_CONTRACT_BYTES;
+
+  if (!valid) {
+    throw ApplicationFailure.nonRetryable(
+      'generic-task.md requires a non-empty string taskId plus string instructions (at most 32 KiB UTF-8) and outputContract (at most 16 KiB UTF-8)',
+      'GenericPromptValidationError',
+    );
+  }
+}
 
 export function createActivities(deps: ActivityDependencies) {
   const heartbeat = deps.heartbeat ?? ((details: unknown) => Context.current().heartbeat(details));
@@ -140,6 +165,8 @@ export function createActivities(deps: ActivityDependencies) {
     async runAgent(
       req: AgentRunRequest,
     ): Promise<AgentRunResult & { promptHash: string; promptSource: string }> {
+      validateGenericPromptContext(req);
+
       // Resolve the model: either via a tier ref (the normal path -- the
       // workflow sends a tier name, the activity resolves it to an ordered
       // ModelRef[] whose [0] is the primary and the rest is the

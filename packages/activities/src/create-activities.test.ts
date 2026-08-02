@@ -572,6 +572,64 @@ describe('createActivities — workspace lifecycle', () => {
 });
 
 describe('createActivities — prompt rendering', () => {
+  it.each([
+    ['instructions', 'x'.repeat(32 * 1024 + 1)],
+    ['instructions', '😀'.repeat(8193)],
+    ['outputContract', 'x'.repeat(16 * 1024 + 1)],
+  ])('rejects oversized generic prompt %s before backend dispatch', async (field, value) => {
+    const run = vi.fn<AgentBackend['run']>();
+    const activities = createActivities({
+      ...buildDeps(),
+      backends: { stub: { run } },
+    });
+
+    const error = await activities
+      .runAgent({
+        taskId: 't1',
+        stage: 'implement',
+        attempt: 1,
+        callIndex: 1,
+        backend: 'stub',
+        model: 'stub-v1',
+        promptRef: 'generic-task.md',
+        promptContext: {
+          taskId: 't1',
+          instructions: 'inspect',
+          outputContract: '{"ok":true}',
+          [field]: value,
+        },
+        workspaceRef: 'demo/repo',
+        limits: { maxTokens: 1000, timeoutMs: 60_000 },
+      })
+      .catch((cause: unknown) => cause);
+
+    expect(error).toMatchObject({ type: 'GenericPromptValidationError', nonRetryable: true });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed generic prompt context before backend dispatch', async () => {
+    const run = vi.fn<AgentBackend['run']>();
+    const activities = createActivities({ ...buildDeps(), backends: { stub: { run } } });
+
+    const error = await activities
+      .runAgent({
+        taskId: 't1',
+        stage: 'implement',
+        attempt: 1,
+        callIndex: 1,
+        backend: 'stub',
+        model: 'stub-v1',
+        promptRef: 'generic-task.md',
+        promptContext: { taskId: '', instructions: 1, outputContract: null },
+        workspaceRef: 'demo/repo',
+        limits: { maxTokens: 1000, timeoutMs: 60_000 },
+      })
+      .catch((cause: unknown) => cause);
+
+    expect(error).toMatchObject({ type: 'GenericPromptValidationError', nonRetryable: true });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it('renders promptRef/promptContext into prompt text before calling the backend', async () => {
     let receivedPrompt = '';
     const fakeBackend: AgentBackend = {
