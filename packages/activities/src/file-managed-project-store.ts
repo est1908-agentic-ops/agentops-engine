@@ -59,20 +59,19 @@ function parseReadRepositories(
       );
     }
 
-    const shortRepo = item.trim();
+    if (item !== item.trim()) {
+      throw new Error(
+        `FileManagedProjectStore: "${entry}" (slug "${slug}") field "readRepositories[${index}]" must be a short owner/name repository`,
+      );
+    }
     try {
-      parseRepoSlug(shortRepo);
+      parseRepoSlug(item);
     } catch {
       throw new Error(
         `FileManagedProjectStore: "${entry}" (slug "${slug}") field "readRepositories[${index}]" must be a short owner/name repository`,
       );
     }
-    const normalizedRepo = normalizeRepo(shortRepo).toLowerCase();
-    if (normalizedRepo !== shortRepo.toLowerCase()) {
-      throw new Error(
-        `FileManagedProjectStore: "${entry}" (slug "${slug}") field "readRepositories[${index}]" must be a short owner/name repository`,
-      );
-    }
+    const normalizedRepo = normalizeRepo(item).toLowerCase();
     if (normalizedRepo === normalizedPrimaryRepo) {
       throw new Error(
         `FileManagedProjectStore: "${entry}" (slug "${slug}") field "readRepositories" must not include the primary repository`,

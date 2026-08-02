@@ -100,6 +100,11 @@ describe('FileManagedProjectStore', () => {
     ['contains a non-string value', ['acme/shared', 42]],
     ['contains an empty value', ['acme/shared', '']],
     ['contains an invalid repository', ['acme/shared', 'acme/shared/extra']],
+    ['contains a repository query', ['acme/repo?ref=main']],
+    ['contains whitespace in a repository segment', ['acme /repo']],
+    ['contains surrounding whitespace', [' acme/repo']],
+    ['contains a current-directory repository segment', ['./repo']],
+    ['contains a parent-directory repository segment', ['acme/..']],
     ['contains a full URL', ['https://github.com/acme/shared']],
   ])('rejects readRepositories when it %s', async (_description, readRepositories) => {
     dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));

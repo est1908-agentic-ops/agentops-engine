@@ -970,6 +970,7 @@ describe('createActivities — resolveRepoConfig', () => {
         repo: 'est1908/agentops-engine',
         trackerType: 'github',
         token: 'fake',
+        readRepositories: [],
       },
     ];
     const activities = createActivities(deps);
@@ -1003,7 +1004,15 @@ describe('createActivities — resolveRepoConfig', () => {
     const deps = {
       ...buildDeps(),
       tracker,
-      registry: [{ project: 'acme', repo: 'acme/web', trackerType: 'github' as const, token: 't' }],
+      registry: [
+        {
+          project: 'acme',
+          repo: 'acme/web',
+          trackerType: 'github' as const,
+          token: 't',
+          readRepositories: [],
+        },
+      ],
     };
     const activities = createActivities(deps);
     await expect(
@@ -1030,7 +1039,15 @@ describe('createActivities — resolveRepoConfig', () => {
   it('listManagedProjects returns registry {project,repo} pairs', async () => {
     const deps = {
       ...buildDeps(),
-      registry: [{ project: 'acme', repo: 'acme/web', token: 't', trackerType: 'github' as const }],
+      registry: [
+        {
+          project: 'acme',
+          repo: 'acme/web',
+          token: 't',
+          trackerType: 'github' as const,
+          readRepositories: [],
+        },
+      ],
     };
     const activities = createActivities(deps);
     expect(await activities.listManagedProjects()).toEqual([{ project: 'acme', repo: 'acme/web' }]);

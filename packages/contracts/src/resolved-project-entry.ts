@@ -9,9 +9,7 @@
 type BaseResolvedProjectEntry = {
   project: string;
   repo: string;
-  // Optional for compatibility with manually constructed legacy entries;
-  // registry resolution always defaults this to an empty array.
-  readRepositories?: string[];
+  readRepositories: string[];
   token: string;
 };
 
