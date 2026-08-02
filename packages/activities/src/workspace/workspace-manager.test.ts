@@ -6,6 +6,7 @@ import {
   rmSync,
   existsSync,
   readFileSync,
+  renameSync,
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
@@ -972,5 +973,85 @@ describe('WorkspaceManager — repository sessions', () => {
     time++;
     await manager.pruneOrphans([], ['live']);
     expect(existsSync(expired.workspaceRef)).toBe(false);
+  });
+
+  it('rechecks session metadata under its lock after a concurrent touch', async () => {
+    let time = 0;
+    let releaseCandidate!: () => void;
+    let candidateSeen!: () => void;
+    const candidate = new Promise<void>((resolveCandidate) => {
+      candidateSeen = resolveCandidate;
+    });
+    const pause = new Promise<void>((resolvePause) => {
+      releaseCandidate = resolvePause;
+    });
+    const manager = new WorkspaceManager({
+      resolveGit: () => new SpawnGitCommandRunner(),
+      resolveGitForProject: () => new SpawnGitCommandRunner(),
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+      now: () => time,
+      onRepositorySessionPruneCandidate: async () => {
+        candidateSeen();
+        await pause;
+      },
+    });
+    const session = await manager.prepareRepositorySession('hub', {
+      taskId: 'racing',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    time = 86_400_001;
+    const pruning = manager.pruneOrphans([], ['hub']);
+    await candidate;
+    time++;
+    await manager.touchRepositorySession('hub', session.workspaceRef);
+    releaseCandidate();
+    await pruning;
+    expect(existsSync(session.workspaceRef)).toBe(true);
+    expect(
+      JSON.parse(readFileSync(join(session.workspaceRef, '.agentops-session.json'), 'utf8'))
+        .lastUsedAt,
+    ).toBe(time);
+  });
+
+  it('serializes cleanup and touch so the later touch is a no-op', async () => {
+    const { manager } = buildManager();
+    const session = await manager.prepareRepositorySession('hub', {
+      taskId: 'cleanup-race',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    await Promise.all([
+      manager.cleanupRepositorySession('hub', session.workspaceRef),
+      manager.touchRepositorySession('hub', session.workspaceRef),
+    ]);
+    expect(existsSync(session.workspaceRef)).toBe(false);
+  });
+
+  it('never follows a symlinked repository-session owner directory', async () => {
+    const { manager } = buildManager();
+    const session = await manager.prepareRepositorySession('hub', {
+      taskId: 'owner-link',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    const ownerPath = join(workspacesDir, 'repository-sessions', repositorySessionIdentity('hub'));
+    const outside = join(root, 'outside-owner');
+    // Preserve a valid session outside the trusted root, then substitute the owner component.
+    renameSync(ownerPath, outside);
+    symlinkSync(outside, ownerPath);
+    await expect(manager.touchRepositorySession('hub', session.workspaceRef)).rejects.toMatchObject(
+      { nonRetryable: true },
+    );
+    await expect(
+      manager.cleanupRepositorySession('hub', session.workspaceRef),
+    ).rejects.toMatchObject({ nonRetryable: true });
+    await manager.pruneOrphans([], []);
+    expect(existsSync(join(outside, repositorySessionIdentity('owner-link')))).toBe(true);
+    await expect(
+      manager.prepareRepositorySession('hub', {
+        taskId: 'another',
+        repositories: [{ repo: 'acme/app' }],
+      }),
+    ).rejects.toMatchObject({ nonRetryable: true });
   });
 });

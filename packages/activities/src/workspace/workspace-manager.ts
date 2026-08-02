@@ -1,16 +1,6 @@
 import { existsSync } from 'node:fs';
-import { createHash } from 'node:crypto';
-import {
-  lstat,
-  mkdir,
-  mkdtemp,
-  readFile,
-  readdir,
-  rename,
-  rm,
-  stat,
-  writeFile,
-} from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import type { GitCommandRunner } from '@agentops/ports';
@@ -32,6 +22,8 @@ export interface WorkspaceManagerOptions {
   commandRunner?: CommandRunner;
   now?: () => number;
   repositorySessionIdleMs?: number;
+  /** Test/instrumentation seam invoked after prune discovers a session, before its locked recheck. */
+  onRepositorySessionPruneCandidate?: (workspaceRef: string) => Promise<void> | void;
 }
 
 export interface PreparedWorkspace {
@@ -130,6 +122,14 @@ export class WorkspaceManager implements Workspaces {
   private readonly resolveGitForProject?: (project: string) => GitCommandRunner;
   private readonly now: () => number;
   private readonly repositorySessionIdleMs: number;
+  private readonly onRepositorySessionPruneCandidate?: (
+    workspaceRef: string,
+  ) => Promise<void> | void;
+  // These paths are engine-owned trusted roots.  We still lstat every mutable
+  // component before destructive operations; Node has no portable openat/
+  // O_NOFOLLOW API, so this is practical TOCTOU hardening rather than a claim
+  // of cross-process race-proof filesystem access.
+  private readonly sessionLocks = new Map<string, Promise<void>>();
 
   constructor(opts: WorkspaceManagerOptions) {
     this.resolveGit = opts.resolveGit;
@@ -140,6 +140,7 @@ export class WorkspaceManager implements Workspaces {
     this.resolveGitForProject = opts.resolveGitForProject;
     this.now = opts.now ?? Date.now;
     this.repositorySessionIdleMs = opts.repositorySessionIdleMs ?? REPOSITORY_SESSION_IDLE_MS;
+    this.onRepositorySessionPruneCandidate = opts.onRepositorySessionPruneCandidate;
   }
 
   async prepare(
@@ -280,9 +281,13 @@ export class WorkspaceManager implements Workspaces {
   ): Promise<RepositorySession> {
     const workspaceRef = this.repositorySessionPath(ownerProject, req.taskId);
     this.assertSessionPath(workspaceRef);
-    if (existsSync(workspaceRef)) {
-      return this.readMatchingRepositorySession(workspaceRef, ownerProject, req);
-    }
+    const existing = await this.withSessionLock(workspaceRef, async () => {
+      await this.assertSessionCreationPath(workspaceRef);
+      return existsSync(workspaceRef)
+        ? this.readMatchingRepositorySession(workspaceRef, ownerProject, req)
+        : undefined;
+    });
+    if (existing) return existing;
     if (!this.resolveGitForProject) {
       throw new WorkspaceError('repository sessions require a project Git runner resolver', true);
     }
@@ -327,22 +332,22 @@ export class WorkspaceManager implements Workspaces {
         requestIdentity,
       });
       await this.readSessionMetadata(stagingPath, true, workspaceRef);
-      try {
-        await rename(stagingPath, workspaceRef);
-        stagingPath = undefined;
-      } catch (error) {
-        if (
-          (error as { code?: string }).code !== 'EEXIST' &&
-          (error as { code?: string }).code !== 'ENOTEMPTY'
-        ) {
-          throw error;
+      return await this.withSessionLock(workspaceRef, async () => {
+        await this.assertSessionCreationPath(workspaceRef);
+        if (existsSync(workspaceRef)) {
+          const matching = await this.readMatchingRepositorySession(
+            workspaceRef,
+            ownerProject,
+            req,
+          );
+          await rm(stagingPath!, { recursive: true, force: true });
+          stagingPath = undefined;
+          return matching;
         }
-        const lostStagingPath = stagingPath;
-        if (lostStagingPath) await rm(lostStagingPath, { recursive: true, force: true });
+        await rename(stagingPath!, workspaceRef);
         stagingPath = undefined;
-        return await this.readMatchingRepositorySession(workspaceRef, ownerProject, req);
-      }
-      return { workspaceRef, repositories };
+        return { workspaceRef, repositories };
+      });
     } catch (error) {
       if (stagingPath) await rm(stagingPath, { recursive: true, force: true }).catch(() => {});
       throw error;
@@ -352,25 +357,32 @@ export class WorkspaceManager implements Workspaces {
   async cleanupRepositorySession(ownerProject: string, workspaceRef: string): Promise<void> {
     this.assertSessionPath(workspaceRef);
     this.assertSessionOwnerPath(ownerProject, workspaceRef);
-    if (!existsSync(workspaceRef)) return;
-    await this.assertExistingSessionDirectory(workspaceRef);
-    const metadata = await this.readSessionMetadata(workspaceRef, true);
-    if (metadata.ownerProject !== ownerProject) {
-      throw new WorkspaceError('repository session belongs to a different project', true);
-    }
-    await rm(workspaceRef, { recursive: true, force: true });
+    await this.withSessionLock(workspaceRef, async () => {
+      if (!existsSync(workspaceRef)) return;
+      await this.assertExistingSessionDirectory(workspaceRef);
+      const metadata = await this.readSessionMetadata(workspaceRef, true);
+      if (metadata.ownerProject !== ownerProject) {
+        throw new WorkspaceError('repository session belongs to a different project', true);
+      }
+      await this.assertExistingSessionDirectory(workspaceRef);
+      await this.readSessionMetadata(workspaceRef, true);
+      await rm(workspaceRef, { recursive: true, force: true });
+    });
   }
 
   async touchRepositorySession(ownerProject: string, workspaceRef: string): Promise<void> {
     if (!this.isUnderSessionRoot(workspaceRef)) return; // compatibility for ordinary workspaces
     this.assertSessionPath(workspaceRef);
-    if (!existsSync(workspaceRef)) return;
-    await this.assertExistingSessionDirectory(workspaceRef);
-    const metadata = await this.readSessionMetadata(workspaceRef, true);
-    if (metadata.ownerProject !== ownerProject) {
-      throw new WorkspaceError('repository session belongs to a different project', true);
-    }
-    await this.writeSessionMetadata(workspaceRef, { ...metadata, lastUsedAt: this.now() });
+    await this.withSessionLock(workspaceRef, async () => {
+      if (!existsSync(workspaceRef)) return;
+      await this.assertExistingSessionDirectory(workspaceRef);
+      const metadata = await this.readSessionMetadata(workspaceRef, true);
+      if (metadata.ownerProject !== ownerProject) {
+        throw new WorkspaceError('repository session belongs to a different project', true);
+      }
+      await this.assertExistingSessionDirectory(workspaceRef);
+      await this.writeSessionMetadata(workspaceRef, { ...metadata, lastUsedAt: this.now() });
+    });
   }
 
   // Remove on-disk artifacts for repos no longer in the managed registry: their
@@ -411,15 +423,22 @@ export class WorkspaceManager implements Workspaces {
         const workspaceRef = join(sessionsRoot, owner, task);
         if (!this.isSessionPath(workspaceRef)) continue;
         try {
-          await this.assertExistingSessionDirectory(workspaceRef);
-          const metadata = await this.readSessionMetadata(workspaceRef, true);
-          if (
-            (liveProjects !== undefined && !live.has(metadata.ownerProject)) ||
-            this.now() - metadata.lastUsedAt > this.repositorySessionIdleMs
-          ) {
-            await rm(workspaceRef, { recursive: true, force: true });
-            removed.push(workspaceRef);
-          }
+          await this.onRepositorySessionPruneCandidate?.(workspaceRef);
+          const deleted = await this.withSessionLock(workspaceRef, async () => {
+            await this.assertExistingSessionDirectory(workspaceRef);
+            const metadata = await this.readSessionMetadata(workspaceRef, true);
+            if (
+              (liveProjects !== undefined && !live.has(metadata.ownerProject)) ||
+              this.now() - metadata.lastUsedAt > this.repositorySessionIdleMs
+            ) {
+              await this.assertExistingSessionDirectory(workspaceRef);
+              await this.readSessionMetadata(workspaceRef, true);
+              await rm(workspaceRef, { recursive: true, force: true });
+              return true;
+            }
+            return false;
+          });
+          if (deleted) removed.push(workspaceRef);
         } catch {
           // Invalid metadata is not trusted as authority to delete a path.
         }
@@ -586,7 +605,8 @@ export class WorkspaceManager implements Workspaces {
     const owner = resolve(workspaceRef).split(sep).at(-2)!;
     for (const path of [root, join(root, owner), workspaceRef]) {
       try {
-        if ((await lstat(path)).isSymbolicLink()) {
+        const entry = await lstat(path);
+        if (entry.isSymbolicLink() || !entry.isDirectory()) {
           throw new WorkspaceError(
             `repository session path contains a symlink: ${workspaceRef}`,
             true,
@@ -694,12 +714,39 @@ export class WorkspaceManager implements Workspaces {
     workspaceRef: string,
     metadata: RepositorySessionMetadata,
   ): Promise<void> {
-    const temporary = join(
-      workspaceRef,
-      `${SESSION_METADATA_FILE}.${process.pid}.${this.now()}.tmp`,
-    );
-    await writeFile(temporary, JSON.stringify(metadata), 'utf8');
-    await rename(temporary, join(workspaceRef, SESSION_METADATA_FILE));
+    const temporary = join(workspaceRef, `.${SESSION_METADATA_FILE}.${randomUUID()}.tmp`);
+    let created = false;
+    let handle: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      handle = await open(temporary, 'wx', 0o600);
+      created = true;
+      await handle.writeFile(JSON.stringify(metadata), 'utf8');
+      await handle.close();
+      handle = undefined;
+      await rename(temporary, join(workspaceRef, SESSION_METADATA_FILE));
+      created = false;
+    } finally {
+      if (handle) await handle.close().catch(() => {});
+      if (created) await rm(temporary, { force: true }).catch(() => {});
+    }
+  }
+
+  private async withSessionLock<T>(workspaceRef: string, operation: () => Promise<T>): Promise<T> {
+    const key = resolve(workspaceRef);
+    const previous = this.sessionLocks.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolveGate) => {
+      release = resolveGate;
+    });
+    const tail = previous.catch(() => {}).then(() => gate);
+    this.sessionLocks.set(key, tail);
+    await previous.catch(() => {});
+    try {
+      return await operation();
+    } finally {
+      release();
+      if (this.sessionLocks.get(key) === tail) this.sessionLocks.delete(key);
+    }
   }
 
   private async detectDefaultBranch(git: GitCommandRunner, cachePath: string): Promise<string> {
