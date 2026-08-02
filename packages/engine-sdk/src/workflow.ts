@@ -6,6 +6,7 @@ export { ENGINE_QUEUE };
 export type { EngineActivities } from '@agentops/contracts';
 export { parseFindings } from '@agentops/policies';
 export { parseVerdict } from '@agentops/policies';
+export { parseAgentResult } from '@agentops/policies';
 import type { DevCycleState, TaskInput } from '@agentops/contracts';
 
 // Proxy the engine's activities onto ENGINE_QUEUE so privileged, credential-

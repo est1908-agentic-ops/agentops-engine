@@ -5,13 +5,17 @@ vi.mock('@temporalio/workflow', () => ({
   executeChild: vi.fn(),
   workflowInfo: () => ({ memo: { project: 'acme' } }),
 }));
-import { engineActivities, engineAgent, ENGINE_QUEUE } from './workflow';
+import { engineActivities, engineAgent, ENGINE_QUEUE, parseAgentResult } from './workflow';
 
 describe('engine-sdk/workflow', () => {
   it('proxies engine activities to ENGINE_QUEUE', () => {
     expect(ENGINE_QUEUE).toBe('agentops-engine');
     expect((engineActivities() as any).__opts.taskQueue).toBe(ENGINE_QUEUE);
     expect((engineAgent() as any).__opts.taskQueue).toBe(ENGINE_QUEUE);
+  });
+
+  it('exports the generic agent-result parser', () => {
+    expect(parseAgentResult('AGENT_RESULT: {"ok":true}')).toEqual({ ok: true });
   });
 });
 /* eslint-enable @typescript-eslint/no-explicit-any */
