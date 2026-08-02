@@ -1,10 +1,18 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  existsSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { SpawnGitCommandRunner } from './spawn-git-command-runner';
-import { WorkspaceManager } from './workspace-manager';
+import { repositorySessionIdentity, WorkspaceManager } from './workspace-manager';
 
 let root: string;
 let remoteDir: string;
@@ -509,11 +517,28 @@ describe('WorkspaceManager — git ref validation', () => {
 });
 
 describe('WorkspaceManager — repository sessions', () => {
+  it('uses collision-resistant owner and task path components', async () => {
+    const { manager } = buildManager();
+    const first = await manager.prepareRepositorySession('a/b', {
+      taskId: 'c/d',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    const second = await manager.prepareRepositorySession('a-b', {
+      taskId: 'c-d',
+      repositories: [{ repo: 'acme/shared' }],
+    });
+    expect(second.workspaceRef).not.toBe(first.workspaceRef);
+    await expect(manager.cleanupRepositorySession('a-b', first.workspaceRef)).rejects.toMatchObject(
+      { nonRetryable: true },
+    );
+  });
+
   it('creates confined one- and multi-repository sessions using the owner project runner', async () => {
     const remoteB = join(root, 'remote-b');
     execFileSync('git', ['clone', remoteDir, remoteB]);
     const ownerCalls: string[][] = [];
     const targetCalls: string[][] = [];
+    const resolvedProjects: string[] = [];
     const real = new SpawnGitCommandRunner();
     const ownerRunner = {
       run: (args: string[], opts: { cwd: string }) => {
@@ -529,7 +554,10 @@ describe('WorkspaceManager — repository sessions', () => {
     };
     const manager = new WorkspaceManager({
       resolveGit: () => targetRunner,
-      resolveGitForProject: (project) => (project === 'hub' ? ownerRunner : targetRunner),
+      resolveGitForProject: (project) => {
+        resolvedProjects.push(project);
+        return project === 'hub' ? ownerRunner : targetRunner;
+      },
       cacheDir,
       workspacesDir,
       cloneUrl: (repo) => (repo === 'acme/app' ? remoteDir : remoteB),
@@ -541,7 +569,12 @@ describe('WorkspaceManager — repository sessions', () => {
     });
 
     expect(session.workspaceRef).toBe(
-      join(workspacesDir, 'repository-sessions', 'hub', 'rollbar-123'),
+      join(
+        workspacesDir,
+        'repository-sessions',
+        repositorySessionIdentity('hub'),
+        repositorySessionIdentity('rollbar-123'),
+      ),
     );
     expect(session.repositories.map((repository) => repository.relativePath)).toEqual([
       'repositories/acme/app',
@@ -556,6 +589,7 @@ describe('WorkspaceManager — repository sessions', () => {
       ),
     ).toBe(true);
     expect(ownerCalls.filter((args) => args[0] === 'clone')).toHaveLength(2);
+    expect(resolvedProjects).toEqual(['hub']);
     expect(targetCalls).toEqual([]);
     expect(
       JSON.parse(readFileSync(join(session.workspaceRef, '.agentops-session.json'), 'utf8')),
@@ -564,6 +598,32 @@ describe('WorkspaceManager — repository sessions', () => {
       taskId: 'rollbar-123',
       repositories: session.repositories,
     });
+  });
+
+  it('checks out the exact fetched explicit ref rather than the remote default commit', async () => {
+    const defaultCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: remoteDir })
+      .toString()
+      .trim();
+    execFileSync('git', ['checkout', '-b', 'feature/session-ref'], { cwd: remoteDir });
+    writeFileSync(join(remoteDir, 'feature.txt'), 'feature');
+    execFileSync('git', ['add', 'feature.txt'], { cwd: remoteDir });
+    execFileSync('git', ['commit', '-m', 'feature'], { cwd: remoteDir });
+    const featureCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: remoteDir })
+      .toString()
+      .trim();
+    execFileSync('git', ['checkout', 'main'], { cwd: remoteDir });
+    const { manager } = buildManager();
+    const session = await manager.prepareRepositorySession('hub', {
+      taskId: 'refs',
+      repositories: [
+        { repo: 'acme/default' },
+        { repo: 'acme/feature', ref: 'refs/heads/feature/session-ref' },
+      ],
+    });
+    expect(session.repositories.map((repository) => repository.commit)).toEqual([
+      defaultCommit,
+      featureCommit,
+    ]);
   });
 
   it('cleans up only owned session roots and is idempotent once absent', async () => {
@@ -610,6 +670,63 @@ describe('WorkspaceManager — repository sessions', () => {
       }),
     ).rejects.toThrow(/nope/);
     expect(existsSync(expected)).toBe(false);
+    expect(existsSync(join(expected, '.agentops-session.json'))).toBe(false);
+  });
+
+  it('rejects malformed and symlinked metadata without deleting the session', async () => {
+    const { manager } = buildManager();
+    const session = await manager.prepareRepositorySession('hub', {
+      taskId: 'metadata',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    const metadataPath = join(session.workspaceRef, '.agentops-session.json');
+    writeFileSync(
+      metadataPath,
+      JSON.stringify({
+        ownerProject: 'hub',
+        taskId: 'metadata',
+        createdAt: 1,
+        lastUsedAt: 1,
+        repositories: [
+          { repo: 'acme/app', relativePath: 'repositories/wrong', commit: 'A'.repeat(40) },
+        ],
+      }),
+    );
+    await expect(
+      manager.cleanupRepositorySession('hub', session.workspaceRef),
+    ).rejects.toMatchObject({ nonRetryable: true });
+    expect(existsSync(session.workspaceRef)).toBe(true);
+    rmSync(metadataPath);
+    const outside = join(root, 'metadata-outside.json');
+    writeFileSync(outside, '{}');
+    symlinkSync(outside, metadataPath);
+    await expect(manager.touchRepositorySession('hub', session.workspaceRef)).rejects.toMatchObject(
+      { nonRetryable: true },
+    );
+    expect(existsSync(session.workspaceRef)).toBe(true);
+  });
+
+  it('requires complete finite metadata timestamps before cleanup', async () => {
+    const { manager } = buildManager();
+    const session = await manager.prepareRepositorySession('hub', {
+      taskId: 'missing-timestamp',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    writeFileSync(
+      join(session.workspaceRef, '.agentops-session.json'),
+      JSON.stringify({
+        ownerProject: 'hub',
+        taskId: 'missing-timestamp',
+        lastUsedAt: Number.NaN,
+        repositories: session.repositories,
+      }),
+    );
+    await expect(
+      manager.cleanupRepositorySession('hub', session.workspaceRef),
+    ).rejects.toMatchObject({
+      nonRetryable: true,
+    });
+    expect(existsSync(session.workspaceRef)).toBe(true);
   });
 
   it('touches owned sessions and skips legacy workspace refs', async () => {

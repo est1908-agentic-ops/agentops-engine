@@ -1,5 +1,9 @@
 import type { CreateRepositorySessionRequest, RepositorySession } from '@agentops/contracts';
-import type { PreparedWorkspace, Workspaces } from './workspace-manager';
+import {
+  repositorySessionIdentity,
+  type PreparedWorkspace,
+  type Workspaces,
+} from './workspace-manager';
 
 export interface MemoryWorkspaceManagerOptions {
   now?: () => number;
@@ -15,10 +19,6 @@ interface MemoryRepositorySession {
 }
 
 const REPOSITORY_SESSION_IDLE_MS = 86_400_000;
-
-function sanitizeSegment(value: string): string {
-  return value.replace(/[^a-zA-Z0-9:_-]/g, '-');
-}
 
 export class MemoryWorkspaceManager implements Workspaces {
   private readonly prepared = new Set<string>();
@@ -86,7 +86,9 @@ export class MemoryWorkspaceManager implements Workspaces {
     ownerProject: string,
     req: CreateRepositorySessionRequest,
   ): Promise<RepositorySession> {
-    const workspaceRef = `memory://repository-session/${sanitizeSegment(ownerProject)}/${sanitizeSegment(req.taskId)}`;
+    const workspaceRef = `memory://repository-session/${repositorySessionIdentity(ownerProject)}/${repositorySessionIdentity(req.taskId)}`;
+    if (this.repositorySessions.has(workspaceRef))
+      throw new Error(`repository session already exists: ${workspaceRef}`);
     const now = this.now();
     const repositories = req.repositories.map((input) => ({
       repo: input.repo,
@@ -104,6 +106,7 @@ export class MemoryWorkspaceManager implements Workspaces {
   }
 
   async cleanupRepositorySession(ownerProject: string, workspaceRef: string): Promise<void> {
+    this.assertMemorySessionOwner(ownerProject, workspaceRef);
     const session = this.repositorySessions.get(workspaceRef);
     if (!session) return;
     if (session.ownerProject !== ownerProject)
@@ -112,6 +115,8 @@ export class MemoryWorkspaceManager implements Workspaces {
   }
 
   async touchRepositorySession(ownerProject: string, workspaceRef: string): Promise<void> {
+    if (!workspaceRef.startsWith('memory://repository-session/')) return;
+    this.assertMemorySessionOwner(ownerProject, workspaceRef);
     const session = this.repositorySessions.get(workspaceRef);
     if (!session) return;
     if (session.ownerProject !== ownerProject)
@@ -121,6 +126,22 @@ export class MemoryWorkspaceManager implements Workspaces {
 
   repositorySessionFor(workspaceRef: string): Readonly<MemoryRepositorySession> | undefined {
     return this.repositorySessions.get(workspaceRef);
+  }
+
+  private assertMemorySessionOwner(ownerProject: string, workspaceRef: string): void {
+    const parts = workspaceRef.split('/');
+    if (
+      parts.length !== 5 ||
+      parts[0] !== 'memory:' ||
+      parts[1] !== '' ||
+      parts[2] !== 'repository-session' ||
+      !parts[3] ||
+      !parts[4]
+    ) {
+      throw new Error(`invalid repository session ref: ${workspaceRef}`);
+    }
+    if (parts[3] !== repositorySessionIdentity(ownerProject))
+      throw new Error('repository session belongs to a different owner');
   }
 
   async pruneOrphans(

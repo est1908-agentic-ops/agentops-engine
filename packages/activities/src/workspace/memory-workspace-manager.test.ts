@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MemoryWorkspaceManager } from './memory-workspace-manager';
+import { repositorySessionIdentity } from './workspace-manager';
 
 describe('MemoryWorkspaceManager', () => {
   it('returns a deterministic fake workspace without touching the filesystem', async () => {
@@ -76,6 +77,30 @@ describe('MemoryWorkspaceManager — scratch workspaces', () => {
 });
 
 describe('MemoryWorkspaceManager — repository sessions', () => {
+  it('uses collision-resistant owner and task identities and rejects duplicate sessions', async () => {
+    const manager = new MemoryWorkspaceManager();
+    const first = await manager.prepareRepositorySession('a/b', {
+      taskId: 'c/d',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    const second = await manager.prepareRepositorySession('a-b', {
+      taskId: 'c-d',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    expect(second.workspaceRef).not.toBe(first.workspaceRef);
+    await expect(
+      manager.prepareRepositorySession('a/b', {
+        taskId: 'c/d',
+        repositories: [{ repo: 'acme/app' }],
+      }),
+    ).rejects.toThrow(/already exists/);
+    await expect(manager.cleanupRepositorySession('a-b', first.workspaceRef)).rejects.toThrow(
+      /different owner/,
+    );
+    await expect(
+      manager.cleanupRepositorySession('a/b', 'memory://repository-session/not-a-valid-key'),
+    ).rejects.toThrow(/invalid/);
+  });
   it('tracks deterministic owned sessions, touch, cleanup, and pruning', async () => {
     let time = 0;
     const manager = new MemoryWorkspaceManager({ now: () => time });
@@ -83,7 +108,9 @@ describe('MemoryWorkspaceManager — repository sessions', () => {
       taskId: 'task/one',
       repositories: [{ repo: 'acme/app' }, { repo: 'acme/shared', ref: 'main' }],
     });
-    expect(session.workspaceRef).toBe('memory://repository-session/hub/task-one');
+    expect(session.workspaceRef).toBe(
+      `memory://repository-session/${repositorySessionIdentity('hub')}/${repositorySessionIdentity('task/one')}`,
+    );
     expect(session.repositories.map((repository) => repository.relativePath)).toEqual([
       'repositories/acme/app',
       'repositories/acme/shared',

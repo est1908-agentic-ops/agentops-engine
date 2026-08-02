@@ -1,11 +1,16 @@
 import { existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { lstat, mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import type { GitCommandRunner } from '@agentops/ports';
 import { slugifyProject } from '@agentops/policies';
 import { isValidGitRefName } from '@agentops/contracts';
-import type { CreateRepositorySessionRequest, RepositorySession } from '@agentops/contracts';
+import {
+  RepositorySessionSchema,
+  type CreateRepositorySessionRequest,
+  type RepositorySession,
+} from '@agentops/contracts';
 import { SpawnCommandRunner, type CommandRunner } from './spawn-command-runner';
 
 export interface WorkspaceManagerOptions {
@@ -77,6 +82,15 @@ function sanitizeRepoSlug(repo: string): string {
 // could otherwise resolve outside the intended scratch/ subtree.
 function sanitizeTaskId(taskId: string): string {
   return taskId.replace(/[^a-zA-Z0-9:_-]/g, '-');
+}
+
+export function repositorySessionIdentity(value: string): string {
+  const prefix =
+    value
+      .replace(/[^a-zA-Z0-9_-]/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 48) || 'session';
+  return `${prefix}-${createHash('sha256').update(value).digest('hex').slice(0, 16)}`;
 }
 
 export class WorkspaceManager implements Workspaces {
@@ -468,8 +482,8 @@ export class WorkspaceManager implements Workspaces {
     return join(
       this.workspacesDir,
       'repository-sessions',
-      sanitizeTaskId(ownerProject),
-      sanitizeTaskId(taskId),
+      repositorySessionIdentity(ownerProject),
+      repositorySessionIdentity(taskId),
     );
   }
 
@@ -490,7 +504,7 @@ export class WorkspaceManager implements Workspaces {
   }
 
   private assertSessionOwnerPath(ownerProject: string, workspaceRef: string): void {
-    const expectedOwner = sanitizeTaskId(ownerProject);
+    const expectedOwner = repositorySessionIdentity(ownerProject);
     if (resolve(workspaceRef).split(sep).at(-2) !== expectedOwner) {
       throw new WorkspaceError('repository session path belongs to a different project', true);
     }
@@ -549,15 +563,23 @@ export class WorkspaceManager implements Workspaces {
   ): Promise<RepositorySessionMetadata> {
     this.assertSessionPath(workspaceRef);
     try {
+      const metadataPath = join(workspaceRef, SESSION_METADATA_FILE);
+      const metadataFile = await lstat(metadataPath);
+      if (metadataFile.isSymbolicLink() || !metadataFile.isFile())
+        throw new Error('metadata is not a regular file');
       const metadata = JSON.parse(
-        await readFile(join(workspaceRef, SESSION_METADATA_FILE), 'utf8'),
+        await readFile(metadataPath, 'utf8'),
       ) as RepositorySessionMetadata;
       if (
         !metadata ||
         typeof metadata.ownerProject !== 'string' ||
+        metadata.ownerProject.length === 0 ||
         typeof metadata.taskId !== 'string' ||
-        !Array.isArray(metadata.repositories) ||
-        typeof metadata.lastUsedAt !== 'number'
+        metadata.taskId.length === 0 ||
+        !Number.isFinite(metadata.createdAt) ||
+        !Number.isFinite(metadata.lastUsedAt) ||
+        !RepositorySessionSchema.safeParse({ workspaceRef, repositories: metadata.repositories })
+          .success
       )
         throw new Error('invalid metadata');
       if (
