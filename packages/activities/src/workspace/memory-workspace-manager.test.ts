@@ -100,6 +100,9 @@ describe('MemoryWorkspaceManager — repository sessions', () => {
     await expect(
       manager.cleanupRepositorySession('a/b', 'memory://repository-session/not-a-valid-key'),
     ).rejects.toThrow(/invalid/);
+    const malformed = `memory://repository-session/${repositorySessionIdentity('a/b')}/not-a-session`;
+    await expect(manager.cleanupRepositorySession('a/b', malformed)).rejects.toThrow(/invalid/);
+    await expect(manager.touchRepositorySession('a/b', malformed)).rejects.toThrow(/invalid/);
   });
   it('tracks deterministic owned sessions, touch, cleanup, and pruning', async () => {
     let time = 0;

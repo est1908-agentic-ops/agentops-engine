@@ -93,6 +93,10 @@ export function repositorySessionIdentity(value: string): string {
   return `${prefix}-${createHash('sha256').update(value).digest('hex').slice(0, 16)}`;
 }
 
+export function isRepositorySessionIdentity(value: string): boolean {
+  return /^[a-zA-Z0-9_-]{1,48}-[0-9a-f]{16}$/.test(value);
+}
+
 export class WorkspaceManager implements Workspaces {
   private readonly resolveGit: (repo: string) => GitCommandRunner;
   private readonly cacheDir: string;
@@ -316,7 +320,8 @@ export class WorkspaceManager implements Workspaces {
   }
 
   async touchRepositorySession(ownerProject: string, workspaceRef: string): Promise<void> {
-    if (!this.isSessionPath(workspaceRef)) return; // compatibility for ordinary workspaces
+    if (!this.isUnderSessionRoot(workspaceRef)) return; // compatibility for ordinary workspaces
+    this.assertSessionPath(workspaceRef);
     if (!existsSync(workspaceRef)) return;
     await this.assertExistingSessionDirectory(workspaceRef);
     const metadata = await this.readSessionMetadata(workspaceRef, true);
@@ -491,7 +496,16 @@ export class WorkspaceManager implements Workspaces {
     const root = resolve(this.workspacesDir, 'repository-sessions');
     const target = resolve(workspaceRef);
     const relative = target.slice(root.length + 1).split(sep);
-    return target.startsWith(root + sep) && relative.length === 2 && relative.every(Boolean);
+    return (
+      this.isUnderSessionRoot(workspaceRef) &&
+      relative.length === 2 &&
+      relative.every(isRepositorySessionIdentity)
+    );
+  }
+
+  private isUnderSessionRoot(workspaceRef: string): boolean {
+    const root = resolve(this.workspacesDir, 'repository-sessions');
+    return resolve(workspaceRef).startsWith(root + sep);
   }
 
   private assertSessionPath(workspaceRef: string): void {

@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import {
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   rmSync,
   existsSync,
   readFileSync,
@@ -539,10 +540,13 @@ describe('WorkspaceManager — repository sessions', () => {
     const ownerCalls: string[][] = [];
     const targetCalls: string[][] = [];
     const resolvedProjects: string[] = [];
+    const metadataPresentDuringClone: boolean[] = [];
     const real = new SpawnGitCommandRunner();
     const ownerRunner = {
       run: (args: string[], opts: { cwd: string }) => {
         ownerCalls.push(args);
+        if (args[0] === 'clone')
+          metadataPresentDuringClone.push(existsSync(join(opts.cwd, '.agentops-session.json')));
         return real.run(args, opts);
       },
     };
@@ -589,15 +593,19 @@ describe('WorkspaceManager — repository sessions', () => {
       ),
     ).toBe(true);
     expect(ownerCalls.filter((args) => args[0] === 'clone')).toHaveLength(2);
+    expect(metadataPresentDuringClone).toEqual([false, false]);
     expect(resolvedProjects).toEqual(['hub']);
     expect(targetCalls).toEqual([]);
-    expect(
-      JSON.parse(readFileSync(join(session.workspaceRef, '.agentops-session.json'), 'utf8')),
-    ).toMatchObject({
+    const metadata = JSON.parse(
+      readFileSync(join(session.workspaceRef, '.agentops-session.json'), 'utf8'),
+    );
+    expect(metadata).toMatchObject({
       ownerProject: 'hub',
       taskId: 'rollbar-123',
       repositories: session.repositories,
     });
+    expect(Number.isFinite(metadata.createdAt)).toBe(true);
+    expect(Number.isFinite(metadata.lastUsedAt)).toBe(true);
   });
 
   it('checks out the exact fetched explicit ref rather than the remote default commit', async () => {
@@ -643,6 +651,18 @@ describe('WorkspaceManager — repository sessions', () => {
     await expect(
       manager.cleanupRepositorySession('hub', join(root, 'outside')),
     ).rejects.toMatchObject({ nonRetryable: true });
+    const malformed = join(
+      workspacesDir,
+      'repository-sessions',
+      repositorySessionIdentity('hub'),
+      'not-a-session',
+    );
+    await expect(manager.cleanupRepositorySession('hub', malformed)).rejects.toMatchObject({
+      nonRetryable: true,
+    });
+    await expect(manager.touchRepositorySession('hub', malformed)).rejects.toMatchObject({
+      nonRetryable: true,
+    });
   });
 
   it('removes only the generated session root when a sequential clone fails', async () => {
@@ -661,7 +681,7 @@ describe('WorkspaceManager — repository sessions', () => {
       workspacesDir,
       cloneUrl: () => remoteDir,
     });
-    const expected = join(workspacesDir, 'repository-sessions', 'hub', 'partial');
+    const sessionsRoot = join(workspacesDir, 'repository-sessions');
 
     await expect(
       manager.prepareRepositorySession('hub', {
@@ -669,8 +689,10 @@ describe('WorkspaceManager — repository sessions', () => {
         repositories: [{ repo: 'acme/app' }, { repo: 'acme/shared' }],
       }),
     ).rejects.toThrow(/nope/);
-    expect(existsSync(expected)).toBe(false);
-    expect(existsSync(join(expected, '.agentops-session.json'))).toBe(false);
+    const taskRoots = existsSync(sessionsRoot)
+      ? readdirSync(sessionsRoot).flatMap((owner) => readdirSync(join(sessionsRoot, owner)))
+      : [];
+    expect(taskRoots).toEqual([]);
   });
 
   it('rejects malformed and symlinked metadata without deleting the session', async () => {

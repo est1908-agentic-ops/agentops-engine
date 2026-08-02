@@ -1,6 +1,7 @@
 import type { CreateRepositorySessionRequest, RepositorySession } from '@agentops/contracts';
 import {
   repositorySessionIdentity,
+  isRepositorySessionIdentity,
   type PreparedWorkspace,
   type Workspaces,
 } from './workspace-manager';
@@ -135,8 +136,8 @@ export class MemoryWorkspaceManager implements Workspaces {
       parts[0] !== 'memory:' ||
       parts[1] !== '' ||
       parts[2] !== 'repository-session' ||
-      !parts[3] ||
-      !parts[4]
+      !isRepositorySessionIdentity(parts[3] ?? '') ||
+      !isRepositorySessionIdentity(parts[4] ?? '')
     ) {
       throw new Error(`invalid repository session ref: ${workspaceRef}`);
     }
