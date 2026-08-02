@@ -8,12 +8,16 @@ import { FileManagedProjectStore } from './file-managed-project-store';
 function writeProjectFiles(
   dir: string,
   slug: string,
-  fields: { project: string; repo: string; tokenSecret: string },
+  fields: { project: string; repo: string; tokenSecret: string; readRepositories?: unknown },
   config?: unknown,
 ): void {
+  const readRepositories =
+    fields.readRepositories === undefined
+      ? ''
+      : `readRepositories: ${JSON.stringify(fields.readRepositories)}\n`;
   writeFileSync(
     join(dir, `${slug}__project.yaml`),
-    `project: ${fields.project}\nrepo: ${fields.repo}\ntokenSecret: ${fields.tokenSecret}\n`,
+    `project: ${fields.project}\nrepo: ${fields.repo}\ntokenSecret: ${fields.tokenSecret}\n${readRepositories}`,
   );
   if (config !== undefined) {
     writeFileSync(join(dir, `${slug}__agentops.json`), JSON.stringify(config));
@@ -74,6 +78,65 @@ describe('FileManagedProjectStore', () => {
     const result = await store.get('acme/bare');
 
     expect(result?.config).toBeNull();
+    expect(result?.readRepositories).toEqual([]);
+  });
+
+  it('normalizes configured read repositories to short lowercase owner/name form', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    writeProjectFiles(dir, 'demo', {
+      project: 'Demo App',
+      repo: 'https://github.com/acme/demo',
+      tokenSecret: 'github-token',
+      readRepositories: ['Acme/Shared', 'acme/Docs'],
+    });
+
+    const managed = await new FileManagedProjectStore(dir).get('acme/demo');
+
+    expect(managed?.readRepositories).toEqual(['acme/shared', 'acme/docs']);
+  });
+
+  it.each([
+    ['is not an array', 'acme/shared'],
+    ['contains a non-string value', ['acme/shared', 42]],
+    ['contains an empty value', ['acme/shared', '']],
+    ['contains an invalid repository', ['acme/shared', 'acme/shared/extra']],
+    ['contains a full URL', ['https://github.com/acme/shared']],
+  ])('rejects readRepositories when it %s', async (_description, readRepositories) => {
+    dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    writeProjectFiles(dir, 'demo', {
+      project: 'Demo App',
+      repo: 'https://github.com/acme/demo',
+      tokenSecret: 'github-token',
+      readRepositories,
+    });
+
+    await expect(new FileManagedProjectStore(dir).get('acme/demo')).rejects.toThrow(
+      /readRepositories/,
+    );
+  });
+
+  it('rejects duplicate read repositories case-insensitively', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    writeProjectFiles(dir, 'demo', {
+      project: 'Demo App',
+      repo: 'https://github.com/acme/demo',
+      tokenSecret: 'github-token',
+      readRepositories: ['Acme/Shared', 'acme/shared'],
+    });
+
+    await expect(new FileManagedProjectStore(dir).get('acme/demo')).rejects.toThrow(/duplicate/i);
+  });
+
+  it('rejects the primary repository in readRepositories case-insensitively', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    writeProjectFiles(dir, 'demo', {
+      project: 'Demo App',
+      repo: 'https://github.com/acme/demo',
+      tokenSecret: 'github-token',
+      readRepositories: ['Acme/Demo'],
+    });
+
+    await expect(new FileManagedProjectStore(dir).get('acme/demo')).rejects.toThrow(/primary/i);
   });
 
   it('finds a project by its project name via getByProject', async () => {
@@ -106,7 +169,11 @@ describe('FileManagedProjectStore', () => {
     writeProjectFiles(
       dir,
       'broken',
-      { project: 'Broken App', repo: 'https://github.com/acme/broken', tokenSecret: 'github-token' },
+      {
+        project: 'Broken App',
+        repo: 'https://github.com/acme/broken',
+        tokenSecret: 'github-token',
+      },
       { autoMerge: 'not-a-real-mode' }, // fails AutoMergeModeSchema's enum even after defaulting
     );
     const store = new FileManagedProjectStore(dir);

@@ -8,7 +8,7 @@ import {
   type ManagedProjectStore,
   type ProjectConfig,
 } from '@agentops/contracts';
-import { normalizeRepo } from '@agentops/ports';
+import { normalizeRepo, parseRepoSlug } from '@agentops/ports';
 
 const CONFIG_FILE_SUFFIX = '__agentops.json';
 
@@ -23,6 +23,7 @@ const PROJECT_FILE_PATTERN = /^([a-z0-9-]+)__project\.yaml$/;
 interface RawManagedProjectFile {
   project?: unknown;
   repo?: unknown;
+  readRepositories?: unknown;
   tokenSecret?: unknown;
   trackerType?: unknown;
   linearTeamKey?: unknown;
@@ -32,6 +33,59 @@ interface RawManagedProjectFile {
 
 function isNonEmptyString(value: unknown): value is string {
   return typeof value === 'string' && value.length > 0;
+}
+
+function parseReadRepositories(
+  value: unknown,
+  primaryRepo: string,
+  entry: string,
+  slug: string,
+): string[] {
+  if (value === undefined) {
+    return [];
+  }
+  if (!Array.isArray(value)) {
+    throw new Error(
+      `FileManagedProjectStore: "${entry}" (slug "${slug}") field "readRepositories" must be an array`,
+    );
+  }
+
+  const normalizedPrimaryRepo = normalizeRepo(primaryRepo).toLowerCase();
+  const seen = new Set<string>();
+  return value.map((item, index) => {
+    if (typeof item !== 'string' || item.trim().length === 0) {
+      throw new Error(
+        `FileManagedProjectStore: "${entry}" (slug "${slug}") field "readRepositories[${index}]" must be a non-empty string`,
+      );
+    }
+
+    const shortRepo = item.trim();
+    try {
+      parseRepoSlug(shortRepo);
+    } catch {
+      throw new Error(
+        `FileManagedProjectStore: "${entry}" (slug "${slug}") field "readRepositories[${index}]" must be a short owner/name repository`,
+      );
+    }
+    const normalizedRepo = normalizeRepo(shortRepo).toLowerCase();
+    if (normalizedRepo !== shortRepo.toLowerCase()) {
+      throw new Error(
+        `FileManagedProjectStore: "${entry}" (slug "${slug}") field "readRepositories[${index}]" must be a short owner/name repository`,
+      );
+    }
+    if (normalizedRepo === normalizedPrimaryRepo) {
+      throw new Error(
+        `FileManagedProjectStore: "${entry}" (slug "${slug}") field "readRepositories" must not include the primary repository`,
+      );
+    }
+    if (seen.has(normalizedRepo)) {
+      throw new Error(
+        `FileManagedProjectStore: "${entry}" (slug "${slug}") field "readRepositories" contains a duplicate repository`,
+      );
+    }
+    seen.add(normalizedRepo);
+    return normalizedRepo;
+  });
 }
 
 /**
@@ -62,18 +116,27 @@ function isNonEmptyString(value: unknown): value is string {
  * registry once, per the Phase-2 platform plan).
  */
 export class FileManagedProjectStore implements ManagedProjectStore {
-  private cache: Promise<{ byRepo: Map<string, ManagedProject>; byLinearTeamKey: Map<string, ManagedProject> }> | null = null;
+  private cache: Promise<{
+    byRepo: Map<string, ManagedProject>;
+    byLinearTeamKey: Map<string, ManagedProject>;
+  }> | null = null;
 
   constructor(private readonly dir: string) {}
 
-  private load(): Promise<{ byRepo: Map<string, ManagedProject>; byLinearTeamKey: Map<string, ManagedProject> }> {
+  private load(): Promise<{
+    byRepo: Map<string, ManagedProject>;
+    byLinearTeamKey: Map<string, ManagedProject>;
+  }> {
     if (!this.cache) {
       this.cache = this.readAll();
     }
     return this.cache;
   }
 
-  private async readAll(): Promise<{ byRepo: Map<string, ManagedProject>; byLinearTeamKey: Map<string, ManagedProject> }> {
+  private async readAll(): Promise<{
+    byRepo: Map<string, ManagedProject>;
+    byLinearTeamKey: Map<string, ManagedProject>;
+  }> {
     const entries = await readdir(this.dir);
     const entrySet = new Set(entries);
     const byRepo = new Map<string, ManagedProject>();
@@ -160,6 +223,12 @@ export class FileManagedProjectStore implements ManagedProjectStore {
       }
 
       const repo = normalizeRepo(parsedProject.repo);
+      const readRepositories = parseReadRepositories(
+        parsedProject.readRepositories,
+        repo,
+        entry,
+        slug,
+      );
       // id/createdAt/updatedAt are DB-row artifacts of ManagedProjectSchema
       // that have no meaning for a file-backed, read-only store -- the slug
       // stands in for id (stable and unique per the ConfigMap key contract)
@@ -171,6 +240,7 @@ export class FileManagedProjectStore implements ManagedProjectStore {
         id: slug,
         project: parsedProject.project,
         repo,
+        readRepositories,
         config,
         createdAt: new Date(0).toISOString(),
         updatedAt: new Date(0).toISOString(),

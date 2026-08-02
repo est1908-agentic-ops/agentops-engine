@@ -43,6 +43,7 @@ async function buildResolvedEntry(
       trackerType: 'linear',
       project: managedProject.project,
       repo: normalizedRepo,
+      readRepositories: managedProject.readRepositories ?? [],
       token,
       linearTeamKey: managedProject.linearTeamKey,
       linearTriggerLabelId: managedProject.linearTriggerLabelId,
@@ -62,6 +63,7 @@ async function buildResolvedEntry(
       trackerType: 'github',
       project: managedProject.project,
       repo: normalizedRepo,
+      readRepositories: managedProject.readRepositories ?? [],
       token,
     };
   }

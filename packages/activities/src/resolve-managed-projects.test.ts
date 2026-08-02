@@ -8,11 +8,33 @@ import { loadManagedProjectRegistry, resolveManagedProjectEntry } from './resolv
 function writeProjectFiles(
   dir: string,
   slug: string,
-  fields: { project: string; repo: string; tokenSecret: string },
+  fields: {
+    project: string;
+    repo: string;
+    tokenSecret: string;
+    readRepositories?: unknown;
+    trackerType?: 'github' | 'linear';
+    linearTeamKey?: string;
+    linearTriggerLabelId?: string;
+    linearTokenSecret?: string;
+  },
 ): void {
+  const optionalFields = [
+    fields.readRepositories === undefined
+      ? ''
+      : `readRepositories: ${JSON.stringify(fields.readRepositories)}\n`,
+    fields.trackerType === undefined ? '' : `trackerType: ${fields.trackerType}\n`,
+    fields.linearTeamKey === undefined ? '' : `linearTeamKey: ${fields.linearTeamKey}\n`,
+    fields.linearTriggerLabelId === undefined
+      ? ''
+      : `linearTriggerLabelId: ${fields.linearTriggerLabelId}\n`,
+    fields.linearTokenSecret === undefined
+      ? ''
+      : `linearTokenSecret: ${fields.linearTokenSecret}\n`,
+  ].join('');
   writeFileSync(
     join(dir, `${slug}__project.yaml`),
-    `project: ${fields.project}\nrepo: ${fields.repo}\ntokenSecret: ${fields.tokenSecret}\n`,
+    `project: ${fields.project}\nrepo: ${fields.repo}\ntokenSecret: ${fields.tokenSecret}\n${optionalFields}`,
   );
 }
 
@@ -44,6 +66,7 @@ describe('resolveManagedProjectEntry', () => {
       repo: 'acme/web',
       trackerType: 'github',
       token: 'ghp_x',
+      readRepositories: [],
     });
   });
 
@@ -77,15 +100,23 @@ describe('loadManagedProjectRegistry', () => {
 
   it('resolves every managed project via store.list(), resolving each tokenSecret', async () => {
     dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
-    writeProjectFiles(dir, 'a', { project: 'a', repo: 'https://github.com/acme/a', tokenSecret: 'github-token' });
-    writeProjectFiles(dir, 'b', { project: 'b', repo: 'https://github.com/acme/b', tokenSecret: 'github-token' });
+    writeProjectFiles(dir, 'a', {
+      project: 'a',
+      repo: 'https://github.com/acme/a',
+      tokenSecret: 'github-token',
+    });
+    writeProjectFiles(dir, 'b', {
+      project: 'b',
+      repo: 'https://github.com/acme/b',
+      tokenSecret: 'github-token',
+    });
     const store = new FileManagedProjectStore(dir);
 
     const entries = await loadManagedProjectRegistry({ store, resolveToken: async () => 'ghp_x' });
 
     expect(entries).toEqual([
-      { project: 'a', repo: 'acme/a', trackerType: 'github', token: 'ghp_x' },
-      { project: 'b', repo: 'acme/b', trackerType: 'github', token: 'ghp_x' },
+      { project: 'a', repo: 'acme/a', readRepositories: [], trackerType: 'github', token: 'ghp_x' },
+      { project: 'b', repo: 'acme/b', readRepositories: [], trackerType: 'github', token: 'ghp_x' },
     ]);
   });
 
@@ -101,5 +132,55 @@ describe('loadManagedProjectRegistry', () => {
     const entries = await loadManagedProjectRegistry({ store, resolveToken: async () => 't' });
 
     expect(entries[0].repo).toBe('acme/webapp');
+  });
+
+  it('propagates normalized read repositories into GitHub and Linear resolved entries without resolving extra tokens', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    writeProjectFiles(dir, 'github', {
+      project: 'github-project',
+      repo: 'https://github.com/acme/github',
+      tokenSecret: 'github-token',
+      readRepositories: ['Acme/Shared'],
+    });
+    writeProjectFiles(dir, 'linear', {
+      project: 'linear-project',
+      repo: 'https://github.com/acme/linear',
+      tokenSecret: 'linear-github-token',
+      trackerType: 'linear',
+      linearTeamKey: 'ENG',
+      linearTriggerLabelId: 'trigger-label',
+      linearTokenSecret: 'linear-token',
+      readRepositories: ['Acme/Docs'],
+    });
+    const resolvedSecrets: string[] = [];
+
+    const entries = await loadManagedProjectRegistry({
+      store: new FileManagedProjectStore(dir),
+      resolveToken: async (secret) => {
+        resolvedSecrets.push(secret);
+        return `token-for-${secret}`;
+      },
+    });
+
+    expect(entries).toEqual([
+      {
+        project: 'github-project',
+        repo: 'acme/github',
+        trackerType: 'github',
+        token: 'token-for-github-token',
+        readRepositories: ['acme/shared'],
+      },
+      {
+        project: 'linear-project',
+        repo: 'acme/linear',
+        trackerType: 'linear',
+        token: 'token-for-linear-github-token',
+        linearTeamKey: 'ENG',
+        linearTriggerLabelId: 'trigger-label',
+        linearToken: 'token-for-linear-token',
+        readRepositories: ['acme/docs'],
+      },
+    ]);
+    expect(resolvedSecrets).toEqual(['github-token', 'linear-github-token', 'linear-token']);
   });
 });
