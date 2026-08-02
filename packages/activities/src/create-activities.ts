@@ -311,10 +311,7 @@ export function createActivities(deps: ActivityDependencies) {
       assertProjectOwnsRepo(req.repo, deps.registry);
       const filedFindings = deps.filedFindings;
       if (req.dedupeFingerprint && filedFindings) {
-        const { won, issueRef } = await filedFindings.reserve(
-          req.project,
-          req.dedupeFingerprint,
-        );
+        const { won, issueRef } = await filedFindings.reserve(req.project, req.dedupeFingerprint);
         if (!won) {
           return { ref: issueRef, url: '', deduped: true };
         }
@@ -428,7 +425,10 @@ export function createActivities(deps: ActivityDependencies) {
     },
 
     async pruneOrphanWorkspaces(liveRepos: string[]): Promise<{ removed: string[] }> {
-      return deps.workspaces.pruneOrphans(liveRepos);
+      return deps.workspaces.pruneOrphans(
+        liveRepos,
+        deps.registry.map((entry) => entry.project),
+      );
     },
 
     async loadAgentsManifest(project: string, repo: string): Promise<AgentsManifest> {
@@ -439,9 +439,7 @@ export function createActivities(deps: ActivityDependencies) {
       return { agents: config.agents ?? [], worker: config.worker };
     },
 
-    async listAgentSchedules(
-      project: string,
-    ): Promise<
+    async listAgentSchedules(project: string): Promise<
       Array<{
         id: string;
         scheduleSpec: string;

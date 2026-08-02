@@ -103,7 +103,7 @@ export class WorkspaceManager implements Workspaces {
   private readonly workspacesDir: string;
   private readonly cloneUrl: (repo: string) => string;
   private readonly commandRunner: CommandRunner;
-  private readonly resolveGitForProject: (project: string) => GitCommandRunner;
+  private readonly resolveGitForProject?: (project: string) => GitCommandRunner;
   private readonly now: () => number;
   private readonly repositorySessionIdleMs: number;
 
@@ -113,9 +113,7 @@ export class WorkspaceManager implements Workspaces {
     this.workspacesDir = opts.workspacesDir ?? join(homedir(), '.agentops', 'workspaces');
     this.cloneUrl = opts.cloneUrl;
     this.commandRunner = opts.commandRunner ?? new SpawnCommandRunner();
-    // Existing callers only have a repository resolver. Its fallback is deliberately
-    // the calling project, never an individual repository in the requested session.
-    this.resolveGitForProject = opts.resolveGitForProject ?? opts.resolveGit;
+    this.resolveGitForProject = opts.resolveGitForProject;
     this.now = opts.now ?? Date.now;
     this.repositorySessionIdleMs = opts.repositorySessionIdleMs ?? REPOSITORY_SESSION_IDLE_MS;
   }
@@ -261,6 +259,9 @@ export class WorkspaceManager implements Workspaces {
     await this.assertSessionCreationPath(workspaceRef);
     if (existsSync(workspaceRef)) {
       throw new WorkspaceError(`repository session already exists: ${workspaceRef}`, true);
+    }
+    if (!this.resolveGitForProject) {
+      throw new WorkspaceError('repository sessions require a project Git runner resolver', true);
     }
     const git = this.resolveGitForProject(ownerProject);
     const repositories: RepositorySession['repositories'] = [];

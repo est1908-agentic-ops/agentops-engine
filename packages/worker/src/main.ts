@@ -88,7 +88,11 @@ export function buildActivityDependencies(
           'history. Fix the ConfigMap/mount (or onboard at least one project) and restart.',
       );
     }
-    return { scm: new MemoryScmPort(), tracker: new MemoryTrackerPort(), workspaces: new MemoryWorkspaceManager() };
+    return {
+      scm: new MemoryScmPort(),
+      tracker: new MemoryTrackerPort(),
+      workspaces: new MemoryWorkspaceManager(),
+    };
   }
   const entries = registry.map((entry) => {
     const git = new SpawnGitCommandRunner({ authToken: () => entry.token });
@@ -97,16 +101,41 @@ export function buildActivityDependencies(
     // design doc). Only the tracker implementation varies per entry.
     const { scm, tracker: githubTracker } = createGithubPorts(entry.token, git);
     if (entry.trackerType !== 'linear') {
-      return { repo: entry.repo, scm, tracker: githubTracker, git };
+      return { project: entry.project, repo: entry.repo, scm, tracker: githubTracker, git };
     }
     if (!entry.linearToken) {
-      throw new Error(`buildActivityDependencies: project "${entry.project}" is linear-tracked but has no resolved linearToken`);
+      throw new Error(
+        `buildActivityDependencies: project "${entry.project}" is linear-tracked but has no resolved linearToken`,
+      );
     }
     const tracker = createLinearTracker(entry.linearToken);
-    return { repo: entry.repo, linearTeamKey: entry.linearTeamKey, scm, tracker, git };
+    return {
+      project: entry.project,
+      repo: entry.repo,
+      linearTeamKey: entry.linearTeamKey,
+      scm,
+      tracker,
+      git,
+    };
   });
   const { scm, tracker, resolveGit } = createProjectScopedPorts(entries);
-  return { scm, tracker, workspaces: new WorkspaceManager({ resolveGit, cloneUrl: githubCloneUrl, workspacesDir, cacheDir }) };
+  const gitByProject = new Map(entries.map((entry) => [entry.project, entry.git]));
+  return {
+    scm,
+    tracker,
+    workspaces: new WorkspaceManager({
+      resolveGit,
+      resolveGitForProject: (project) => {
+        const git = gitByProject.get(project);
+        if (!git)
+          throw new Error(`no project registered for repository session owner "${project}"`);
+        return git;
+      },
+      cloneUrl: githubCloneUrl,
+      workspacesDir,
+      cacheDir,
+    }),
+  };
 }
 
 // Per-project tokens, read from a mounted managed-projects ConfigMap dir and
@@ -166,7 +195,12 @@ export function resolveCacheDir(inCluster: boolean): string | undefined {
 
 export function buildJobRunnerOptions(
   batchApi: BatchV1ApiLike,
-  opts: { authSecretName?: string; serviceAccountName?: string; additionalSecretNames?: string[]; podLabels?: Record<string, string> } = {},
+  opts: {
+    authSecretName?: string;
+    serviceAccountName?: string;
+    additionalSecretNames?: string[];
+    podLabels?: Record<string, string>;
+  } = {},
 ): K8sJobRunnerOptions {
   return {
     namespace: process.env.AGENT_NAMESPACE ?? 'dev-agents',
@@ -252,10 +286,18 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
     const claudeRateWindowLimiter = buildRateWindowLimiter('CLAUDE');
     return {
       stub: new StubBackend(),
-      claude: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), claudeRateWindowLimiter, 'claude'),
+      claude: wrapWithRateWindow(
+        new ProcessCliRunner(claudeSpec),
+        claudeRateWindowLimiter,
+        'claude',
+      ),
       pi: wrapWithRateWindow(new ProcessCliRunner(piSpec), buildRateWindowLimiter('PI'), 'pi'),
       // Same CLI/model/rate window as claude (see the in-cluster branch below for why).
-      platform: wrapWithRateWindow(new ProcessCliRunner(claudeSpec), claudeRateWindowLimiter, 'platform'),
+      platform: wrapWithRateWindow(
+        new ProcessCliRunner(claudeSpec),
+        claudeRateWindowLimiter,
+        'platform',
+      ),
     };
   }
 
@@ -271,12 +313,18 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
     // its env vars are provider-dependent (images/agent-runner/Dockerfile),
     // not guaranteed to be the same shape as claude's.
     claude: wrapWithRateWindow(
-      new K8sJobRunner(claudeSpec, buildJobRunnerOptions(batchApi, { authSecretName: process.env.CLAUDE_AUTH_SECRET_NAME })),
+      new K8sJobRunner(
+        claudeSpec,
+        buildJobRunnerOptions(batchApi, { authSecretName: process.env.CLAUDE_AUTH_SECRET_NAME }),
+      ),
       claudeRateWindowLimiter,
       'claude',
     ),
     pi: wrapWithRateWindow(
-      new K8sJobRunner(piSpec, buildJobRunnerOptions(batchApi, { authSecretName: process.env.PI_AUTH_SECRET_NAME })),
+      new K8sJobRunner(
+        piSpec,
+        buildJobRunnerOptions(batchApi, { authSecretName: process.env.PI_AUTH_SECRET_NAME }),
+      ),
       buildRateWindowLimiter('PI'),
       'pi',
     ),
@@ -295,7 +343,9 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
         buildJobRunnerOptions(batchApi, {
           authSecretName: process.env.CLAUDE_AUTH_SECRET_NAME,
           serviceAccountName: process.env.PLATFORM_AGENT_SERVICE_ACCOUNT,
-          additionalSecretNames: process.env.PLATFORM_AGENT_SECRET_NAME ? [process.env.PLATFORM_AGENT_SECRET_NAME] : undefined,
+          additionalSecretNames: process.env.PLATFORM_AGENT_SECRET_NAME
+            ? [process.env.PLATFORM_AGENT_SECRET_NAME]
+            : undefined,
           podLabels: { 'agentops/role': 'platform-agent' },
         }),
       ),
@@ -350,7 +400,10 @@ const TIER_REFRESH_INTERVAL_MS = 60_000;
 
 export async function buildGlobalTiers(
   pool: Pool | undefined,
-): Promise<{ tiers: Record<string, import('@agentops/contracts').ModelRef[]> | undefined; stop: () => void }> {
+): Promise<{
+  tiers: Record<string, import('@agentops/contracts').ModelRef[]> | undefined;
+  stop: () => void;
+}> {
   if (!pool) {
     return { tiers: undefined, stop: () => {} };
   }
@@ -462,10 +515,18 @@ async function main(): Promise<void> {
     // boot. A failure here isn't fatal (the worker can still serve devCycle);
     // warn so a genuinely broken namespace surfaces without blocking startup.
     try {
-      await ensureSearchAttributes(c as unknown as OperatorConnectionLike, process.env.TEMPORAL_NAMESPACE);
-      console.log('agentops worker: custom search attributes ensured (project, agentName, workflowType)');
+      await ensureSearchAttributes(
+        c as unknown as OperatorConnectionLike,
+        process.env.TEMPORAL_NAMESPACE,
+      );
+      console.log(
+        'agentops worker: custom search attributes ensured (project, agentName, workflowType)',
+      );
     } catch (err) {
-      console.warn('agentops worker: failed to ensure search attributes — reconcile may reject Schedule creates', err);
+      console.warn(
+        'agentops worker: failed to ensure search attributes — reconcile may reject Schedule creates',
+        err,
+      );
     }
     try {
       await ensureReconcileSchedule(tc.schedule as unknown as ScheduleClientLike, ENGINE_QUEUE);
@@ -475,7 +536,9 @@ async function main(): Promise<void> {
     }
     try {
       if (!enginePool) {
-        console.log('agentops worker: self-heal schedule skipped (no ENGINE_DB_HOST — settings live in DB only)');
+        console.log(
+          'agentops worker: self-heal schedule skipped (no ENGINE_DB_HOST — settings live in DB only)',
+        );
       } else {
         const engineSettingsStore = new PostgresEngineSettingsStore(enginePool);
         await engineSettingsStore.ensureSchema();
@@ -484,8 +547,14 @@ async function main(): Promise<void> {
           console.log('agentops worker: engine_settings seeded with defaults (first boot)');
         }
         const selfHealOpts = await engineSettingsStore.getSelfHeal();
-        await ensureSelfHealSchedule(tc.schedule as unknown as SelfHealScheduleClient, ENGINE_QUEUE, selfHealOpts);
-        console.log(`agentops worker: self-heal schedule ensured (enabled=${selfHealOpts.enabled})`);
+        await ensureSelfHealSchedule(
+          tc.schedule as unknown as SelfHealScheduleClient,
+          ENGINE_QUEUE,
+          selfHealOpts,
+        );
+        console.log(
+          `agentops worker: self-heal schedule ensured (enabled=${selfHealOpts.enabled})`,
+        );
       }
     } catch (err) {
       console.warn('agentops worker: failed to ensure self-heal schedule', err);
@@ -517,9 +586,23 @@ async function main(): Promise<void> {
       : 'agentops worker: tracing disabled (OTEL_EXPORTER_OTLP_ENDPOINT not set)',
   );
 
-  const worker = await createWorker({ taskQueue: ENGINE_QUEUE, activities, connection, namespace: process.env.TEMPORAL_NAMESPACE, tracing });
-  const legacyWorker = await createWorker({ taskQueue: LEGACY_ENGINE_QUEUE, activities, connection, namespace: process.env.TEMPORAL_NAMESPACE, tracing });
-  console.log(`agentops worker started on "${ENGINE_QUEUE}" (+ legacy "${LEGACY_ENGINE_QUEUE}" during cutover)`);
+  const worker = await createWorker({
+    taskQueue: ENGINE_QUEUE,
+    activities,
+    connection,
+    namespace: process.env.TEMPORAL_NAMESPACE,
+    tracing,
+  });
+  const legacyWorker = await createWorker({
+    taskQueue: LEGACY_ENGINE_QUEUE,
+    activities,
+    connection,
+    namespace: process.env.TEMPORAL_NAMESPACE,
+    tracing,
+  });
+  console.log(
+    `agentops worker started on "${ENGINE_QUEUE}" (+ legacy "${LEGACY_ENGINE_QUEUE}" during cutover)`,
+  );
   try {
     await Promise.all([worker.run(), legacyWorker.run()]);
   } finally {

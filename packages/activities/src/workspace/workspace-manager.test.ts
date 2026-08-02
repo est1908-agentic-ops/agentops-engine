@@ -49,6 +49,7 @@ function buildManager(): { manager: WorkspaceManager; gitCalls: string[][] } {
   };
   const manager = new WorkspaceManager({
     resolveGit: () => recording,
+    resolveGitForProject: () => recording,
     cacheDir,
     workspacesDir,
     cloneUrl: () => remoteDir,
@@ -102,6 +103,7 @@ describe('WorkspaceManager', () => {
     const git = new SpawnGitCommandRunner({ authToken: () => 'super-secret' });
     const manager = new WorkspaceManager({
       resolveGit: () => git,
+      resolveGitForProject: () => git,
       cacheDir,
       workspacesDir,
       cloneUrl: () => remoteDir,
@@ -677,6 +679,7 @@ describe('WorkspaceManager — repository sessions', () => {
     };
     const manager = new WorkspaceManager({
       resolveGit: () => git,
+      resolveGitForProject: () => git,
       cacheDir,
       workspacesDir,
       cloneUrl: () => remoteDir,
@@ -755,6 +758,7 @@ describe('WorkspaceManager — repository sessions', () => {
     let time = 100;
     const manager = new WorkspaceManager({
       resolveGit: () => new SpawnGitCommandRunner(),
+      resolveGitForProject: () => new SpawnGitCommandRunner(),
       cacheDir,
       workspacesDir,
       cloneUrl: () => remoteDir,
@@ -782,6 +786,7 @@ describe('WorkspaceManager — repository sessions', () => {
     let time = 0;
     const manager = new WorkspaceManager({
       resolveGit: () => new SpawnGitCommandRunner(),
+      resolveGitForProject: () => new SpawnGitCommandRunner(),
       cacheDir,
       workspacesDir,
       cloneUrl: () => remoteDir,
