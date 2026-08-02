@@ -8,6 +8,7 @@ import {
   readFileSync,
   renameSync,
   symlinkSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -534,6 +535,22 @@ describe('WorkspaceManager — repository sessions', () => {
     expect(gitCalls).toHaveLength(callsAfterFirst);
   });
 
+  it('creates repository-session control directories with engine-only permissions', async () => {
+    const { manager } = buildManager();
+    const session = await manager.prepareRepositorySession('hub', {
+      taskId: 'private-controls',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    const sessionsRoot = join(workspacesDir, 'repository-sessions');
+    const owner = join(sessionsRoot, repositorySessionIdentity('hub'));
+    const locks = join(sessionsRoot, '.locks', repositorySessionIdentity('hub'));
+
+    expect(statSync(owner).mode & 0o777).toBe(0o700);
+    expect(statSync(join(owner, '.staging')).mode & 0o777).toBe(0o700);
+    expect(statSync(locks).mode & 0o777).toBe(0o700);
+    expect(session.workspaceRef).toContain(repositorySessionIdentity('private-controls'));
+  });
+
   it('rejects a different request without mutating an existing session', async () => {
     const { manager } = buildManager();
     const first = await manager.prepareRepositorySession('hub', {
@@ -722,6 +739,74 @@ describe('WorkspaceManager — repository sessions', () => {
     const { removed } = await manager.pruneOrphans([]);
     expect(existsSync(staging)).toBe(false);
     expect(removed).toContain(staging);
+  });
+
+  it('reclaims only an old, empty, generated unmarked staging directory', async () => {
+    const time = Date.now() + 100;
+    const manager = new WorkspaceManager({
+      resolveGit: () => new SpawnGitCommandRunner(),
+      resolveGitForProject: () => new SpawnGitCommandRunner(),
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+      now: () => time,
+      repositorySessionStagingIdleMs: 20,
+    });
+    const staging = join(
+      workspacesDir,
+      'repository-sessions',
+      repositorySessionIdentity('gone'),
+      '.staging',
+      'session-Ab3dE9',
+    );
+    mkdirSync(staging, { recursive: true });
+
+    await manager.pruneOrphans([]);
+
+    expect(existsSync(staging)).toBe(false);
+  });
+
+  it('never recursively removes an unmarked nonempty, malformed, or symlinked staging entry', async () => {
+    const manager = new WorkspaceManager({
+      resolveGit: () => new SpawnGitCommandRunner(),
+      resolveGitForProject: () => new SpawnGitCommandRunner(),
+      cacheDir,
+      workspacesDir,
+      cloneUrl: () => remoteDir,
+      repositorySessionStagingIdleMs: 0,
+    });
+    const stagingRoot = join(
+      workspacesDir,
+      'repository-sessions',
+      repositorySessionIdentity('gone'),
+      '.staging',
+    );
+    const nonempty = join(stagingRoot, 'session-nonempty');
+    const outside = join(root, 'outside-staging');
+    mkdirSync(nonempty, { recursive: true });
+    writeFileSync(join(nonempty, 'sentinel'), 'keep');
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'sentinel'), 'keep');
+    symlinkSync(outside, join(stagingRoot, 'session-symlink'));
+
+    await manager.pruneOrphans([]);
+
+    expect(existsSync(join(nonempty, 'sentinel'))).toBe(true);
+    expect(existsSync(join(outside, 'sentinel'))).toBe(true);
+  });
+
+  it('does not follow a symlinked staging root while pruning', async () => {
+    const manager = buildManager().manager;
+    const owner = join(workspacesDir, 'repository-sessions', repositorySessionIdentity('gone'));
+    const outside = join(root, 'outside-staging-root');
+    mkdirSync(join(outside, 'session-attacker'), { recursive: true });
+    writeFileSync(join(outside, 'session-attacker', 'sentinel'), 'keep');
+    mkdirSync(owner, { recursive: true });
+    symlinkSync(outside, join(owner, '.staging'));
+
+    await manager.pruneOrphans([]);
+
+    expect(existsSync(join(outside, 'session-attacker', 'sentinel'))).toBe(true);
   });
 
   it('uses collision-resistant owner and task path components', async () => {

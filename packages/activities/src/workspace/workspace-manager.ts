@@ -1,6 +1,18 @@
 import { existsSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
-import { lstat, mkdir, mkdtemp, open, readFile, readdir, rename, rm, stat } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  rm,
+  rmdir,
+  stat,
+} from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve, sep } from 'node:path';
 import type { GitCommandRunner } from '@agentops/ports';
@@ -643,8 +655,11 @@ export class WorkspaceManager implements Workspaces {
       'repository-sessions',
       resolve(workspaceRef).split(sep).at(-2)!,
     );
+    const sessionsRoot = join(this.workspacesDir, 'repository-sessions');
     const stagingRoot = join(ownerPath, '.staging');
-    await mkdir(stagingRoot, { recursive: true });
+    await mkdir(sessionsRoot, { recursive: true, mode: 0o700 });
+    await mkdir(ownerPath, { recursive: true, mode: 0o700 });
+    await mkdir(stagingRoot, { recursive: true, mode: 0o700 });
     const stagingEntry = await lstat(stagingRoot);
     if (stagingEntry.isSymbolicLink() || !stagingEntry.isDirectory()) {
       throw new WorkspaceError('repository session staging root is not a real directory', true);
@@ -682,11 +697,48 @@ export class WorkspaceManager implements Workspaces {
   }
 
   private async removeOwnedStagingPath(stagingPath: string): Promise<void> {
-    const root = resolve(stagingPath).split(sep).slice(0, -1).join(sep);
-    const moved = join(root, `.removed-${randomUUID()}`);
-    this.assertPathInside(root, stagingPath);
+    const stagingRoot = resolve(stagingPath).split(sep).slice(0, -1).join(sep);
+    const ownerPath = resolve(stagingRoot).split(sep).slice(0, -1).join(sep);
+    const sessionsRoot = resolve(this.workspacesDir, 'repository-sessions');
+    this.assertPathInside(stagingRoot, stagingPath);
+    if (
+      stagingRoot !== join(ownerPath, '.staging') ||
+      !resolve(stagingPath).split(sep).at(-1)!.startsWith('session-')
+    ) {
+      throw new WorkspaceError('repository session staging path is invalid', true);
+    }
+    await this.assertTrustedStagingPath(sessionsRoot, ownerPath, stagingRoot, stagingPath);
+    const moved = join(ownerPath, `.agentops-removed-${randomUUID()}`);
     await rename(stagingPath, moved);
+    const movedEntry = await lstat(moved);
+    if (movedEntry.isSymbolicLink() || !movedEntry.isDirectory())
+      throw new WorkspaceError(
+        'repository session staging quarantine is not a real directory',
+        true,
+      );
     await rm(moved, { recursive: true, force: true });
+  }
+
+  private async assertTrustedStagingPath(
+    sessionsRoot: string,
+    ownerPath: string,
+    stagingRoot: string,
+    stagingPath?: string,
+  ): Promise<void> {
+    const trustedRoot = await realpath(sessionsRoot);
+    for (const candidate of [
+      sessionsRoot,
+      ownerPath,
+      stagingRoot,
+      ...(stagingPath ? [stagingPath] : []),
+    ]) {
+      const entry = await lstat(candidate);
+      if (entry.isSymbolicLink() || !entry.isDirectory())
+        throw new WorkspaceError('repository session staging path is not a real directory', true);
+      const canonical = await realpath(candidate);
+      if (canonical !== trustedRoot && !canonical.startsWith(trustedRoot + sep))
+        throw new WorkspaceError('repository session staging path escapes the trusted root', true);
+    }
   }
 
   private async removeSessionDirectory(workspaceRef: string): Promise<void> {
@@ -714,15 +766,7 @@ export class WorkspaceManager implements Workspaces {
       const ownerPath = join(sessionsRoot, owner);
       const stagingRoot = join(ownerPath, '.staging');
       try {
-        const ownerEntry = await lstat(ownerPath);
-        const stagingEntry = await lstat(stagingRoot);
-        if (
-          ownerEntry.isSymbolicLink() ||
-          !ownerEntry.isDirectory() ||
-          stagingEntry.isSymbolicLink() ||
-          !stagingEntry.isDirectory()
-        )
-          continue;
+        await this.assertTrustedStagingPath(resolve(sessionsRoot), ownerPath, stagingRoot);
       } catch {
         continue;
       }
@@ -732,7 +776,26 @@ export class WorkspaceManager implements Workspaces {
         try {
           const directory = await lstat(stagingPath);
           if (directory.isSymbolicLink() || !directory.isDirectory()) continue;
-          const metadata = await this.readStagingMetadata(stagingPath);
+          let metadata: RepositorySessionStagingMetadata;
+          try {
+            metadata = await this.readStagingMetadata(stagingPath);
+          } catch {
+            if (
+              /^session-[A-Za-z0-9]{6}$/.test(entry) &&
+              this.now() - directory.mtimeMs > this.repositorySessionStagingIdleMs &&
+              (await readdir(stagingPath)).length === 0
+            ) {
+              await this.assertTrustedStagingPath(
+                resolve(sessionsRoot),
+                ownerPath,
+                stagingRoot,
+                stagingPath,
+              );
+              await rmdir(stagingPath).catch(() => {});
+              if (!existsSync(stagingPath)) removed.push(stagingPath);
+            }
+            continue;
+          }
           try {
             await this.withSessionLock(metadata.workspaceRef, async () => {
               const fresh = await this.readStagingMetadata(stagingPath);
@@ -872,7 +935,7 @@ export class WorkspaceManager implements Workspaces {
     const owner = resolve(workspaceRef).split(sep).at(-2)!;
     const ownerLocksPath = join(lockRoot, owner);
     for (const path of [lockRoot, ownerLocksPath]) {
-      await mkdir(path, { recursive: true });
+      await mkdir(path, { recursive: true, mode: 0o700 });
       const entry = await lstat(path);
       if (entry.isSymbolicLink() || !entry.isDirectory()) {
         throw new WorkspaceError('repository session lock path is not a real directory', true);

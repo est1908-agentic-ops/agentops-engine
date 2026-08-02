@@ -1,5 +1,6 @@
 import { trace } from '@opentelemetry/api';
 import {
+  K8sWorkspaceConfigurationError,
   ProcessCliAuthError,
   RateLimitError,
   RateWindowExceededError,
@@ -231,6 +232,9 @@ export function createActivities(deps: ActivityDependencies) {
           promptSource,
         };
       } catch (err) {
+        if (err instanceof K8sWorkspaceConfigurationError) {
+          throw ApplicationFailure.nonRetryable(err.message, 'K8sWorkspaceConfigurationError');
+        }
         // A rejected credential (bad/expired/revoked token, placeholder key) is
         // definitive, not transient -- retrying just burns the activity's retry
         // budget and delays surfacing the real cause. Fail fast with a clearly

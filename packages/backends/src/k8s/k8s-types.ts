@@ -30,8 +30,17 @@ export interface V1Job {
           command?: string[];
           env?: Array<{ name: string; value: string }>;
           envFrom?: Array<{ secretRef?: { name: string } }>;
-          securityContext?: { runAsNonRoot?: boolean; runAsUser?: number; allowPrivilegeEscalation?: boolean };
-          volumeMounts?: Array<{ name: string; mountPath: string; readOnly?: boolean }>;
+          securityContext?: {
+            runAsNonRoot?: boolean;
+            runAsUser?: number;
+            allowPrivilegeEscalation?: boolean;
+          };
+          volumeMounts?: Array<{
+            name: string;
+            mountPath: string;
+            subPath?: string;
+            readOnly?: boolean;
+          }>;
           readinessProbe?: V1ReadinessProbe;
         }>;
       };

@@ -4,7 +4,12 @@ import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { Context } from '@temporalio/activity';
 import { ApiException } from '@kubernetes/client-node';
-import type { AgentRunResult, BackendRunRequest, VerifyService, VerifyServiceReadiness } from '@agentops/contracts';
+import type {
+  AgentRunResult,
+  BackendRunRequest,
+  VerifyService,
+  VerifyServiceReadiness,
+} from '@agentops/contracts';
 import type { AgentBackend } from '../agent-backend';
 import type { CliSpec } from '../cli-spec';
 import {
@@ -38,6 +43,37 @@ export interface K8sJobRunnerOptions {
   imagePullSecretName?: string;
   heartbeat?: (details: unknown) => void;
   now?: () => number;
+}
+
+// This is operator configuration (the worker and Job container must agree on
+// their shared PVC path), so retrying cannot repair it.
+export class K8sWorkspaceConfigurationError extends Error {}
+
+function workspaceSubPath(workspaceRef: string, workspaceMountPath: string): string {
+  const root = path.posix.normalize(workspaceMountPath);
+  if (
+    !path.posix.isAbsolute(workspaceRef) ||
+    !path.posix.isAbsolute(workspaceMountPath) ||
+    workspaceRef !== path.posix.normalize(workspaceRef) ||
+    workspaceMountPath !== root ||
+    workspaceRef === root
+  ) {
+    throw new K8sWorkspaceConfigurationError(
+      `workspaceRef must be a canonical descendant of the configured workspace mount: ${workspaceRef}`,
+    );
+  }
+  const relative = path.posix.relative(root, workspaceRef);
+  if (
+    relative === '' ||
+    relative === '..' ||
+    relative.startsWith('../') ||
+    path.posix.isAbsolute(relative)
+  ) {
+    throw new K8sWorkspaceConfigurationError(
+      `workspaceRef must be a canonical descendant of the configured workspace mount: ${workspaceRef}`,
+    );
+  }
+  return relative;
 }
 
 // readNamespacedJobStatus has no client-side timeout of its own (the
@@ -148,7 +184,9 @@ function buildInitContainers(services: VerifyService[] | undefined): V1InitConta
     name: service.name,
     image: service.image,
     restartPolicy: 'Always',
-    env: service.env ? Object.entries(service.env).map(([name, value]) => ({ name, value })) : undefined,
+    env: service.env
+      ? Object.entries(service.env).map(([name, value]) => ({ name, value }))
+      : undefined,
     readinessProbe: toReadinessProbe(service.readiness),
   }));
 }
@@ -174,6 +212,7 @@ export function buildAgentJob(
 ): V1Job {
   const args = spec.buildArgs(req);
   const image = req.image ?? spec.image;
+  const workspaceSubpath = workspaceSubPath(req.workspaceRef, opts.workspaceMountPath);
   // A "CHANGEME" placeholder means whoever wired this up (an operator's
   // AGENT_RUNNER_IMAGE, or a project's own agentops.json) never got replaced
   // with a real image -- letting that reach the cluster means an
@@ -190,7 +229,9 @@ export function buildAgentJob(
     ...(opts.additionalSecretNames ?? []).map((name) => ({ secretRef: { name } })),
   ];
   const runAsUser = opts.runAsUser ?? 1000;
-  const imagePullSecrets = opts.imagePullSecretName ? [{ name: opts.imagePullSecretName }] : undefined;
+  const imagePullSecrets = opts.imagePullSecretName
+    ? [{ name: opts.imagePullSecretName }]
+    : undefined;
   const initContainers = buildInitContainers(req.services);
 
   // Mount the base-clone cache too, so the worktree's `.git` gitdir resolves and
@@ -200,7 +241,9 @@ export function buildAgentJob(
   const cacheVolume = mountCache
     ? [{ name: 'workspace-cache', persistentVolumeClaim: { claimName: opts.cachePvcName! } }]
     : [];
-  const cacheMount = mountCache ? [{ name: 'workspace-cache', mountPath: opts.cacheMountPath! }] : [];
+  const cacheMount = mountCache
+    ? [{ name: 'workspace-cache', mountPath: opts.cacheMountPath! }]
+    : [];
 
   return {
     metadata: {
@@ -242,7 +285,11 @@ export function buildAgentJob(
               volumeMounts: [
                 {
                   name: 'workspace-tasks',
-                  mountPath: opts.workspaceMountPath,
+                  // Kubelet resolves subPath safely against the PVC. Coupled
+                  // with engine-owned sibling control dirs, this prevents an
+                  // agent from seeing other sessions or staging state.
+                  mountPath: req.workspaceRef,
+                  subPath: workspaceSubpath,
                 },
                 ...cacheMount,
               ],
