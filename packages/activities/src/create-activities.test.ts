@@ -1402,6 +1402,56 @@ describe('createActivities — repository sessions', () => {
     },
   ];
 
+  it('records only operational repository-session create attributes', async () => {
+    const { projectContext } = await import('./project-context');
+    const exporter = new InMemorySpanExporter();
+    const provider = new NodeTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(exporter)],
+    });
+    provider.register();
+    const span = provider.getTracer('test').startSpan('CreateRepositorySession');
+    const commit = 'b'.repeat(40);
+    const activities = createActivities({
+      ...buildDeps(),
+      registry: [{ ...registry[0], readRepositories: ['acme/shared', 'acme/private-repo'] }],
+      workspaces: {
+        ...buildDeps().workspaces,
+        prepareRepositorySession: vi.fn().mockResolvedValue({
+          workspaceRef: 'session-ref',
+          repositories: [
+            { repo: 'acme/private-repo', relativePath: 'repositories/acme/private-repo', commit },
+          ],
+        }),
+      } as Workspaces,
+    });
+
+    await context.with(trace.setSpan(context.active(), span), () =>
+      projectContext.run({ project: 'acme' }, () =>
+        activities.createRepositorySession({
+          taskId: 'safe-task',
+          repositories: [{ repo: 'acme/private-repo', ref: 'private-ref' }],
+        }),
+      ),
+    );
+    span.end();
+    const [recorded] = exporter.getFinishedSpans();
+    await provider.shutdown();
+
+    expect(recorded.attributes).toMatchObject({
+      'agentops.project': 'acme',
+      'agentops.task_id': 'safe-task',
+      'agentops.repository.count': 1,
+      'agentops.workspace.kind': 'repository-session',
+      'agentops.workspace.operation': 'create',
+      'agentops.workspace.outcome': 'success',
+    });
+    expect(Object.values(recorded.attributes).join(' ')).not.toContain('acme/private-repo');
+    expect(Object.values(recorded.attributes).join(' ')).not.toContain('private-ref');
+    expect(Object.values(recorded.attributes).join(' ')).not.toContain(commit);
+    expect(Object.keys(recorded.attributes)).not.toContain('agentops.repository.names');
+    expect(Object.keys(recorded.attributes)).not.toContain('agentops.repository.commits');
+  });
+
   it.each([
     { taskId: 'task', repositories: [], label: 'an empty repository list' },
     {

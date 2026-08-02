@@ -739,10 +739,6 @@ export function createActivities(deps: ActivityDependencies) {
           'agentops.project': caller.project,
           'agentops.task_id': req.taskId,
           'agentops.repository.count': req.repositories.length,
-          'agentops.repository.names': req.repositories.map((repository) => repository.repo),
-          'agentops.repository.commits': parsed.data.repositories.map(
-            (repository) => repository.commit,
-          ),
           'agentops.workspace.kind': 'repository-session',
           'agentops.workspace.operation': 'create',
           'agentops.workspace.outcome': 'success',
