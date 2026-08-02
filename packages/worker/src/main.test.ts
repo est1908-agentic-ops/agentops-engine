@@ -168,6 +168,30 @@ describe('buildActivityDependencies', () => {
         rmSync(defaultScratchDir, { recursive: true, force: true });
       }
     });
+
+    it.each([false, true])(
+      'uses activity cancellation for real session managers inCluster=%s',
+      async (inCluster) => {
+        const controller = new AbortController();
+        controller.abort();
+        const workspacesDir = join(root, `workspace-tasks-${String(inCluster)}`);
+        const deps = buildActivityDependencies(
+          registry,
+          workspacesDir,
+          join(root, 'cache'),
+          false,
+          inCluster,
+          () => controller.signal,
+        );
+
+        await expect(
+          deps.workspaces.prepareRepositorySession('demo', {
+            taskId: 'cancelled',
+            repositories: [{ repo: 'octocat/demo' }],
+          }),
+        ).rejects.toThrow(/cancelled/);
+      },
+    );
   });
 });
 

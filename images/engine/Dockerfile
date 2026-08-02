@@ -84,7 +84,7 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
     && apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates
+    && apt-get install -y --no-install-recommends git ca-certificates util-linux
 # Same explicit allowlist as `base` -- see the comment there. Repeated rather
 # than shared because `worker` deliberately forks from `deps`, not `base`, to
 # keep the apt-get layer's cache key off the source digest.

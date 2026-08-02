@@ -1,4 +1,6 @@
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from 'node:fs';
+import { PassThrough } from 'node:stream';
+import { EventEmitter } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -106,6 +108,54 @@ describe('LocalRepositorySessionCoordinator', () => {
 });
 
 describe('FlockRepositorySessionCoordinator', () => {
+  it('waits for an operation to settle after unexpected helper loss', async () => {
+    const child = Object.assign(new EventEmitter(), {
+      stdin: new PassThrough(),
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      exitCode: null as number | null,
+      kill: () => true,
+    });
+    const coordinator = new FlockRepositorySessionCoordinator(
+      '/fake/flock',
+      1_000,
+      () => child as never,
+    );
+    let release!: () => void;
+    const delayedOperation = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered!: () => void;
+    const operationEntered = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let observedLoss = false;
+    let settled = false;
+    const held = coordinator
+      .withLock(join(root(), 'lock'), async (signal) => {
+        signal?.addEventListener('abort', () => {
+          observedLoss = true;
+        });
+        entered();
+        await delayedOperation;
+      })
+      .finally(() => {
+        settled = true;
+      });
+    process.nextTick(() => child.stdout.write('AGENTOPS_REPOSITORY_SESSION_LOCK_ACQUIRED\n'));
+    await operationEntered;
+    child.exitCode = 1;
+    child.emit('exit', 1);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(observedLoss).toBe(true);
+    expect(settled).toBe(false);
+    release();
+    await expect(held).rejects.toMatchObject({
+      nonRetryable: false,
+      message: expect.stringContaining('lost'),
+    });
+  });
+
   it('uses a fixed child protocol after flock acquires the stable lock file', () => {
     expect(repositorySessionFlockArgs('/locks/a.lock', 1_500)).toEqual([
       '--exclusive',

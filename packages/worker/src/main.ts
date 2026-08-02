@@ -81,6 +81,7 @@ export function buildActivityDependencies(
   // so this fails fast instead. Defaults false to preserve the local/test path.
   requireRegistry = false,
   inCluster = false,
+  getAbortSignal: () => AbortSignal | undefined = getActivityCancellationSignal,
 ): ActivityWiring {
   if (registry.length === 0) {
     if (requireRegistry) {
@@ -138,7 +139,7 @@ export function buildActivityDependencies(
       workspacesDir,
       cacheDir,
       repositorySessionCoordinator: inCluster ? new FlockRepositorySessionCoordinator() : undefined,
-      getAbortSignal: inCluster ? getActivityCancellationSignal : undefined,
+      getAbortSignal,
     }),
   };
 }

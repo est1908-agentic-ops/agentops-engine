@@ -95,6 +95,7 @@ export class FlockRepositorySessionCoordinator implements RepositorySessionCoord
   constructor(
     private readonly flockPath = '/usr/bin/flock',
     private readonly defaultTimeoutMs = DEFAULT_REPOSITORY_SESSION_LOCK_TIMEOUT_MS,
+    private readonly spawnProcess: typeof spawn = spawn,
   ) {}
 
   async withLock<T>(
@@ -108,12 +109,32 @@ export class FlockRepositorySessionCoordinator implements RepositorySessionCoord
       options.timeoutMs ?? this.defaultTimeoutMs,
       options.signal,
     );
+    const lockLoss = new AbortController();
+    let normalRelease = false;
+    let lockLost = false;
+    const onExit = () => {
+      if (!normalRelease) {
+        lockLost = true;
+        lockLoss.abort();
+      }
+    };
+    child.once('exit', onExit);
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, lockLoss.signal])
+      : lockLoss.signal;
     try {
       // Once acquired, cancellation is deliberately only propagated to the
       // operation. Releasing here would let a clone that ignores cancellation
       // continue without its kernel lock.
-      return await operation(options.signal);
+      const result = await operation(signal);
+      if (lockLost) throw new WorkspaceError('repository session flock lock was lost');
+      return result;
+    } catch (error) {
+      if (lockLost) throw new WorkspaceError('repository session flock lock was lost');
+      throw error;
     } finally {
+      normalRelease = true;
+      child.removeListener('exit', onExit);
       const exited =
         child.exitCode !== null
           ? Promise.resolve()
@@ -156,7 +177,7 @@ export class FlockRepositorySessionCoordinator implements RepositorySessionCoord
     if (signal?.aborted)
       return Promise.reject(new WorkspaceError('repository session lock acquisition cancelled'));
     return new Promise((resolveAcquire, rejectAcquire) => {
-      const child = spawn(
+      const child = this.spawnProcess(
         this.flockPath,
         repositorySessionFlockArgs(resolve(lockPath), timeoutMs),
         {
