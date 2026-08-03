@@ -577,6 +577,7 @@ async function main(): Promise<void> {
     workspaces,
     prompts: new PromptPack(),
     registry,
+    managedProjectDeps,
     globalTiers,
     filedFindings,
     scheduleClient,
