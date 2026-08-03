@@ -4,7 +4,12 @@ import { context, trace } from '@opentelemetry/api';
 import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import type { AgentBackend } from '@agentops/backends';
-import type { BackendRunRequest, ResolvedProjectEntry } from '@agentops/contracts';
+import {
+  parseProjectConfig,
+  type BackendRunRequest,
+  type ManagedProjectStore,
+  type ResolvedProjectEntry,
+} from '@agentops/contracts';
 import {
   ProcessCliAuthError,
   RateLimitError,
@@ -21,6 +26,7 @@ import { InMemoryStageResultStore } from './stage-result-store';
 import { InMemoryFiledFindingStore } from './filed-finding-store';
 import { MemoryWorkspaceManager } from './workspace/memory-workspace-manager';
 import { WorkspaceError, type Workspaces } from './workspace/workspace-manager';
+import type { ManagedProjectRegistryDeps } from './resolve-managed-projects';
 
 function buildDeps() {
   return {
@@ -35,6 +41,39 @@ function buildDeps() {
     filedFindings: new InMemoryFiledFindingStore(),
     heartbeat: () => {},
   };
+}
+
+function managedProjectDeps(
+  repo: string,
+  config: ReturnType<typeof parseProjectConfig> | null,
+): ManagedProjectRegistryDeps {
+  const managedProject = {
+    id: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+    project: 'acme-web',
+    repo,
+    readRepositories: [],
+    credentialSet: false,
+    config,
+    createdAt: '2026-08-03T00:00:00.000Z',
+    updatedAt: '2026-08-03T00:00:00.000Z',
+    trackerType: 'github' as const,
+  };
+  const store: ManagedProjectStore = {
+    async get(requestedRepo: string) {
+      return requestedRepo === repo ? managedProject : null;
+    },
+    async getByProject(project: string) {
+      return project === managedProject.project ? managedProject : null;
+    },
+    async getByLinearTeamKey() {
+      return null;
+    },
+    async list() {
+      return [managedProject];
+    },
+  };
+
+  return { store, resolveToken: async () => 'unused' };
 }
 
 describe('createActivities', () => {
@@ -1079,6 +1118,36 @@ describe('createActivities — runAgent project authorization', () => {
 });
 
 describe('createActivities — resolveRepoConfig', () => {
+  it('resolves a managed project config from the store without reading SCM', async () => {
+    const deps = {
+      ...buildDeps(),
+      managedProjectDeps: managedProjectDeps(
+        'acme/web',
+        parseProjectConfig({ fastVerifyCommands: ['pnpm lint'] }),
+      ),
+    };
+    deps.registry = [
+      {
+        project: 'acme-web',
+        repo: 'acme/web',
+        trackerType: 'github',
+        token: 'fake',
+        readRepositories: [],
+      },
+    ];
+    const readFileSpy = vi.spyOn(deps.scm, 'readFile');
+    const activities = createActivities(deps);
+
+    const result = await activities.resolveRepoConfig('acme/web');
+
+    expect(result).toMatchObject({
+      registered: true,
+      project: 'acme-web',
+      config: { fastVerifyCommands: ['pnpm lint'] },
+    });
+    expect(readFileSpy).not.toHaveBeenCalled();
+  });
+
   it("resolves project from the registry and loads that repo's ProjectConfig", async () => {
     const deps = buildDeps();
     deps.scm.seedFile(
@@ -1118,6 +1187,70 @@ describe('createActivities — resolveRepoConfig', () => {
     // the real (non-fake) ScmPort throws for any repo it isn't configured
     // for, so resolveRepoConfig must never reach it for an unregistered repo.
     expect(readFileSpy).not.toHaveBeenCalled();
+  });
+
+  it('loads agents and worker from a managed project config without reading SCM', async () => {
+    const deps = {
+      ...buildDeps(),
+      managedProjectDeps: managedProjectDeps(
+        'acme/web',
+        parseProjectConfig({
+          agents: [
+            {
+              name: 'nightly-scan',
+              workflow: 'projectScan',
+              schedule: '0 2 * * *',
+            },
+          ],
+          worker: { image: 'ghcr.io/acme/web-worker:1.2.3', taskQueue: 'proj-acme-web' },
+        }),
+      ),
+    };
+    const readFileSpy = vi.spyOn(deps.scm, 'readFile');
+    const activities = createActivities(deps);
+
+    const manifest = await activities.loadAgentsManifest('acme-web', 'acme/web');
+
+    expect(manifest).toEqual({
+      agents: [
+        {
+          name: 'nightly-scan',
+          workflow: 'projectScan',
+          schedule: '0 2 * * *',
+          input: {},
+          enabled: true,
+          timezone: 'UTC',
+          overlap: 'skip',
+        },
+      ],
+      worker: {
+        image: 'ghcr.io/acme/web-worker:1.2.3',
+        taskQueue: 'proj-acme-web',
+        replicas: 1,
+        externalSecrets: [],
+      },
+    });
+    expect(readFileSpy).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the repository manifest when managed project config is null', async () => {
+    const deps = { ...buildDeps(), managedProjectDeps: managedProjectDeps('acme/web', null) };
+    deps.scm.seedFile(
+      'acme/web',
+      'agentops.json',
+      JSON.stringify({
+        agents: [{ name: 'repo-scan', workflow: 'projectScan', schedule: 'continuous' }],
+      }),
+    );
+    const readFileSpy = vi.spyOn(deps.scm, 'readFile');
+    const activities = createActivities(deps);
+
+    const manifest = await activities.loadAgentsManifest('acme-web', 'acme/web');
+
+    expect(manifest.agents).toMatchObject([
+      { name: 'repo-scan', workflow: 'projectScan', schedule: 'continuous' },
+    ]);
+    expect(readFileSpy).toHaveBeenCalledWith('acme/web', 'agentops.json');
   });
 
   it('createIssue throws ProjectAuthorizationError when caller project does not own the repo', async () => {

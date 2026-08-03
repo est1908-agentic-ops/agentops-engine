@@ -58,7 +58,8 @@ import {
   type PreparedWorkspace,
   type Workspaces,
 } from './workspace/workspace-manager';
-import { loadProjectConfig } from './load-project-config';
+import { resolveProjectConfig } from './resolve-project-config';
+import type { ManagedProjectRegistryDeps } from './resolve-managed-projects';
 import { ApplicationFailure } from '@temporalio/common';
 import { Context } from '@temporalio/activity';
 import {
@@ -76,6 +77,7 @@ export interface ActivityDependencies {
   workspaces: Workspaces;
   prompts: PromptPack;
   registry: ResolvedProjectEntry[];
+  managedProjectDeps?: ManagedProjectRegistryDeps;
   // Global tier table loaded from Postgres (SP3-A). When omitted, resolveTier
   // falls back to DEFAULT_TIERS (the hardcoded seed) -- the in-memory/demo path.
   globalTiers?: Record<string, ModelRef[]>;
@@ -512,7 +514,7 @@ export function createActivities(deps: ActivityDependencies) {
         // "skip this proposed fix" rather than crashing the whole run).
         return { registered: false, project: 'default', config: parseProjectConfig({}) };
       }
-      const config = await loadProjectConfig(deps.scm, repo);
+      const config = await resolveProjectConfig(deps.managedProjectDeps, deps.scm, repo);
       return { registered: true, project: entry.project, config };
     },
 
@@ -531,7 +533,7 @@ export function createActivities(deps: ActivityDependencies) {
       // Agents + worker are the corresponding blocks of the project's
       // agentops.json (validated by parseProjectConfig). A missing file yields
       // full defaults, i.e. no agents and no worker.
-      const config = await loadProjectConfig(deps.scm, repo);
+      const config = await resolveProjectConfig(deps.managedProjectDeps, deps.scm, repo);
       return { agents: config.agents ?? [], worker: config.worker };
     },
 
