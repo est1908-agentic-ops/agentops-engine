@@ -1,117 +1,123 @@
-import type { ResolvedProjectEntry } from '@agentops/contracts';
+import type { ManagedProjectStore, ResolvedProjectEntry } from '@agentops/contracts';
 import { normalizeRepo } from '@agentops/ports';
-import { decryptForManagedProject } from './credential-crypto';
-import type { PostgresManagedProjectStore } from './postgres-managed-project-store';
 
 export interface ManagedProjectRegistryDeps {
-  store: PostgresManagedProjectStore;
-  /** Base64 PKCS8 DER private key -- decrypts credentials this process is allowed to use. */
-  privateKey: string;
+  store: ManagedProjectStore;
+  /**
+   * Resolves a project's `tokenSecret` (a Kubernetes Secret NAME) to the
+   * actual token value -- per-project, not a single shared `GITHUB_TOKEN`
+   * (that design was superseded). The real implementation is
+   * `KubeTokenResolver.get`, bound to a namespace; the cli's local-dev path
+   * (no in-cluster API available) falls back to reading `GITHUB_TOKEN` from
+   * the environment instead (see packages/cli/src/main.ts).
+   */
+  resolveToken: (tokenSecret: string) => Promise<string>;
 }
 
-async function resolveOne(deps: ManagedProjectRegistryDeps, repo: string): Promise<ResolvedProjectEntry | null> {
-  const managedProject = await deps.store.get(repo);
+async function buildResolvedEntry(
+  deps: ManagedProjectRegistryDeps,
+  managedProject: Awaited<ReturnType<ManagedProjectStore['get']>>,
+): Promise<ResolvedProjectEntry | null> {
   if (!managedProject) {
     return null;
   }
-  const encryptedToken = await deps.store.getEncryptedToken(repo);
-  if (!encryptedToken) {
-    return null; // shouldn't happen (get() and getEncryptedToken() query the same row) -- treat as unregistered rather than throw
-  }
-  let token: string;
-  try {
-    token = decryptForManagedProject(deps.privateKey, encryptedToken);
-  } catch (err) {
-    console.warn(`resolveManagedProjects: failed to decrypt credential for repo "${repo}" — skipping`, err);
-    return null;
-  }
 
-  // Canonicalize to short `owner/repo`: a project registered through the CRUD
-  // with a full GitHub URL is stored verbatim, but every downstream consumer
-  // (createProjectScopedPorts keys, githubCloneUrl, resolveRepoConfig) assumes
-  // the short form. Applies to both tracker types -- the repo a linear-tracked
-  // project's PR lands in has the same URL-vs-short-form ambiguity.
   const normalizedRepo = normalizeRepo(managedProject.repo);
 
-  if (managedProject.trackerType !== 'linear') {
-    return { trackerType: 'github', project: managedProject.project, repo: normalizedRepo, token };
-  }
+  if (managedProject.trackerType === 'linear') {
+    if (!managedProject.linearTokenSecret) {
+      throw new Error(
+        `resolveManagedProjectEntry: managed project "${managedProject.project}" (Linear team "${managedProject.linearTeamKey}") has no linearTokenSecret configured`,
+      );
+    }
+    if (!managedProject.tokenSecret) {
+      throw new Error(
+        `resolveManagedProjectEntry: managed project "${managedProject.project}" (Linear team "${managedProject.linearTeamKey}") has no tokenSecret configured`,
+      );
+    }
 
-  const encryptedLinearToken = await deps.store.getEncryptedLinearToken(repo);
-  if (!encryptedLinearToken) {
-    console.warn(`resolveManagedProjects: linear-tracked repo "${repo}" has no Linear credential set — skipping`);
-    return null;
+    const token = await deps.resolveToken(managedProject.tokenSecret);
+    const linearToken = await deps.resolveToken(managedProject.linearTokenSecret);
+
+    return {
+      trackerType: 'linear',
+      project: managedProject.project,
+      repo: normalizedRepo,
+      readRepositories: managedProject.readRepositories ?? [],
+      token,
+      linearTeamKey: managedProject.linearTeamKey,
+      linearTriggerLabelId: managedProject.linearTriggerLabelId,
+      linearToken,
+    };
+  } else {
+    // GitHub tracker
+    if (!managedProject.tokenSecret) {
+      throw new Error(
+        `resolveManagedProjectEntry: managed project "${managedProject.project}" (repo "${normalizedRepo}") has no tokenSecret configured`,
+      );
+    }
+
+    const token = await deps.resolveToken(managedProject.tokenSecret);
+
+    return {
+      trackerType: 'github',
+      project: managedProject.project,
+      repo: normalizedRepo,
+      readRepositories: managedProject.readRepositories ?? [],
+      token,
+    };
   }
-  let linearToken: string;
-  try {
-    linearToken = decryptForManagedProject(deps.privateKey, encryptedLinearToken);
-  } catch (err) {
-    console.warn(`resolveManagedProjects: failed to decrypt Linear credential for repo "${repo}" — skipping`, err);
-    return null;
-  }
-  return {
-    trackerType: 'linear',
-    project: managedProject.project,
-    repo: normalizedRepo,
-    token,
-    linearTeamKey: managedProject.linearTeamKey,
-    linearTriggerLabelId: managedProject.linearTriggerLabelId,
-    linearToken,
-  };
+}
+
+async function resolveOne(
+  deps: ManagedProjectRegistryDeps,
+  repo: string,
+): Promise<ResolvedProjectEntry | null> {
+  const managedProject = await deps.store.get(repo);
+  return buildResolvedEntry(deps, managedProject);
 }
 
 /**
- * DB-only lookup for one repo. `deps` is undefined when no DB is configured
- * at all (ENGINE_DB_HOST/private key unset), in which case nothing is
+ * Store-only lookup for one repo. `deps` is undefined when no store is
+ * configured at all (no GITHUB_TOKEN/dir), in which case nothing is
  * registered anywhere -- there is no other registry to fall back to (the
  * static PROJECT_REGISTRY_JSON mechanism was removed; see
  * docs/superpowers/specs/2026-07-09-linear-trigger-design.md's DB-only addendum).
  */
-export async function resolveManagedProjectEntry(deps: ManagedProjectRegistryDeps | undefined, repo: string): Promise<ResolvedProjectEntry | null> {
+export async function resolveManagedProjectEntry(
+  deps: ManagedProjectRegistryDeps | undefined,
+  repo: string,
+): Promise<ResolvedProjectEntry | null> {
   if (!deps) {
     return null;
   }
   return resolveOne(deps, repo);
 }
 
-export type ResolvedLinearProjectEntry = ResolvedProjectEntry & { trackerType: 'linear' };
-
-function isLinearEntry(entry: ResolvedProjectEntry | null): entry is ResolvedLinearProjectEntry {
-  return entry !== null && entry.trackerType === 'linear';
-}
-
-async function resolveOneByLinearTeamKey(deps: ManagedProjectRegistryDeps, teamKey: string): Promise<ResolvedLinearProjectEntry | null> {
-  const managedProject = await deps.store.getByLinearTeamKey(teamKey);
-  if (!managedProject || managedProject.trackerType !== 'linear') {
-    return null;
-  }
-  const resolved = await resolveOne(deps, managedProject.repo);
-  return isLinearEntry(resolved) ? resolved : null;
-}
-
 /**
- * Same DB-only shape as resolveManagedProjectEntry, but keyed by a Linear
- * team key instead of a repo -- how the gateway routes a Linear webhook
- * (which only carries an issue identifier like "ENG-123", not a GitHub repo)
- * to the project it belongs to.
+ * Linear-tracked project lookup by team key. `deps` is undefined when no
+ * store is configured at all.
  */
 export async function resolveManagedProjectEntryByLinearTeamKey(
   deps: ManagedProjectRegistryDeps | undefined,
   teamKey: string,
-): Promise<ResolvedLinearProjectEntry | null> {
+): Promise<ResolvedProjectEntry | null> {
   if (!deps) {
     return null;
   }
-  return resolveOneByLinearTeamKey(deps, teamKey);
+  const managedProject = await deps.store.getByLinearTeamKey(teamKey);
+  return buildResolvedEntry(deps, managedProject);
 }
 
 /**
- * All DB-managed projects, decrypted -- used once at worker boot to build
- * ports for every registered repo (worker pre-builds ports for every
- * registered repo at startup rather than per request; see the data-layer
- * plan's Task 6 for why this is boot-time rather than fully dynamic).
+ * All managed projects -- used once at worker boot to build ports for every
+ * registered repo (worker pre-builds ports for every registered repo at
+ * startup rather than per request; see the data-layer plan's Task 6 for why
+ * this is boot-time rather than fully dynamic).
  */
-export async function loadManagedProjectRegistry(deps: ManagedProjectRegistryDeps): Promise<ResolvedProjectEntry[]> {
+export async function loadManagedProjectRegistry(
+  deps: ManagedProjectRegistryDeps,
+): Promise<ResolvedProjectEntry[]> {
   const managedProjects = await deps.store.list();
   const entries: ResolvedProjectEntry[] = [];
   for (const project of managedProjects) {

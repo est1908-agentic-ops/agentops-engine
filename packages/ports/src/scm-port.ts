@@ -1,4 +1,4 @@
-import type { PrFeedback } from '@agentops/contracts';
+import type { MergePrRequest, MergePrResult, PrFeedback, PrSnapshot } from '@agentops/contracts';
 
 export interface OpenPrRequest {
   repo: string;
@@ -16,6 +16,8 @@ export interface OpenPrResult {
 export interface ScmPort {
   openPr(req: OpenPrRequest): Promise<OpenPrResult>;
   getPrFeedback(prRef: string): Promise<PrFeedback>;
+  getPrSnapshot(prRef: string): Promise<PrSnapshot>;
+  mergePr(req: MergePrRequest): Promise<MergePrResult>;
   push(repo: string, workspaceRef: string, branch: string, contentHash: string): Promise<void>;
   readFile(repo: string, path: string): Promise<string | null>;
 }

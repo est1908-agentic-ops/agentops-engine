@@ -4,10 +4,14 @@ import { ensureSelfHealSchedule } from './ensure-self-heal-schedule';
 describe('ensureSelfHealSchedule', () => {
   it('creates the self-heal schedule when enabled', async () => {
     const create = vi.fn().mockResolvedValue({});
-    await ensureSelfHealSchedule({ create, getHandle: () => ({ delete: vi.fn() }) } as never, 'agentops-engine', {
-      enabled: true,
-      cron: '*/30 * * * *',
-    });
+    await ensureSelfHealSchedule(
+      { create, getHandle: () => ({ delete: vi.fn() }) } as never,
+      'agentops-engine',
+      {
+        enabled: true,
+        cron: '*/30 * * * *',
+      },
+    );
     const opts = create.mock.calls[0][0] as {
       scheduleId: string;
       spec: { cronExpressions?: string[]; timezone?: string; cron?: unknown };
@@ -27,20 +31,28 @@ describe('ensureSelfHealSchedule', () => {
   it('is idempotent when the schedule already exists', async () => {
     const create = vi.fn().mockRejectedValue(new Error('schedule already exists'));
     await expect(
-      ensureSelfHealSchedule({ create, getHandle: () => ({ delete: vi.fn() }) } as never, 'agentops-engine', {
-        enabled: true,
-        cron: '*/30 * * * *',
-      }),
+      ensureSelfHealSchedule(
+        { create, getHandle: () => ({ delete: vi.fn() }) } as never,
+        'agentops-engine',
+        {
+          enabled: true,
+          cron: '*/30 * * * *',
+        },
+      ),
     ).resolves.toBeUndefined();
   });
 
   it('deletes the schedule when disabled', async () => {
     const del = vi.fn().mockResolvedValue(undefined);
     const create = vi.fn();
-    await ensureSelfHealSchedule({ create, getHandle: () => ({ delete: del }) } as never, 'agentops-engine', {
-      enabled: false,
-      cron: '*/30 * * * *',
-    });
+    await ensureSelfHealSchedule(
+      { create, getHandle: () => ({ delete: del }) } as never,
+      'agentops-engine',
+      {
+        enabled: false,
+        cron: '*/30 * * * *',
+      },
+    );
     expect(del).toHaveBeenCalled();
     expect(create).not.toHaveBeenCalled();
   });
@@ -48,10 +60,14 @@ describe('ensureSelfHealSchedule', () => {
   it('swallows a not-found error when disabling an absent schedule', async () => {
     const del = vi.fn().mockRejectedValue(new Error('schedule not found'));
     await expect(
-      ensureSelfHealSchedule({ create: vi.fn(), getHandle: () => ({ delete: del }) } as never, 'agentops-engine', {
-        enabled: false,
-        cron: '*/30 * * * *',
-      }),
+      ensureSelfHealSchedule(
+        { create: vi.fn(), getHandle: () => ({ delete: del }) } as never,
+        'agentops-engine',
+        {
+          enabled: false,
+          cron: '*/30 * * * *',
+        },
+      ),
     ).resolves.toBeUndefined();
   });
 });

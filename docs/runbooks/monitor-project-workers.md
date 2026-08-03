@@ -1,7 +1,7 @@
 # Runbook: repo-sourced project-worker pipeline (dev-agents)
 
 How to monitor, test, and debug the pipeline that deploys **Tier-2 project workers**
-from a `worker` block in each project's `agents.json` — no per-project platform YAML.
+from a `worker` block in each project's `agentops.json` — no per-project platform YAML.
 
 Design: [`docs/superpowers/specs/2026-07-12-project-worker-onboarding-design.md`](../superpowers/specs/2026-07-12-project-worker-onboarding-design.md).
 First proven end-to-end on dev-agents 2026-07-13 (a project's own smoke workflow completing on its `proj-<project>` queue).
@@ -9,7 +9,7 @@ First proven end-to-end on dev-agents 2026-07-13 (a project's own smoke workflow
 ## The chain (what to picture)
 
 ```
-project repo agents.json  ──(worker block)──▶  gateway  POST /api/v1/getparams.execute
+project repo agentops.json  ──(worker block)──▶  gateway  POST /api/v1/getparams.execute
         │                                        (reads the block via the per-project
         │                                         SCM token; bearer ARGOCD_PLUGIN_TOKEN)
         │                                               │
@@ -93,7 +93,7 @@ temporal workflow result --workflow-id smoke-manual-1 --namespace "$NS"
   returns 401, it's holding a stale token env — `kubectl rollout restart deploy/engine-gateway -n dev-agents`
   so it re-reads the Secret. The token must match on both sides (argocd/argocd-plugin-token[`token`] ==
   dev-agents/argocd-plugin-token[`ARGOCD_PLUGIN_TOKEN`]).
-- **A new project's worker never appears.** Its `agents.json` has no `worker` block, or the gateway
+- **A new project's worker never appears.** Its `agentops.json` has no `worker` block, or the gateway
   can't read the repo (SCM token) — the generator omits it. Check gateway logs + the block is committed.
 - **A worker got pruned.** The generator returned `[]` for it (worker block missing at generation
   time). Ensure the project's `worker` block lands before the generator runs.

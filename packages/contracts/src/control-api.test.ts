@@ -63,9 +63,22 @@ describe('RunListItemSchema', () => {
   });
 
   it('accepts the full set of realistic terminal statuses', () => {
-    for (const status of ['RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED', 'TERMINATED', 'TIMED_OUT', 'CONTINUED_AS_NEW']) {
+    for (const status of [
+      'RUNNING',
+      'COMPLETED',
+      'FAILED',
+      'CANCELLED',
+      'TERMINATED',
+      'TIMED_OUT',
+      'CONTINUED_AS_NEW',
+    ]) {
       expect(() =>
-        RunListItemSchema.parse({ workflowId: 'w', runId: 'r', status, startTime: '2026-07-07T00:00:00.000Z' }),
+        RunListItemSchema.parse({
+          workflowId: 'w',
+          runId: 'r',
+          status,
+          startTime: '2026-07-07T00:00:00.000Z',
+        }),
       ).not.toThrow();
     }
   });

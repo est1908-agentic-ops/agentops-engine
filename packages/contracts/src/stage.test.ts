@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { StageSchema, TaskStatusSchema, BlockReasonSchema } from './stage';
+import { StageSchema, TaskStatusSchema, BlockReasonSchema, READ_ONLY_STAGES, isReadOnlyStage } from './stage';
 
 describe('StageSchema', () => {
   it('accepts every fixed-vocabulary stage', () => {
@@ -34,6 +34,24 @@ describe('StageSchema', () => {
   });
 });
 
+describe('isReadOnlyStage / READ_ONLY_STAGES', () => {
+  it('classifies exactly bughunt as read-only, all others as read-write', () => {
+    const allStages = StageSchema.options;
+    for (const stage of allStages) {
+      if (stage === 'bughunt') {
+        expect(isReadOnlyStage(stage)).toBe(true);
+      } else {
+        expect(isReadOnlyStage(stage)).toBe(false);
+      }
+    }
+  });
+
+  it('READ_ONLY_STAGES contains only bughunt', () => {
+    expect(READ_ONLY_STAGES.size).toBe(1);
+    expect(READ_ONLY_STAGES.has('bughunt')).toBe(true);
+  });
+});
+
 describe('TaskStatusSchema', () => {
   it('accepts pending|running|blocked|done|failed', () => {
     for (const status of ['pending', 'running', 'blocked', 'done', 'failed']) {
@@ -51,6 +69,7 @@ describe('BlockReasonSchema', () => {
       'babysit-brake',
       'max-attempts',
       'hook-required-failed',
+      'pr-landing-blocked',
     ];
     for (const reason of reasons) {
       expect(BlockReasonSchema.parse(reason)).toBe(reason);

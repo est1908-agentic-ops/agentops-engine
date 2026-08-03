@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "dotenv": "^16.6.1",
+    "yaml": "^2",
+    "@kubernetes/client-node": "^1.3.0",
     "@agentops/contracts": "workspace:*",
     "@agentops/policies": "workspace:*",
     "@agentops/ports": "workspace:*",

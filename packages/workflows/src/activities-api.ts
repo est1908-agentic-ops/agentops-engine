@@ -1,4 +1,14 @@
-import type { AgentRunRequest, AgentRunResult, PrFeedback, ProjectConfig, RunStats, StageResult } from '@agentops/contracts';
+import type {
+  AgentRunRequest,
+  AgentRunResult,
+  MergePrRequest,
+  MergePrResult,
+  PrFeedback,
+  PrSnapshot,
+  ProjectConfig,
+  RunStats,
+  StageResult,
+} from '@agentops/contracts';
 import type { AgentSpec, AgentsManifest } from '@agentops/contracts';
 import type { ExistingSchedule, ReconcilePlan } from '@agentops/policies';
 
@@ -41,7 +51,9 @@ export interface PreparedWorkspace {
 }
 
 export interface DevCycleActivities {
-  runAgent(req: AgentRunRequest): Promise<AgentRunResult & { promptHash: string; promptSource: string }>;
+  runAgent(
+    req: AgentRunRequest,
+  ): Promise<AgentRunResult & { promptHash: string; promptSource: string }>;
   resolveRepoConfig(repo: string): Promise<RepoConfigResolution>;
   getIssue(ref: string): Promise<Issue>;
   commentOnIssue(ref: string, body: string): Promise<void>;
@@ -49,13 +61,33 @@ export interface DevCycleActivities {
   unlabelIssue(ref: string, label: string): Promise<void>;
   openPr(req: OpenPrRequest): Promise<OpenPrResult>;
   getPrFeedback(prRef: string): Promise<PrFeedback>;
-  pushBranch(repo: string, workspaceRef: string, branch: string, contentHash: string): Promise<void>;
+  getPrSnapshot(prRef: string): Promise<PrSnapshot>;
+  mergePr(req: MergePrRequest): Promise<MergePrResult>;
+  pushBranch(
+    repo: string,
+    workspaceRef: string,
+    branch: string,
+    contentHash: string,
+  ): Promise<void>;
   recordStageResult(result: StageResultRecord): Promise<void>;
   recordRunStats(stats: RunStats): Promise<void>;
-  prepareWorkspace(req: { taskId: string; repo: string; initCommands?: string[]; headBranch?: string }): Promise<PreparedWorkspace>;
+  prepareWorkspace(req: {
+    taskId: string;
+    repo: string;
+    initCommands?: string[];
+    headBranch?: string;
+    headRef?: string;
+  }): Promise<PreparedWorkspace>;
   cleanupWorkspace(workspaceRef: string, repo: string): Promise<void>;
   readWorkspaceFile(workspaceRef: string, relativePath: string): Promise<string | null>;
-  createIssue(req: { repo: string; project: string; title: string; body: string; labels: string[]; dedupeFingerprint?: string }): Promise<{ ref: string; url: string; deduped: boolean }>;
+  createIssue(req: {
+    repo: string;
+    project: string;
+    title: string;
+    body: string;
+    labels: string[];
+    dedupeFingerprint?: string;
+  }): Promise<{ ref: string; url: string; deduped: boolean }>;
 }
 
 export interface ConfigSyncActivities {

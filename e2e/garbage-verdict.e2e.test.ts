@@ -35,7 +35,12 @@ describe('DevCycle e2e: garbage verdict never blocks', () => {
         fullVerifyCommands: [],
         stages: {},
         routing: {},
-        brakes: { maxImplementAttempts: 3, maxIterations: 10, maxTokens: 1_000_000, maxBabysitRounds: 5 },
+        brakes: {
+          maxImplementAttempts: 3,
+          maxIterations: 10,
+          maxTokens: 1_000_000,
+          maxBabysitRounds: 5,
+        },
       },
     };
 

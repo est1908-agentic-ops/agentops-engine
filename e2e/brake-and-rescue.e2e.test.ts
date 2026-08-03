@@ -30,7 +30,12 @@ describe('DevCycle e2e: brake + rescue', () => {
         fullVerifyCommands: [],
         stages: {},
         routing: {},
-        brakes: { maxImplementAttempts: 3, maxIterations: 10, maxTokens: 50_000, maxBabysitRounds: 5 },
+        brakes: {
+          maxImplementAttempts: 3,
+          maxIterations: 10,
+          maxTokens: 50_000,
+          maxBabysitRounds: 5,
+        },
       },
     };
 

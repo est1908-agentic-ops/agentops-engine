@@ -7,11 +7,36 @@ export interface GithubIssueData {
 export interface GithubClient {
   rest: {
     issues: {
-      get(params: { owner: string; repo: string; issue_number: number }): Promise<{ data: GithubIssueData }>;
-      createComment(params: { owner: string; repo: string; issue_number: number; body: string }): Promise<unknown>;
-      addLabels(params: { owner: string; repo: string; issue_number: number; labels: string[] }): Promise<unknown>;
-      removeLabel(params: { owner: string; repo: string; issue_number: number; name: string }): Promise<unknown>;
-      create(params: { owner: string; repo: string; title: string; body: string; labels?: string[] }): Promise<{ data: { number: number; html_url: string } }>;
+      get(params: {
+        owner: string;
+        repo: string;
+        issue_number: number;
+      }): Promise<{ data: GithubIssueData }>;
+      createComment(params: {
+        owner: string;
+        repo: string;
+        issue_number: number;
+        body: string;
+      }): Promise<unknown>;
+      addLabels(params: {
+        owner: string;
+        repo: string;
+        issue_number: number;
+        labels: string[];
+      }): Promise<unknown>;
+      removeLabel(params: {
+        owner: string;
+        repo: string;
+        issue_number: number;
+        name: string;
+      }): Promise<unknown>;
+      create(params: {
+        owner: string;
+        repo: string;
+        title: string;
+        body: string;
+        labels?: string[];
+      }): Promise<{ data: { number: number; html_url: string } }>;
     };
     pulls: {
       create(params: {
@@ -22,7 +47,23 @@ export interface GithubClient {
         title: string;
         body: string;
       }): Promise<{ data: { number: number; html_url: string } }>;
-      get(params: { owner: string; repo: string; pull_number: number }): Promise<{ data: { head: { sha: string } } }>;
+      get(params: { owner: string; repo: string; pull_number: number }): Promise<{
+        data: {
+          head: { sha: string; ref: string; repo: { full_name: string } };
+          labels: Array<{ name: string }>;
+          state: 'open' | 'closed';
+          draft: boolean;
+          merged: boolean;
+          mergeable: boolean | null;
+          merge_commit_sha: string | null;
+        };
+      }>;
+      merge(params: {
+        owner: string;
+        repo: string;
+        pull_number: number;
+        sha: string;
+      }): Promise<{ data: { merged: boolean; message: string; sha: string } }>;
       list(params: {
         owner: string;
         repo: string;
@@ -32,7 +73,11 @@ export interface GithubClient {
     };
     repos: {
       get(params: { owner: string; repo: string }): Promise<{ data: { default_branch: string } }>;
-      getContent(params: { owner: string; repo: string; path: string }): Promise<{ data: { content?: string } }>;
+      getContent(params: {
+        owner: string;
+        repo: string;
+        path: string;
+      }): Promise<{ data: { content?: string } }>;
       getCombinedStatusForRef(params: {
         owner: string;
         repo: string;
@@ -44,7 +89,12 @@ export interface GithubClient {
         owner: string;
         repo: string;
         ref: string;
-      }): Promise<{ data: { total_count?: number; check_runs: Array<{ status: string; conclusion: string | null }> } }>;
+      }): Promise<{
+        data: {
+          total_count?: number;
+          check_runs: Array<{ status: string; conclusion: string | null }>;
+        };
+      }>;
     };
   };
   graphql<T = unknown>(query: string, variables?: Record<string, unknown>): Promise<T>;

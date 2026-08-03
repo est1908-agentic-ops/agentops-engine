@@ -13,10 +13,13 @@ spec:
       labels:
         app: {{ .Release.Name }}-gateway
     spec:
+      serviceAccountName: {{ .Release.Name }}-gateway
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.imagePullSecretName }}
       imagePullSecrets:
         - name: {{ .Values.imagePullSecretName }}
+      {{- end }}
       containers:
         - name: gateway
           image: "{{ .Values.image.repository }}/gateway:{{ .Values.image.gatewayTag }}"
@@ -32,6 +35,8 @@ spec:
               value: {{ .Values.temporalAddress | quote }}
             - name: TEMPORAL_NAMESPACE
               value: {{ .Values.temporal.namespace | quote }}
+            - name: AGENT_NAMESPACE
+              value: {{ .Values.namespace | quote }}
             - name: TRIGGER_LABEL
               value: {{ .Values.gateway.triggerLabel | quote }}
             - name: GITHUB_WEBHOOK_SECRET
@@ -45,13 +50,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.gateway.linearWebhookSecretName }}
                   key: LINEAR_WEBHOOK_SECRET
-            {{- end }}
-            {{- if .Values.gateway.argocdPluginTokenSecretName }}
-            - name: ARGOCD_PLUGIN_TOKEN
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.gateway.argocdPluginTokenSecretName }}
-                  key: ARGOCD_PLUGIN_TOKEN
             {{- end }}
             {{- if .Values.engineDb.host }}
             - name: ENGINE_DB_HOST
@@ -67,13 +65,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.engineDb.passwordSecretName }}
                   key: password
-            {{- end }}
-            {{- if .Values.projectCredentialPrivateKeySecretName }}
-            - name: PROJECT_CREDENTIAL_PRIVATE_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.projectCredentialPrivateKeySecretName }}
-                  key: privateKey
             {{- end }}
           resources:
             {{- toYaml .Values.gateway.resources | nindent 12 }}
@@ -94,3 +85,10 @@ spec:
             httpGet:
               path: /healthz
               port: {{ .Values.gateway.port }}
+          volumeMounts:
+            - name: managed-projects
+              mountPath: /etc/managed-projects
+              readOnly: true
+      volumes:
+        - name: managed-projects
+          configMap: { name: {{ .Values.managedProjectsConfigMapName }} }

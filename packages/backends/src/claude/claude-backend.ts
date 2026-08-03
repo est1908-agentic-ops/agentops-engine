@@ -1,3 +1,4 @@
+import { isReadOnlyStage } from '@agentops/contracts';
 import type { AgentRunResult, BackendRunRequest } from '@agentops/contracts';
 import type { CliSpec } from '../cli-spec';
 import {
@@ -93,6 +94,10 @@ export function createClaudeCliSpec(opts: ClaudeCliSpecOptions = {}): CliSpec {
       // file grows continuously and idle-detection sees real progress while
       // still firing on a genuinely wedged CLI (no events at all). `--verbose`
       // is required by the CLI to enable `stream-json` under `-p`.
+      //
+      // Permission profile (least privilege): read-only stages (e.g., bughunt)
+      // receive `--permission-mode plan` (read-only exploration mode). Write
+      // stages receive `--dangerously-skip-permissions` to maintain compatibility.
       const args = [
         '-p',
         '--output-format',
@@ -100,8 +105,12 @@ export function createClaudeCliSpec(opts: ClaudeCliSpecOptions = {}): CliSpec {
         '--verbose',
         '--model',
         req.model,
-        '--dangerously-skip-permissions',
       ];
+      if (isReadOnlyStage(req.stage)) {
+        args.push('--permission-mode', 'plan');
+      } else {
+        args.push('--dangerously-skip-permissions');
+      }
       if (req.effort) {
         args.push('--effort', req.effort);
       }

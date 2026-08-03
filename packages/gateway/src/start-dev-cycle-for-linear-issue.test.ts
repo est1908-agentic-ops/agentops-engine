@@ -57,7 +57,7 @@ describe('startDevCycleForLinearIssue', () => {
     );
   });
 
-  it('never collides with the GitHub path\'s workflow id space, even for the same project', async () => {
+  it("never collides with the GitHub path's workflow id space, even for the same project", async () => {
     const start = vi.fn().mockResolvedValue(undefined);
     const client = fakeClient(start);
 
@@ -77,7 +77,11 @@ describe('startDevCycleForLinearIssue', () => {
   });
 
   it('treats an already-started workflow as an idempotent no-op, not an error', async () => {
-    const start = vi.fn().mockRejectedValue(new WorkflowExecutionAlreadyStartedError('already started', 'wf-1', 'devCycle'));
+    const start = vi
+      .fn()
+      .mockRejectedValue(
+        new WorkflowExecutionAlreadyStartedError('already started', 'wf-1', 'devCycle'),
+      );
     const client = fakeClient(start);
 
     const result = await startDevCycleForLinearIssue(
@@ -97,7 +101,14 @@ describe('startDevCycleForLinearIssue', () => {
     const client = fakeClient(start);
 
     await expect(
-      startDevCycleForLinearIssue(client, 'agentops-devcycle', 'my-project', event, 'octocat/hello-world', config),
+      startDevCycleForLinearIssue(
+        client,
+        'agentops-devcycle',
+        'my-project',
+        event,
+        'octocat/hello-world',
+        config,
+      ),
     ).rejects.toThrow('temporal unreachable');
   });
 });

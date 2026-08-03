@@ -3,9 +3,11 @@ import {
   condition,
   defineQuery,
   defineSignal,
+  patched,
   proxyActivities,
   setHandler,
   sleep,
+  startChild,
 } from '@temporalio/workflow';
 import type {
   Brakes,
@@ -15,15 +17,17 @@ import type {
   TaskInput,
   VerdictKind,
 } from '@agentops/contracts';
-import { feedbackHash } from '@agentops/contracts';
+import { AGENTOPS_MANAGED_LABEL, feedbackHash } from '@agentops/contracts';
 import {
   babysitDecision,
   nextRepairAction,
   parseVerdict,
   preImplementStages,
+  prLandingWorkflowId,
   resolveStageLimits,
 } from '@agentops/policies';
 import type { DevCycleActivities } from './activities-api';
+import { prLanding, prLandingCancelSignal, prLandingResumeSignal } from './pr-landing';
 
 // No step retries forever: a failure that keeps recurring attempt after attempt
 // (a bad git ref, a repo that no longer exists, a deterministic backend error) is
@@ -86,10 +90,14 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     prRef: null,
     workspaceRef: '',
     branch: '',
+    landingOutcome: null,
   };
 
   let cancelled = false;
   let stopRequested = false;
+  let landingChild: {
+    signal: (name: typeof prLandingCancelSignal | typeof prLandingResumeSignal) => Promise<void>;
+  } | null = null;
   // Assigned right after config resolution below. Only the signal handlers
   // close over it before then, and none can meaningfully fire before the
   // first stage can possibly block.
@@ -100,6 +108,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
   });
   setHandler(cancelSignal, () => {
     cancelled = true;
+    void landingChild?.signal(prLandingCancelSignal);
   });
   setHandler(clarifySignal, (_text: string) => {
     // M0 stores no clarification text yet — later milestones feed it back into
@@ -118,6 +127,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     }
     state.status = 'running';
     state.blockReason = null;
+    void landingChild?.signal(prLandingResumeSignal);
   });
   setHandler(stateQuery, () => state);
 
@@ -241,7 +251,11 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     return { kind: lastKind === 'unparseable' ? 'fail' : lastKind, output: lastOutput };
   };
 
-  for (const stage of preImplementStages({ config, hasHumanDesign: false, hasHumanPlan: false })) {
+  for (const stage of preImplementStages({
+    config,
+    hasHumanDesign: false,
+    hasHumanPlan: false,
+  })) {
     state.stage = stage;
     const extraContext = stage === 'context' ? { issueBody } : {};
     await runStageAgent(stage as RoutableStage, 1, 1, undefined, extraContext);
@@ -369,17 +383,55 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     findingsSummary,
   });
 
+  const prLabels = [...new Set([...issueLabels, 'agentops', AGENTOPS_MANAGED_LABEL])];
   const { prRef } = await activities.openPr({
     repo: input.repo,
     branch: state.branch,
     title: buildPrTitle(input.goal),
     body: prBody,
-    labels: issueLabels.length > 0 ? issueLabels : undefined,
+    labels: prLabels,
   });
   state.prRef = prRef;
   await dropAgentWorking();
   if (exhausted) {
     await activities.commentOnIssue(input.issueRef ?? input.taskId, prBody);
+  }
+
+  if (patched('shared-pr-landing-v1')) {
+    const snapshot = await activities.getPrSnapshot(prRef);
+    const handle = await startChild(prLanding, {
+      workflowId: prLandingWorkflowId(prRef),
+      args: [
+        {
+          taskId: `landing-${input.taskId}`,
+          project: input.project,
+          repo: input.repo,
+          prRef,
+          agentCreated: true,
+          config,
+          workspace: {
+            workspaceRef: state.workspaceRef,
+            branch: state.branch,
+            validatedHeadSha: snapshot.headSha,
+          },
+        },
+      ],
+    });
+    landingChild = handle;
+    const landing = await handle.result();
+    state.landingOutcome = landing.outcome;
+    if (landing.outcome === 'blocked') {
+      state.stage = 'pr_babysit';
+      state.status = 'blocked';
+      state.blockReason = 'pr-landing-blocked';
+    } else if (landing.outcome === 'failed' || landing.outcome === 'cancelled') {
+      state.stage = 'failed';
+      state.status = 'failed';
+    } else {
+      state.stage = 'done';
+      state.status = 'done';
+    }
+    return state;
   }
 
   state.stage = 'pr_babysit';

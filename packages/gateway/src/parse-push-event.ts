@@ -6,7 +6,10 @@ interface GithubPushPayload {
   repository?: { full_name?: string };
 }
 
-export function parsePushEvent(githubEvent: string | undefined, payload: unknown): PushEvent | null {
+export function parsePushEvent(
+  githubEvent: string | undefined,
+  payload: unknown,
+): PushEvent | null {
   if (githubEvent !== 'push') {
     return null;
   }

@@ -8,11 +8,10 @@ import {
   RunDetailSchema,
   StartRunRequestSchema,
   StartRunResponseSchema,
-  CreateManagedProjectRequestSchema,
-  UpdateManagedProjectRequestSchema,
+  type ManagedProjectStore,
   type RunStats,
 } from '@agentops/contracts';
-import type { PostgresEngineSettingsStore, PostgresManagedProjectStore, PostgresTierStore } from '@agentops/activities';
+import type { PostgresEngineSettingsStore, PostgresTierStore } from '@agentops/activities';
 import { platform } from '@agentops/workflows';
 import { listRunsByType, memoPrompt, readJsonBody, type HandlerResponse } from './handler-util';
 import {
@@ -42,20 +41,35 @@ export interface ControlDeps {
   namespace: string;
   temporalUiBaseUrl: string;
   uiDistPath?: string;
-  // Managed-project CRUD (design §7). The store encrypts tokens internally
-  // with `projectCredentialPublicKey`; control holds ONLY the public key and
-  // the store, so it can write credentials it cannot read (design §5). All
-  // five routes are gated behind `projectCrudAuthToken` (a bearer token);
-  // with any of these three unset the routes return 503. Issue #4 (Traefik
-  // basic-auth) is still required before the control ingress goes public.
-  managedProjectStore?: PostgresManagedProjectStore;
+  // Managed-project registry (read-only). The engine's only source of truth
+  // for projects is now the mounted `managed-projects` ConfigMap
+  // (FileManagedProjectStore, built from MANAGED_PROJECTS_DIR in main.ts) --
+  // the DB-backed CRUD store + X25519 credential crypto were retired once
+  // worker/gateway/cli stopped needing them (see
+  // docs/superpowers/plans/2026-07-25-engine-projects-configmap-resolver.md).
+  // `GET /api/projects` and `GET /api/projects/:repo` read straight from it;
+  // there is no write path anymore, so unlike the routes below this needs no
+  // auth token -- it never exposes a token, only `credentialSet`/`tokenSecret`
+  // (a Secret *name*, not a value).
+  managedProjectStore?: ManagedProjectStore;
   // Tier table CRUD (SP3-B). Only needs ENGINE_DB_HOST; not credential-gated
   // like managed projects (tier edits are operational, not secret-bearing).
   tierStore?: PostgresTierStore;
   engineSettingsStore?: PostgresEngineSettingsStore;
   // Stats reader for budgets dashboard (simple slice). Same ENGINE_DB connection.
   statsStore?: { all(): Promise<RunStats[]> };
-  projectCredentialPublicKey?: string;
+  // General control-mutation bearer token (sent as X-Control-Crud-Token),
+  // fail-closed (401) when unset. Originally added to gate the managed-project
+  // CRUD routes (now retired -- see managedProjectStore above), it has since
+  // been reused to gate every other mutating route control exposes: POST
+  // /api/platform/runs, POST /api/devcycle/runs, /api/platform/chats/*, PUT
+  // /api/tiers, PUT /api/settings/self-heal, and POST /api/agents/:id/run.
+  // Kept under its original name (and the CONTROL_CRUD_TOKEN env var / chart
+  // knob) deliberately: it is still live-configured in the deployed cluster
+  // (agentops-platform's engine values set projectCrudTokenSecretName) to
+  // protect those routes, so removing it here would silently 401-lock all of
+  // them. Issue #4 (Traefik basic-auth) is still required before the control
+  // ingress goes public.
   projectCrudAuthToken?: string;
 }
 
@@ -148,10 +162,6 @@ async function handleListRepos(deps: ControlDeps): Promise<HandlerResponse> {
   return { status: 200, body: RepoListResponseSchema.parse({ repos }) };
 }
 
-function isProjectCrudEnabled(deps: ControlDeps): boolean {
-  return Boolean(deps.managedProjectStore && deps.projectCredentialPublicKey && deps.projectCrudAuthToken);
-}
-
 function constantTimeTokenEqual(
   configured: string | undefined,
   provided: string | string[] | undefined,
@@ -174,107 +184,27 @@ function constantTimeTokenEqual(
   return timingSafeEqual(configuredBuf, providedBuf);
 }
 
-function authorizeProjectCrud(deps: ControlDeps, req: IncomingMessage): boolean {
-  // X-Control-Crud-Token (not Authorization): Traefik basic-auth on the control
-  // ingress consumes the Authorization header, so the CRUD bearer token uses a
-  // custom header to avoid collision. Works with or without basic-auth in front.
-  return constantTimeTokenEqual(deps.projectCrudAuthToken, req.headers['x-control-crud-token']);
-}
-
+// X-Control-Crud-Token (not Authorization): Traefik basic-auth on the control
+// ingress consumes the Authorization header, so the bearer token uses a
+// custom header to avoid collision. Works with or without basic-auth in front.
 function authorizeControlToken(deps: ControlDeps, req: IncomingMessage): boolean {
   return constantTimeTokenEqual(deps.projectCrudAuthToken, req.headers['x-control-crud-token']);
 }
 
+// Read-only -- no auth token required (see the ControlDeps.managedProjectStore
+// doc comment: nothing sensitive is exposed here anymore). No store configured
+// means an empty list / a 404, same "graceful no-op" shape handleListRepos uses.
 async function handleListProjects(deps: ControlDeps): Promise<HandlerResponse> {
-  return { status: 200, body: await deps.managedProjectStore!.list() };
+  const projects = deps.managedProjectStore ? await deps.managedProjectStore.list() : [];
+  return { status: 200, body: projects };
 }
 
 async function handleGetProject(deps: ControlDeps, repo: string): Promise<HandlerResponse> {
-  const project = await deps.managedProjectStore!.get(repo);
+  const project = deps.managedProjectStore ? await deps.managedProjectStore.get(repo) : null;
   if (!project) {
     return { status: 404, body: { error: `no managed project for repo "${repo}"` } };
   }
   return { status: 200, body: project };
-}
-
-async function handleCreateProject(deps: ControlDeps, req: IncomingMessage): Promise<HandlerResponse> {
-  let rawBody: unknown;
-  try {
-    rawBody = await readJsonBody(req);
-  } catch {
-    return { status: 400, body: { error: 'invalid JSON body' } };
-  }
-  const parsed = CreateManagedProjectRequestSchema.safeParse(rawBody);
-  if (!parsed.success) {
-    return { status: 400, body: { error: parsed.error.issues.map((issue) => issue.message).join('; ') } };
-  }
-  const { project, repo, token, config, trackerType, linearTeamKey, linearTriggerLabelId, linearToken } = parsed.data;
-  if (await deps.managedProjectStore!.get(repo)) {
-    return { status: 409, body: { error: `a managed project for repo "${repo}" already exists` } };
-  }
-  if (await deps.managedProjectStore!.getByProject(project)) {
-    return { status: 409, body: { error: `a managed project with project "${project}" already exists` } };
-  }
-  if (trackerType === 'linear' && linearTeamKey && (await deps.managedProjectStore!.getByLinearTeamKey(linearTeamKey))) {
-    return { status: 409, body: { error: `a managed project with linearTeamKey "${linearTeamKey}" already exists` } };
-  }
-  try {
-    const created = await deps.managedProjectStore!.upsert(
-      { project, repo, token, config, trackerType, linearTeamKey, linearTriggerLabelId, linearToken },
-      deps.projectCredentialPublicKey!,
-    );
-    return { status: 201, body: created };
-  } catch (err) {
-    return { status: 400, body: { error: err instanceof Error ? err.message : 'failed to create managed project' } };
-  }
-}
-
-async function handleUpdateProject(deps: ControlDeps, repo: string, req: IncomingMessage): Promise<HandlerResponse> {
-  const existing = await deps.managedProjectStore!.get(repo);
-  if (!existing) {
-    return { status: 404, body: { error: `no managed project for repo "${repo}"` } };
-  }
-  let rawBody: unknown;
-  try {
-    rawBody = await readJsonBody(req);
-  } catch {
-    return { status: 400, body: { error: 'invalid JSON body' } };
-  }
-  const parsed = UpdateManagedProjectRequestSchema.safeParse(rawBody);
-  if (!parsed.success) {
-    return { status: 400, body: { error: parsed.error.issues.map((issue) => issue.message).join('; ') } };
-  }
-  // repo/project/trackerType are immutable identity -- pass the existing
-  // values through; only token/config/linear-* come from the body (token
-  // rotates, config set/clear/keep, linear-* only meaningful if already
-  // linear-tracked -- the store rejects them otherwise).
-  try {
-    const updated = await deps.managedProjectStore!.upsert(
-      {
-        project: existing.project,
-        repo: existing.repo,
-        trackerType: existing.trackerType,
-        token: parsed.data.token,
-        config: parsed.data.config,
-        linearTeamKey: parsed.data.linearTeamKey,
-        linearTriggerLabelId: parsed.data.linearTriggerLabelId,
-        linearToken: parsed.data.linearToken,
-      },
-      deps.projectCredentialPublicKey!,
-    );
-    return { status: 200, body: updated };
-  } catch (err) {
-    return { status: 400, body: { error: err instanceof Error ? err.message : 'failed to update managed project' } };
-  }
-}
-
-async function handleDeleteProject(deps: ControlDeps, repo: string): Promise<HandlerResponse> {
-  const existing = await deps.managedProjectStore!.get(repo);
-  if (!existing) {
-    return { status: 404, body: { error: `no managed project for repo "${repo}"` } };
-  }
-  await deps.managedProjectStore!.remove(repo);
-  return { status: 204 };
 }
 
 async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<HandlerResponse | undefined> {
@@ -285,6 +215,9 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
     return { status: 200 };
   }
   if (req.method === 'POST' && pathname === '/api/platform/runs') {
+    if (!authorizeControlToken(deps, req)) {
+      return { status: 401, body: { error: 'unauthorized' } };
+    }
     return handleStartRun(deps, req);
   }
   if (req.method === 'GET' && pathname === '/api/platform/runs') {
@@ -295,6 +228,9 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
     return handleGetRun(deps, runMatch.params.workflowId);
   }
   if (req.method === 'POST' && pathname === '/api/devcycle/runs') {
+    if (!authorizeControlToken(deps, req)) {
+      return { status: 401, body: { error: 'unauthorized' } };
+    }
     return handleStartDevCycleRun(deps, req);
   }
   if (req.method === 'GET' && pathname === '/api/devcycle/runs') {
@@ -318,7 +254,7 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
   }
   const agentRun = matchPath('/api/agents/:scheduleId/run', pathname);
   if (req.method === 'POST' && agentRun) {
-    if (!authorizeProjectCrud(deps, req)) {
+    if (!authorizeControlToken(deps, req)) {
       return { status: 401, body: { error: 'unauthorized' } };
     }
     return handleTriggerAgent(deps, agentRun.params.scheduleId);
@@ -355,7 +291,7 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
       return handleGetSelfHealSettings(deps);
     }
     if (req.method === 'PUT') {
-      if (!authorizeProjectCrud(deps, req)) {
+      if (!authorizeControlToken(deps, req)) {
         return { status: 401, body: { error: 'unauthorized' } };
       }
       return handleUpdateSelfHealSettings(deps, req);
@@ -366,43 +302,25 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
       return handleListTiers(deps);
     }
     // PUT rewrites the whole fleet's model routing -- gate it behind the same
-    // bearer token as /api/projects (GET stays open). Reuses projectCrudAuthToken
-    // rather than introducing a second token: one operator secret governs all
-    // fleet-mutating writes. Issue #4 (Traefik basic-auth) is still required
-    // before the control ingress goes public.
+    // bearer token as the other mutating routes (GET stays open). Reuses
+    // projectCrudAuthToken rather than introducing a second token: one
+    // operator secret governs all fleet-mutating writes. Issue #4 (Traefik
+    // basic-auth) is still required before the control ingress goes public.
     if (req.method === 'PUT') {
-      if (!deps.tierStore || !authorizeProjectCrud(deps, req)) {
+      if (!deps.tierStore || !authorizeControlToken(deps, req)) {
         return { status: 401, body: { error: 'unauthorized' } };
       }
       return handleReplaceTiers(deps, req);
     }
   }
-  if (pathname === '/api/projects' || pathname.startsWith('/api/projects/')) {
-    if (!isProjectCrudEnabled(deps)) {
-      return { status: 503, body: { error: 'project CRUD is disabled (requires ENGINE_DB_*, PROJECT_CREDENTIAL_PUBLIC_KEY, and CONTROL_CRUD_TOKEN)' } };
-    }
-    if (!authorizeProjectCrud(deps, req)) {
-      return { status: 401, body: { error: 'unauthorized' } };
-    }
-    const projectMatch = matchPath('/api/projects/:repo', pathname);
-    if (req.method === 'GET' && pathname === '/api/projects') {
-      return handleListProjects(deps);
-    }
-    if (req.method === 'POST' && pathname === '/api/projects') {
-      return handleCreateProject(deps, req);
-    }
-    if (projectMatch) {
-      const { repo } = projectMatch.params;
-      if (req.method === 'GET') {
-        return handleGetProject(deps, repo);
-      }
-      if (req.method === 'PUT') {
-        return handleUpdateProject(deps, repo, req);
-      }
-      if (req.method === 'DELETE') {
-        return handleDeleteProject(deps, repo);
-      }
-    }
+  // Read-only (see ControlDeps.managedProjectStore) -- no auth, no 503 gating.
+  // The write CRUD (POST/PUT/DELETE) was retired; the console is a viewer now.
+  if (req.method === 'GET' && pathname === '/api/projects') {
+    return handleListProjects(deps);
+  }
+  const projectMatch = matchPath('/api/projects/:repo', pathname);
+  if (req.method === 'GET' && projectMatch) {
+    return handleGetProject(deps, projectMatch.params.repo);
   }
   return undefined;
 }

@@ -14,7 +14,12 @@ describe('DevCycle e2e: project initCommands reach workspace preparation', () =>
     testEnv = await buildTestEnv();
     const { env, worker, stub, tracker, scm, workspaces, taskQueue } = testEnv;
 
-    tracker.seedIssue({ ref: 'issue-1', title: 'Add widget', body: 'Please add a widget', labels: [] });
+    tracker.seedIssue({
+      ref: 'issue-1',
+      title: 'Add widget',
+      body: 'Please add a widget',
+      labels: [],
+    });
     stub.scriptResponse('full_verify', 1, { output: 'FULL: PASS' });
     stub.scriptResponse('review', 1, { output: 'VERDICT: PASS' });
     scm.scriptFeedback('pr-1', [{ ciStatus: 'green', unresolvedThreads: 0, comments: [] }]);
@@ -31,7 +36,12 @@ describe('DevCycle e2e: project initCommands reach workspace preparation', () =>
         fullVerifyCommands: [],
         stages: {},
         routing: {},
-        brakes: { maxImplementAttempts: 3, maxIterations: 10, maxTokens: 1_000_000, maxBabysitRounds: 5 },
+        brakes: {
+          maxImplementAttempts: 3,
+          maxIterations: 10,
+          maxTokens: 1_000_000,
+          maxBabysitRounds: 5,
+        },
       },
     };
 
@@ -46,6 +56,9 @@ describe('DevCycle e2e: project initCommands reach workspace preparation', () =>
     });
 
     expect(finalState.status).toBe('done');
-    expect(workspaces.initCommandsFor(finalState.workspaceRef)).toEqual(['pnpm install', 'pnpm worktree-setup']);
+    expect(workspaces.initCommandsFor(finalState.workspaceRef)).toEqual([
+      'pnpm install',
+      'pnpm worktree-setup',
+    ]);
   });
 });

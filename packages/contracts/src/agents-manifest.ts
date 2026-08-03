@@ -5,7 +5,10 @@ import { z, ZodError } from 'zod';
 // this catches obvious typos at PR time.
 const CRON_FIELD = String.raw`[\d*/,\-A-Za-z?]+`;
 const CRON_RE = new RegExp(`^${CRON_FIELD}(\\s+${CRON_FIELD}){4}$`);
-const scheduleSchema = z.union([z.literal('continuous'), z.string().regex(CRON_RE, 'must be a 5-field cron or "continuous"')]);
+const scheduleSchema = z.union([
+  z.literal('continuous'),
+  z.string().regex(CRON_RE, 'must be a 5-field cron or "continuous"'),
+]);
 
 export const AgentSpecSchema = z
   .object({
@@ -38,57 +41,54 @@ export const ProjectWorkerSchema = z
   .strict();
 export type ProjectWorker = z.infer<typeof ProjectWorkerSchema>;
 
-export const AgentsManifestSchema = z
-  .object({ agents: z.array(AgentSpecSchema), worker: ProjectWorkerSchema.optional() })
-  .strict();
-export type AgentsManifest = z.infer<typeof AgentsManifestSchema>;
+// The reconciler's view of a project's agents: the `agents` and `worker` blocks
+// of its `agentops.json`. These fields live on `ProjectConfig` (see
+// ./project-config) — there is no separate manifest file anymore.
+export type AgentsManifest = { agents: AgentSpec[]; worker?: ProjectWorker };
 
 // The built-in workflows the engine's shared fleet runs (they poll ENGINE_QUEUE).
 // Any other `workflow` name in a manifest is a project (Tier-2) workflow, which
 // runs on the project's own queue (proj-<project>) — see resolveAgentQueue in
 // @agentops/policies. Keep in sync with the workflows registered by the worker
 // (packages/workflows). Adding a built-in is a deliberate change here.
-export const BUILTIN_WORKFLOWS: ReadonlySet<string> = new Set(['devCycle', 'whiteboxBugHunt', 'platform']);
+export const BUILTIN_WORKFLOWS: ReadonlySet<string> = new Set([
+  'devCycle',
+  'whiteboxBugHunt',
+  'platform',
+]);
 export function isBuiltinWorkflow(name: string): boolean {
   return BUILTIN_WORKFLOWS.has(name);
 }
 
 // Manifest-facing input schemas for built-ins (the reconciler injects `repo`).
-export const WhiteboxBugHuntManifestInputSchema = z.object({ focus: z.string().optional() }).strict();
+export const WhiteboxBugHuntManifestInputSchema = z
+  .object({ focus: z.string().optional() })
+  .strict();
 export const BUILTIN_WORKFLOW_INPUTS: Record<string, z.ZodTypeAny> = {
   whiteboxBugHunt: WhiteboxBugHuntManifestInputSchema,
 };
-
-export class InvalidAgentsManifestError extends Error {
-  constructor(message: string, public readonly issues?: unknown) {
-    super(message);
-  }
-}
 
 function fmt(err: ZodError): string {
   return err.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ');
 }
 
-export function parseAgentsManifest(
-  raw: unknown,
-  opts: { workflowInputs: Record<string, z.ZodTypeAny> },
-): AgentsManifest {
-  let manifest: AgentsManifest;
-  try {
-    manifest = AgentsManifestSchema.parse(raw);
-  } catch (err) {
-    if (err instanceof ZodError) throw new InvalidAgentsManifestError(fmt(err), err.issues);
-    throw err;
-  }
+// Manifest-level validation the per-entry zod schema can't express: unique
+// agent names, and per-workflow input validation for known built-ins. Returns
+// an error message, or null when the agents are valid. Callers wrap the message
+// in their own error type — `parseProjectConfig` throws InvalidProjectConfigError.
+export function validateAgentSpecs(
+  agents: readonly AgentSpec[],
+  workflowInputs: Record<string, z.ZodTypeAny> = BUILTIN_WORKFLOW_INPUTS,
+): string | null {
   const seen = new Set<string>();
-  for (const agent of manifest.agents) {
-    if (seen.has(agent.name)) throw new InvalidAgentsManifestError(`duplicate agent name "${agent.name}"`);
+  for (const agent of agents) {
+    if (seen.has(agent.name)) return `duplicate agent name "${agent.name}"`;
     seen.add(agent.name);
-    const inputSchema = opts.workflowInputs[agent.workflow];
+    const inputSchema = workflowInputs[agent.workflow];
     if (inputSchema) {
       const res = inputSchema.safeParse(agent.input);
-      if (!res.success) throw new InvalidAgentsManifestError(`agent "${agent.name}" input: ${fmt(res.error)}`);
+      if (!res.success) return `agent "${agent.name}" input: ${fmt(res.error)}`;
     }
   }
-  return manifest;
+  return null;
 }

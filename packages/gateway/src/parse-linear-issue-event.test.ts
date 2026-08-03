@@ -8,7 +8,11 @@ describe('parseLinearIssueEvent', () => {
     const event = parseLinearIssueEvent({
       type: 'Issue',
       action: 'update',
-      data: { identifier: 'ENG-123', title: 'Fix the thing', labelIds: [TRIGGER_LABEL_ID, 'other'] },
+      data: {
+        identifier: 'ENG-123',
+        title: 'Fix the thing',
+        labelIds: [TRIGGER_LABEL_ID, 'other'],
+      },
       updatedFrom: { labelIds: ['other'] },
       webhookTimestamp: 123,
     });
@@ -45,11 +49,15 @@ describe('parseLinearIssueEvent', () => {
   });
 
   it('ignores a remove action', () => {
-    expect(parseLinearIssueEvent({ type: 'Issue', action: 'remove', data: { identifier: 'ENG-1' } })).toBeNull();
+    expect(
+      parseLinearIssueEvent({ type: 'Issue', action: 'remove', data: { identifier: 'ENG-1' } }),
+    ).toBeNull();
   });
 
   it('ignores a malformed identifier with no team-key separator', () => {
-    expect(parseLinearIssueEvent({ type: 'Issue', action: 'create', data: { identifier: 'malformed' } })).toBeNull();
+    expect(
+      parseLinearIssueEvent({ type: 'Issue', action: 'create', data: { identifier: 'malformed' } }),
+    ).toBeNull();
   });
 
   it('ignores a payload missing an identifier', () => {
@@ -57,10 +65,22 @@ describe('parseLinearIssueEvent', () => {
   });
 
   it('does not throw and returns null for a non-string identifier (adversarial/malformed payload)', () => {
-    expect(() => parseLinearIssueEvent({ type: 'Issue', action: 'create', data: { identifier: 12345 } })).not.toThrow();
-    expect(parseLinearIssueEvent({ type: 'Issue', action: 'create', data: { identifier: 12345 } })).toBeNull();
-    expect(parseLinearIssueEvent({ type: 'Issue', action: 'create', data: { identifier: { foo: 'bar' } } })).toBeNull();
-    expect(parseLinearIssueEvent({ type: 'Issue', action: 'create', data: { identifier: ['ENG-1'] } })).toBeNull();
+    expect(() =>
+      parseLinearIssueEvent({ type: 'Issue', action: 'create', data: { identifier: 12345 } }),
+    ).not.toThrow();
+    expect(
+      parseLinearIssueEvent({ type: 'Issue', action: 'create', data: { identifier: 12345 } }),
+    ).toBeNull();
+    expect(
+      parseLinearIssueEvent({
+        type: 'Issue',
+        action: 'create',
+        data: { identifier: { foo: 'bar' } },
+      }),
+    ).toBeNull();
+    expect(
+      parseLinearIssueEvent({ type: 'Issue', action: 'create', data: { identifier: ['ENG-1'] } }),
+    ).toBeNull();
   });
 
   it('treats previousLabelIds as unchanged (equal to current), not empty, when updatedFrom omits labelIds', () => {
@@ -79,7 +99,12 @@ describe('parseLinearIssueEvent', () => {
 });
 
 describe('matchesLinearTriggerLabel', () => {
-  const baseEvent = { teamKey: 'ENG', identifier: 'ENG-1', title: 't', webhookTimestamp: undefined };
+  const baseEvent = {
+    teamKey: 'ENG',
+    identifier: 'ENG-1',
+    title: 't',
+    webhookTimestamp: undefined,
+  };
 
   it('matches a create where the issue already carries the trigger label', () => {
     const event = { ...baseEvent, labelIds: [TRIGGER_LABEL_ID], previousLabelIds: undefined };
@@ -87,7 +112,11 @@ describe('matchesLinearTriggerLabel', () => {
   });
 
   it('matches an update that adds the trigger label', () => {
-    const event = { ...baseEvent, labelIds: [TRIGGER_LABEL_ID, 'other'], previousLabelIds: ['other'] };
+    const event = {
+      ...baseEvent,
+      labelIds: [TRIGGER_LABEL_ID, 'other'],
+      previousLabelIds: ['other'],
+    };
     expect(matchesLinearTriggerLabel(event, TRIGGER_LABEL_ID)).toBe(true);
   });
 
@@ -97,14 +126,22 @@ describe('matchesLinearTriggerLabel', () => {
   });
 
   it('does not match when the trigger label was already present before this update', () => {
-    const event = { ...baseEvent, labelIds: [TRIGGER_LABEL_ID, 'new-unrelated'], previousLabelIds: [TRIGGER_LABEL_ID] };
+    const event = {
+      ...baseEvent,
+      labelIds: [TRIGGER_LABEL_ID, 'new-unrelated'],
+      previousLabelIds: [TRIGGER_LABEL_ID],
+    };
     expect(matchesLinearTriggerLabel(event, TRIGGER_LABEL_ID)).toBe(false);
   });
 
   it('does not re-match (no devCycle re-trigger) for an unrelated edit to an already-labeled issue', () => {
     // Regression for the "updatedFrom omits labelIds" parsing fix above --
     // previousLabelIds equal to labelIds here means "labels didn't change".
-    const event = { ...baseEvent, labelIds: [TRIGGER_LABEL_ID], previousLabelIds: [TRIGGER_LABEL_ID] };
+    const event = {
+      ...baseEvent,
+      labelIds: [TRIGGER_LABEL_ID],
+      previousLabelIds: [TRIGGER_LABEL_ID],
+    };
     expect(matchesLinearTriggerLabel(event, TRIGGER_LABEL_ID)).toBe(false);
   });
 });

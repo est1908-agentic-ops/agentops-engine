@@ -10,3 +10,6 @@ export * from './reconcile-agents';
 export * from './parse-findings';
 export * from './resolve-tier';
 export * from './slug';
+export * from './merge-authority';
+export * from './pr-landing-id';
+export * from './parse-agent-result';

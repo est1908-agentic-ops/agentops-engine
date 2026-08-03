@@ -4,7 +4,12 @@ import { context, trace } from '@opentelemetry/api';
 import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import type { AgentBackend } from '@agentops/backends';
-import type { BackendRunRequest, ResolvedProjectEntry } from '@agentops/contracts';
+import {
+  parseProjectConfig,
+  type BackendRunRequest,
+  type ManagedProjectStore,
+  type ResolvedProjectEntry,
+} from '@agentops/contracts';
 import {
   ProcessCliAuthError,
   RateLimitError,
@@ -21,6 +26,7 @@ import { InMemoryStageResultStore } from './stage-result-store';
 import { InMemoryFiledFindingStore } from './filed-finding-store';
 import { MemoryWorkspaceManager } from './workspace/memory-workspace-manager';
 import { WorkspaceError, type Workspaces } from './workspace/workspace-manager';
+import type { ManagedProjectRegistryDeps } from './resolve-managed-projects';
 
 function buildDeps() {
   return {
@@ -35,6 +41,39 @@ function buildDeps() {
     filedFindings: new InMemoryFiledFindingStore(),
     heartbeat: () => {},
   };
+}
+
+function managedProjectDeps(
+  repo: string,
+  config: ReturnType<typeof parseProjectConfig> | null,
+): ManagedProjectRegistryDeps {
+  const managedProject = {
+    id: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
+    project: 'acme-web',
+    repo,
+    readRepositories: [],
+    credentialSet: false,
+    config,
+    createdAt: '2026-08-03T00:00:00.000Z',
+    updatedAt: '2026-08-03T00:00:00.000Z',
+    trackerType: 'github' as const,
+  };
+  const store: ManagedProjectStore = {
+    async get(requestedRepo: string) {
+      return requestedRepo === repo ? managedProject : null;
+    },
+    async getByProject(project: string) {
+      return project === managedProject.project ? managedProject : null;
+    },
+    async getByLinearTeamKey() {
+      return null;
+    },
+    async list() {
+      return [managedProject];
+    },
+  };
+
+  return { store, resolveToken: async () => 'unused' };
 }
 
 describe('createActivities', () => {
@@ -84,7 +123,13 @@ describe('createActivities', () => {
       backend: 'stub',
       model: 'stub-v1',
       promptRef: 'implement.md',
-      promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
+      promptContext: {
+        taskId: 't1',
+        goal: 'g',
+        fullVerifyFindings: '',
+        reviewFindings: '',
+        prReviewFeedback: '',
+      },
       workspaceRef: 'demo/repo',
       limits: { maxTokens: 1000, timeoutMs: 60_000 },
     });
@@ -105,13 +150,27 @@ describe('createActivities', () => {
       backend: 'stub',
       model: 'stub-v1',
       promptRef: 'implement.md',
-      promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
+      promptContext: {
+        taskId: 't1',
+        goal: 'g',
+        fullVerifyFindings: '',
+        reviewFindings: '',
+        prReviewFeedback: '',
+      },
       workspaceRef: 'demo/repo',
       limits: { maxTokens: 1000, timeoutMs: 60_000 },
     });
 
     expect(heartbeats).toEqual([
-      { phase: 'started', taskId: 't1', stage: 'implement', attempt: 1, callIndex: 1, backend: 'stub', model: 'stub-v1' },
+      {
+        phase: 'started',
+        taskId: 't1',
+        stage: 'implement',
+        attempt: 1,
+        callIndex: 1,
+        backend: 'stub',
+        model: 'stub-v1',
+      },
     ]);
   });
 
@@ -169,6 +228,35 @@ describe('createActivities', () => {
     expect(deps.tracker.getLabels('issue-1')).toEqual(['bug']);
   });
 
+  it('getPrSnapshot and mergePr validate and return zod-parsed SCM results', async () => {
+    const deps = buildDeps();
+    const activities = createActivities(deps);
+    deps.scm.scriptSnapshots('demo/repo#7', [
+      {
+        prRef: 'demo/repo#7',
+        headSha: 'abc',
+        headRepo: 'demo/repo',
+        headBranch: 'feature/x',
+        checkoutRef: 'refs/pull/7/head',
+        labels: ['automerge'],
+        state: 'open',
+        draft: false,
+        mergeable: true,
+        mergedHeadSha: null,
+        ciStatus: 'green',
+        unresolvedThreads: 0,
+        comments: [],
+      },
+    ]);
+    await expect(activities.getPrSnapshot('demo/repo#7')).resolves.toMatchObject({
+      headSha: 'abc',
+      labels: ['automerge'],
+    });
+    await expect(
+      activities.mergePr({ prRef: 'demo/repo#7', expectedHeadSha: 'abc' }),
+    ).resolves.toEqual({ kind: 'merged', headSha: 'abc', mergeCommitSha: 'merge-abc' });
+  });
+
   it('openPr/getPrFeedback/pushBranch delegate to the scm port', async () => {
     const deps = buildDeps();
     const activities = createActivities(deps);
@@ -190,10 +278,113 @@ describe('createActivities', () => {
     const filedFindings = new InMemoryFiledFindingStore();
     const deps = { ...buildDeps(), tracker, filedFindings };
     const activities = createActivities(deps);
-    const a = await activities.createIssue({ repo: 'o/r', project: 'p', title: 'T', body: 'B', labels: ['bug'], dedupeFingerprint: 'fp1' });
-    const b = await activities.createIssue({ repo: 'o/r', project: 'p', title: 'T2', body: 'B2', labels: ['bug'], dedupeFingerprint: 'fp1' });
+    const a = await activities.createIssue({
+      repo: 'o/r',
+      project: 'p',
+      title: 'T',
+      body: 'B',
+      labels: ['bug'],
+      dedupeFingerprint: 'fp1',
+    });
+    const b = await activities.createIssue({
+      repo: 'o/r',
+      project: 'p',
+      title: 'T2',
+      body: 'B2',
+      labels: ['bug'],
+      dedupeFingerprint: 'fp1',
+    });
     expect(a.deduped).toBe(false);
     expect(b).toEqual({ ref: a.ref, url: '', deduped: true });
+  });
+
+  it('createIssue prevents concurrent duplicate filing via atomic reserve', async () => {
+    const filedFindings = new InMemoryFiledFindingStore();
+    const barrierPromise = (() => {
+      let resolve: () => void;
+      const p = new Promise<void>((r) => {
+        resolve = r;
+      });
+      return { promise: p, resolve: resolve! };
+    })();
+    const trackerCreateIssueCalls: number[] = [];
+    const tracker = {
+      async createIssue(_req: any) {
+        trackerCreateIssueCalls.push(1);
+        await barrierPromise.promise;
+        return { ref: 'issue-1', url: 'http://issue-1' };
+      },
+    } as any;
+    const deps = { ...buildDeps(), tracker, filedFindings };
+    const activities = createActivities(deps);
+
+    const promiseA = activities.createIssue({
+      repo: 'o/r',
+      project: 'p',
+      title: 'T',
+      body: 'B',
+      labels: ['bug'],
+      dedupeFingerprint: 'fp1',
+    });
+    const promiseB = activities.createIssue({
+      repo: 'o/r',
+      project: 'p',
+      title: 'T2',
+      body: 'B2',
+      labels: ['bug'],
+      dedupeFingerprint: 'fp1',
+    });
+
+    barrierPromise.resolve();
+    const [a, b] = await Promise.all([promiseA, promiseB]);
+
+    expect(trackerCreateIssueCalls.length).toBe(1);
+    expect(a.deduped).toBe(false);
+    expect(a.ref).toBe('issue-1');
+    expect(b.deduped).toBe(true);
+    expect(b.ref).toBe('');
+  });
+
+  it('createIssue releases reservation on tracker error so retry succeeds', async () => {
+    const filedFindings = new InMemoryFiledFindingStore();
+    let createIssueCallCount = 0;
+    const tracker = {
+      async createIssue(_req: any) {
+        createIssueCallCount++;
+        if (createIssueCallCount === 1) {
+          throw new Error('transient error');
+        }
+        return { ref: 'issue-1', url: 'http://issue-1' };
+      },
+    } as any;
+    const deps = { ...buildDeps(), tracker, filedFindings };
+    const activities = createActivities(deps);
+
+    try {
+      await activities.createIssue({
+        repo: 'o/r',
+        project: 'p',
+        title: 'T',
+        body: 'B',
+        labels: ['bug'],
+        dedupeFingerprint: 'fp1',
+      });
+    } catch (err) {
+      expect((err as Error).message).toBe('transient error');
+    }
+
+    const retryResult = await activities.createIssue({
+      repo: 'o/r',
+      project: 'p',
+      title: 'T',
+      body: 'B',
+      labels: ['bug'],
+      dedupeFingerprint: 'fp1',
+    });
+
+    expect(createIssueCallCount).toBe(2);
+    expect(retryResult.deduped).toBe(false);
+    expect(retryResult.ref).toBe('issue-1');
   });
 
   it('runAgent returns a stable promptHash and a promptSource', async () => {
@@ -208,7 +399,13 @@ describe('createActivities', () => {
       backend: 'stub',
       model: 'stub-v1',
       promptRef: 'implement.md',
-      promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
+      promptContext: {
+        taskId: 't1',
+        goal: 'g',
+        fullVerifyFindings: '',
+        reviewFindings: '',
+        prReviewFeedback: '',
+      },
       workspaceRef: 'demo/repo',
       limits: { maxTokens: 1000, timeoutMs: 60_000 },
     } as never);
@@ -221,8 +418,23 @@ describe('createActivities', () => {
     (deps.backends.stub as StubBackend).scriptResponse('bughunt', 1, { output: 'FINDINGS: []' });
     const activities = createActivities(deps);
     const res = await activities.runAgent({
-      taskId: 't1', stage: 'bughunt', repo: 'acme/web', project: 'acme', attempt: 1, callIndex: 1, backend: 'stub', model: 'm',
-      promptRef: 'implement.md', promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' }, workspaceRef: 'ws',
+      taskId: 't1',
+      stage: 'bughunt',
+      repo: 'acme/web',
+      project: 'acme',
+      attempt: 1,
+      callIndex: 1,
+      backend: 'stub',
+      model: 'm',
+      promptRef: 'implement.md',
+      promptContext: {
+        taskId: 't1',
+        goal: 'g',
+        fullVerifyFindings: '',
+        reviewFindings: '',
+        prReviewFeedback: '',
+      },
+      workspaceRef: 'ws',
       limits: { maxTokens: 1000, maxIterations: 1, maxImplementAttempts: 1, maxBabysitRounds: 1 },
       promptSource: { repo: 'acme/web', commit: 'abc123', path: 'agentops/prompts/x.md' },
     } as any);
@@ -233,8 +445,23 @@ describe('createActivities', () => {
     (deps.backends.stub as StubBackend).scriptResponse('bughunt', 1, { output: 'FINDINGS: []' });
     const activities = createActivities(deps);
     const res = await activities.runAgent({
-      taskId: 't1', stage: 'bughunt', repo: 'o/r', project: 'p', attempt: 1, callIndex: 1, backend: 'stub', model: 'm',
-      promptRef: 'implement.md', promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' }, workspaceRef: 'ws',
+      taskId: 't1',
+      stage: 'bughunt',
+      repo: 'o/r',
+      project: 'p',
+      attempt: 1,
+      callIndex: 1,
+      backend: 'stub',
+      model: 'm',
+      promptRef: 'implement.md',
+      promptContext: {
+        taskId: 't1',
+        goal: 'g',
+        fullVerifyFindings: '',
+        reviewFindings: '',
+        prReviewFeedback: '',
+      },
+      workspaceRef: 'ws',
       limits: { maxTokens: 1000, maxIterations: 1, maxImplementAttempts: 1, maxBabysitRounds: 1 },
     } as any);
     expect(res.promptSource).toBe('builtin:implement.md');
@@ -273,7 +500,13 @@ describe('createActivities — tracing', () => {
         backend: 'stub',
         model: 'stub-v1',
         promptRef: 'implement.md',
-        promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
+        promptContext: {
+          taskId: 't1',
+          goal: 'g',
+          fullVerifyFindings: '',
+          reviewFindings: '',
+          prReviewFeedback: '',
+        },
         workspaceRef: 'demo/repo',
         limits: { maxTokens: 1000, timeoutMs: 60_000 },
       }),
@@ -309,7 +542,13 @@ describe('createActivities — tracing', () => {
         backend: 'stub',
         model: 'stub-v1',
         promptRef: 'implement.md',
-        promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
+        promptContext: {
+          taskId: 't1',
+          goal: 'g',
+          fullVerifyFindings: '',
+          reviewFindings: '',
+          prReviewFeedback: '',
+        },
         workspaceRef: 'demo/repo',
         limits: { maxTokens: 1000, timeoutMs: 60_000 },
       }),
@@ -345,6 +584,14 @@ describe('createActivities — workspace lifecycle', () => {
           return { workspaceRef: 'ref', branch: 'b', baseBranch: 'main' };
         },
         cleanup: async () => {},
+        prepareRepositorySession: async () => ({
+          workspaceRef: 'session-ref',
+          repositories: [
+            { repo: 'owner/repo', relativePath: 'repositories/owner/repo', commit: '0'.repeat(40) },
+          ],
+        }),
+        cleanupRepositorySession: async () => {},
+        touchRepositorySession: async () => {},
         prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
         cleanupScratch: async () => {},
         pruneOrphans: async () => ({ removed: [] }),
@@ -364,6 +611,96 @@ describe('createActivities — workspace lifecycle', () => {
 });
 
 describe('createActivities — prompt rendering', () => {
+  it.each([
+    ['instructions', 'x'.repeat(32 * 1024 + 1)],
+    ['instructions', '😀'.repeat(8193)],
+    ['outputContract', 'x'.repeat(16 * 1024 + 1)],
+  ])('rejects oversized generic prompt %s before backend dispatch', async (field, value) => {
+    const run = vi.fn<AgentBackend['run']>();
+    const activities = createActivities({
+      ...buildDeps(),
+      backends: { stub: { run } },
+    });
+
+    const error = await activities
+      .runAgent({
+        taskId: 't1',
+        stage: 'implement',
+        attempt: 1,
+        callIndex: 1,
+        backend: 'stub',
+        model: 'stub-v1',
+        promptRef: 'generic-task.md',
+        promptContext: {
+          taskId: 't1',
+          instructions: 'inspect',
+          outputContract: '{"ok":true}',
+          [field]: value,
+        },
+        workspaceRef: 'demo/repo',
+        limits: { maxTokens: 1000, timeoutMs: 60_000 },
+      })
+      .catch((cause: unknown) => cause);
+
+    expect(error).toMatchObject({ type: 'GenericPromptValidationError', nonRetryable: true });
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it.each([null, [], 'not an object'])(
+    'rejects non-object generic prompt context before tier, workspace, rendering, or backend work',
+    async (promptContext) => {
+      const run = vi.fn<AgentBackend['run']>();
+      const deps = buildDeps();
+      deps.backends = { stub: { run } };
+      const touchRepositorySession = vi.spyOn(deps.workspaces, 'touchRepositorySession');
+      const render = vi.spyOn(deps.prompts, 'render');
+      const activities = createActivities(deps);
+
+      const error = await activities
+        .runAgent({
+          taskId: 't1',
+          stage: 'implement',
+          attempt: 1,
+          callIndex: 1,
+          tier: 'missing-tier',
+          projectTiers: {},
+          promptRef: 'generic-task.md',
+          promptContext: promptContext as unknown as Record<string, unknown>,
+          workspaceRef: 'demo/repo',
+          limits: { maxTokens: 1000, timeoutMs: 60_000 },
+        })
+        .catch((cause: unknown) => cause);
+
+      expect(error).toMatchObject({ type: 'GenericPromptValidationError', nonRetryable: true });
+      expect(touchRepositorySession).not.toHaveBeenCalled();
+      expect(render).not.toHaveBeenCalled();
+      expect(run).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects malformed generic prompt fields before backend dispatch', async () => {
+    const run = vi.fn<AgentBackend['run']>();
+    const activities = createActivities({ ...buildDeps(), backends: { stub: { run } } });
+
+    const error = await activities
+      .runAgent({
+        taskId: 't1',
+        stage: 'implement',
+        attempt: 1,
+        callIndex: 1,
+        backend: 'stub',
+        model: 'stub-v1',
+        promptRef: 'generic-task.md',
+        promptContext: { taskId: '', instructions: 1, outputContract: null },
+        workspaceRef: 'demo/repo',
+        limits: { maxTokens: 1000, timeoutMs: 60_000 },
+      })
+      .catch((cause: unknown) => cause);
+
+    expect(error).toMatchObject({ type: 'GenericPromptValidationError', nonRetryable: true });
+    expect(run).not.toHaveBeenCalled();
+  });
+
   it('renders promptRef/promptContext into prompt text before calling the backend', async () => {
     let receivedPrompt = '';
     const fakeBackend: AgentBackend = {
@@ -425,6 +762,14 @@ describe('createActivities — workspace error translation', () => {
         throw new WorkspaceError('git clone failed for owner/repo: spawn git ENOENT', true);
       },
       cleanup: async () => {},
+      prepareRepositorySession: async () => ({
+        workspaceRef: 'session-ref',
+        repositories: [
+          { repo: 'owner/repo', relativePath: 'repositories/owner/repo', commit: '0'.repeat(40) },
+        ],
+      }),
+      cleanupRepositorySession: async () => {},
+      touchRepositorySession: async () => {},
       prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
       cleanupScratch: async () => {},
       pruneOrphans: async () => ({ removed: [] }),
@@ -451,6 +796,14 @@ describe('createActivities — workspace error translation', () => {
         throw new WorkspaceError('git fetch failed for owner/repo: network unreachable', false);
       },
       cleanup: async () => {},
+      prepareRepositorySession: async () => ({
+        workspaceRef: 'session-ref',
+        repositories: [
+          { repo: 'owner/repo', relativePath: 'repositories/owner/repo', commit: '0'.repeat(40) },
+        ],
+      }),
+      cleanupRepositorySession: async () => {},
+      touchRepositorySession: async () => {},
       prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
       cleanupScratch: async () => {},
       pruneOrphans: async () => ({ removed: [] }),
@@ -474,6 +827,14 @@ describe('createActivities — workspace error translation', () => {
       cleanup: async () => {
         throw new WorkspaceError('git worktree remove failed: spawn git ENOENT', true);
       },
+      prepareRepositorySession: async () => ({
+        workspaceRef: 'session-ref',
+        repositories: [
+          { repo: 'owner/repo', relativePath: 'repositories/owner/repo', commit: '0'.repeat(40) },
+        ],
+      }),
+      cleanupRepositorySession: async () => {},
+      touchRepositorySession: async () => {},
       prepareScratch: async () => ({ workspaceRef: 'scratch-ref' }),
       cleanupScratch: async () => {},
       pruneOrphans: async () => ({ removed: [] }),
@@ -497,7 +858,13 @@ function runAgentReq(backend: string) {
     backend,
     model: 'm',
     promptRef: 'implement.md',
-    promptContext: { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' },
+    promptContext: {
+      taskId: 't1',
+      goal: 'g',
+      fullVerifyFindings: '',
+      reviewFindings: '',
+      prReviewFeedback: '',
+    },
     workspaceRef: 'demo/repo',
     limits: { maxTokens: 1000, timeoutMs: 60_000 },
   };
@@ -577,7 +944,9 @@ describe('createActivities — tier resolution + fallback', () => {
 
   it('falls back cross-backend on SessionLimitError and attributes to the fallback', async () => {
     const claude: AgentBackend = {
-      run: async () => { throw new SessionLimitError('session limit'); },
+      run: async () => {
+        throw new SessionLimitError('session limit');
+      },
     };
     const pi: AgentBackend = {
       run: async () => ({ output: 'fallback', tokensIn: 1, tokensOut: 1, wallMs: 1 }),
@@ -606,7 +975,9 @@ describe('createActivities — tier resolution + fallback', () => {
   it('maps SessionLimitExhaustedError to a non-retryable ApplicationFailure', async () => {
     // Both tier entries throw SessionLimitError -> chain exhausted.
     const sessionLimited: AgentBackend = {
-      run: async () => { throw new SessionLimitError('session limit'); },
+      run: async () => {
+        throw new SessionLimitError('session limit');
+      },
     };
     const deps = {
       ...buildDeps(),
@@ -616,9 +987,15 @@ describe('createActivities — tier resolution + fallback', () => {
 
     const err: unknown = await activities
       .runAgent({
-        taskId: 't1', stage: 'design', attempt: 1, callIndex: 1, tier: 'smart',
-        promptRef: 'design.md', promptContext: { taskId: 't1', goal: 'g' },
-        workspaceRef: 'demo/repo', limits: { maxTokens: 1000, timeoutMs: 60_000 },
+        taskId: 't1',
+        stage: 'design',
+        attempt: 1,
+        callIndex: 1,
+        tier: 'smart',
+        promptRef: 'design.md',
+        promptContext: { taskId: 't1', goal: 'g' },
+        workspaceRef: 'demo/repo',
+        limits: { maxTokens: 1000, timeoutMs: 60_000 },
       })
       .catch((e) => e);
 
@@ -629,16 +1006,24 @@ describe('createActivities — tier resolution + fallback', () => {
 
   it('maps RateLimitError to a retryable ApplicationFailure with a nextRetryDelay', async () => {
     const claude: AgentBackend = {
-      run: async () => { throw new RateLimitError('429 rate limit'); },
+      run: async () => {
+        throw new RateLimitError('429 rate limit');
+      },
     };
     const deps = { ...buildDeps(), backends: { claude } };
     const activities = createActivities(deps);
 
     const err: unknown = await activities
       .runAgent({
-        taskId: 't1', stage: 'design', attempt: 1, callIndex: 1, tier: 'smart',
-        promptRef: 'design.md', promptContext: { taskId: 't1', goal: 'g' },
-        workspaceRef: 'demo/repo', limits: { maxTokens: 1000, timeoutMs: 60_000 },
+        taskId: 't1',
+        stage: 'design',
+        attempt: 1,
+        callIndex: 1,
+        tier: 'smart',
+        promptRef: 'design.md',
+        promptContext: { taskId: 't1', goal: 'g' },
+        workspaceRef: 'demo/repo',
+        limits: { maxTokens: 1000, timeoutMs: 60_000 },
       })
       .catch((e) => e);
 
@@ -652,16 +1037,25 @@ describe('createActivities — tier resolution + fallback', () => {
 describe('createActivities — runAgent project authorization', () => {
   it('rejects a project-scoped caller requesting the platform backend directly', async () => {
     const { projectContext } = await import('./project-context');
-    const platform: AgentBackend = { run: async () => ({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }) };
+    const platform: AgentBackend = {
+      run: async () => ({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }),
+    };
     const deps = { ...buildDeps(), backends: { platform } };
     const activities = createActivities(deps);
 
     const err: unknown = await projectContext
       .run({ project: 'acme' }, () =>
         activities.runAgent({
-          taskId: 't1', stage: 'agent', attempt: 1, callIndex: 1, backend: 'platform', model: 'claude-sonnet-5',
-          promptRef: 'agent.md', promptContext: { taskId: 't1', instructions: 'x' },
-          workspaceRef: 'memory://scratch/t1', limits: { maxTokens: 1000, timeoutMs: 60_000 },
+          taskId: 't1',
+          stage: 'agent',
+          attempt: 1,
+          callIndex: 1,
+          backend: 'platform',
+          model: 'claude-sonnet-5',
+          promptRef: 'agent.md',
+          promptContext: { taskId: 't1', instructions: 'x' },
+          workspaceRef: 'memory://scratch/t1',
+          limits: { maxTokens: 1000, timeoutMs: 60_000 },
         }),
       )
       .catch((e) => e);
@@ -672,17 +1066,25 @@ describe('createActivities — runAgent project authorization', () => {
 
   it('rejects a project-scoped caller whose own projectTiers resolves to the platform backend', async () => {
     const { projectContext } = await import('./project-context');
-    const platform: AgentBackend = { run: async () => ({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }) };
+    const platform: AgentBackend = {
+      run: async () => ({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }),
+    };
     const deps = { ...buildDeps(), backends: { platform } };
     const activities = createActivities(deps);
 
     const err: unknown = await projectContext
       .run({ project: 'acme' }, () =>
         activities.runAgent({
-          taskId: 't1', stage: 'agent', attempt: 1, callIndex: 1,
-          tier: 'sneaky', projectTiers: { sneaky: [{ backend: 'platform', model: 'claude-sonnet-5' }] },
-          promptRef: 'agent.md', promptContext: { taskId: 't1', instructions: 'x' },
-          workspaceRef: 'memory://scratch/t1', limits: { maxTokens: 1000, timeoutMs: 60_000 },
+          taskId: 't1',
+          stage: 'agent',
+          attempt: 1,
+          callIndex: 1,
+          tier: 'sneaky',
+          projectTiers: { sneaky: [{ backend: 'platform', model: 'claude-sonnet-5' }] },
+          promptRef: 'agent.md',
+          promptContext: { taskId: 't1', instructions: 'x' },
+          workspaceRef: 'memory://scratch/t1',
+          limits: { maxTokens: 1000, timeoutMs: 60_000 },
         }),
       )
       .catch((e) => e);
@@ -692,14 +1094,23 @@ describe('createActivities — runAgent project authorization', () => {
   });
 
   it('allows an engine-internal caller (no project in context) to use the platform backend', async () => {
-    const platform: AgentBackend = { run: async () => ({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }) };
+    const platform: AgentBackend = {
+      run: async () => ({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }),
+    };
     const deps = { ...buildDeps(), backends: { platform } };
     const activities = createActivities(deps);
 
     const result = await activities.runAgent({
-      taskId: 't1', stage: 'platform', attempt: 1, callIndex: 1, backend: 'platform', model: 'claude-sonnet-5',
-      promptRef: 'platform.md', promptContext: { taskId: 't1', prompt: 'p', hintRepos: '' },
-      workspaceRef: 'memory://scratch/t1', limits: { maxTokens: 1000, timeoutMs: 60_000 },
+      taskId: 't1',
+      stage: 'platform',
+      attempt: 1,
+      callIndex: 1,
+      backend: 'platform',
+      model: 'claude-sonnet-5',
+      promptRef: 'platform.md',
+      promptContext: { taskId: 't1', prompt: 'p', hintRepos: '' },
+      workspaceRef: 'memory://scratch/t1',
+      limits: { maxTokens: 1000, timeoutMs: 60_000 },
     });
 
     expect(result.output).toBe('ok');
@@ -707,6 +1118,36 @@ describe('createActivities — runAgent project authorization', () => {
 });
 
 describe('createActivities — resolveRepoConfig', () => {
+  it('resolves a managed project config from the store without reading SCM', async () => {
+    const deps = {
+      ...buildDeps(),
+      managedProjectDeps: managedProjectDeps(
+        'acme/web',
+        parseProjectConfig({ fastVerifyCommands: ['pnpm lint'] }),
+      ),
+    };
+    deps.registry = [
+      {
+        project: 'acme-web',
+        repo: 'acme/web',
+        trackerType: 'github',
+        token: 'fake',
+        readRepositories: [],
+      },
+    ];
+    const readFileSpy = vi.spyOn(deps.scm, 'readFile');
+    const activities = createActivities(deps);
+
+    const result = await activities.resolveRepoConfig('acme/web');
+
+    expect(result).toMatchObject({
+      registered: true,
+      project: 'acme-web',
+      config: { fastVerifyCommands: ['pnpm lint'] },
+    });
+    expect(readFileSpy).not.toHaveBeenCalled();
+  });
+
   it("resolves project from the registry and loads that repo's ProjectConfig", async () => {
     const deps = buildDeps();
     deps.scm.seedFile(
@@ -720,13 +1161,13 @@ describe('createActivities — resolveRepoConfig', () => {
         repo: 'est1908/agentops-engine',
         trackerType: 'github',
         token: 'fake',
+        readRepositories: [],
       },
     ];
     const activities = createActivities(deps);
 
-    const { registered, project, config } = await activities.resolveRepoConfig(
-      'est1908/agentops-engine',
-    );
+    const { registered, project, config } =
+      await activities.resolveRepoConfig('est1908/agentops-engine');
 
     expect(registered).toBe(true);
     expect(project).toBe('engine');
@@ -748,14 +1189,96 @@ describe('createActivities — resolveRepoConfig', () => {
     expect(readFileSpy).not.toHaveBeenCalled();
   });
 
+  it('loads agents and worker from a managed project config without reading SCM', async () => {
+    const deps = {
+      ...buildDeps(),
+      managedProjectDeps: managedProjectDeps(
+        'acme/web',
+        parseProjectConfig({
+          agents: [
+            {
+              name: 'nightly-scan',
+              workflow: 'projectScan',
+              schedule: '0 2 * * *',
+            },
+          ],
+          worker: { image: 'ghcr.io/acme/web-worker:1.2.3', taskQueue: 'proj-acme-web' },
+        }),
+      ),
+    };
+    const readFileSpy = vi.spyOn(deps.scm, 'readFile');
+    const activities = createActivities(deps);
+
+    const manifest = await activities.loadAgentsManifest('acme-web', 'acme/web');
+
+    expect(manifest).toEqual({
+      agents: [
+        {
+          name: 'nightly-scan',
+          workflow: 'projectScan',
+          schedule: '0 2 * * *',
+          input: {},
+          enabled: true,
+          timezone: 'UTC',
+          overlap: 'skip',
+        },
+      ],
+      worker: {
+        image: 'ghcr.io/acme/web-worker:1.2.3',
+        taskQueue: 'proj-acme-web',
+        replicas: 1,
+        externalSecrets: [],
+      },
+    });
+    expect(readFileSpy).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the repository manifest when managed project config is null', async () => {
+    const deps = { ...buildDeps(), managedProjectDeps: managedProjectDeps('acme/web', null) };
+    deps.scm.seedFile(
+      'acme/web',
+      'agentops.json',
+      JSON.stringify({
+        agents: [{ name: 'repo-scan', workflow: 'projectScan', schedule: 'continuous' }],
+      }),
+    );
+    const readFileSpy = vi.spyOn(deps.scm, 'readFile');
+    const activities = createActivities(deps);
+
+    const manifest = await activities.loadAgentsManifest('acme-web', 'acme/web');
+
+    expect(manifest.agents).toMatchObject([
+      { name: 'repo-scan', workflow: 'projectScan', schedule: 'continuous' },
+    ]);
+    expect(readFileSpy).toHaveBeenCalledWith('acme/web', 'agentops.json');
+  });
+
   it('createIssue throws ProjectAuthorizationError when caller project does not own the repo', async () => {
     const { projectContext } = await import('./project-context');
     const tracker = new MemoryTrackerPort();
-    const deps = { ...buildDeps(), tracker, registry: [{ project: 'acme', repo: 'acme/web', trackerType: 'github' as const, token: 't' }] };
+    const deps = {
+      ...buildDeps(),
+      tracker,
+      registry: [
+        {
+          project: 'acme',
+          repo: 'acme/web',
+          trackerType: 'github' as const,
+          token: 't',
+          readRepositories: [],
+        },
+      ],
+    };
     const activities = createActivities(deps);
     await expect(
       projectContext.run({ project: 'other' }, () =>
-        activities.createIssue({ repo: 'acme/web', project: 'acme', title: 't', body: 'b', labels: [] }),
+        activities.createIssue({
+          repo: 'acme/web',
+          project: 'acme',
+          title: 't',
+          body: 'b',
+          labels: [],
+        }),
       ),
     ).rejects.toThrow(/ProjectAuthorizationError|not authorized/);
   });
@@ -771,7 +1294,15 @@ describe('createActivities — resolveRepoConfig', () => {
   it('listManagedProjects returns registry {project,repo} pairs', async () => {
     const deps = {
       ...buildDeps(),
-      registry: [{ project: 'acme', repo: 'acme/web', token: 't', trackerType: 'github' as const }],
+      registry: [
+        {
+          project: 'acme',
+          repo: 'acme/web',
+          token: 't',
+          trackerType: 'github' as const,
+          readRepositories: [],
+        },
+      ],
     };
     const activities = createActivities(deps);
     expect(await activities.listManagedProjects()).toEqual([{ project: 'acme', repo: 'acme/web' }]);
@@ -787,8 +1318,22 @@ describe('createActivities — resolveRepoConfig', () => {
     } as any;
     const activities = createActivities(deps);
     const plan = {
-      toCreate: [{ name: 'nightly', workflow: 'projectScan', schedule: '0 2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip', taskQueue: 'proj-acme' }],
-      toUpdate: [], toDelete: [], toPause: [], toResume: [],
+      toCreate: [
+        {
+          name: 'nightly',
+          workflow: 'projectScan',
+          schedule: '0 2 * * *',
+          input: {},
+          enabled: true,
+          timezone: 'UTC',
+          overlap: 'skip',
+          taskQueue: 'proj-acme',
+        },
+      ],
+      toUpdate: [],
+      toDelete: [],
+      toPause: [],
+      toResume: [],
     } as any;
     await activities.applyScheduleChanges('acme', 'acme/web', plan);
     expect(create.mock.calls[0][0].action.taskQueue).toBe('proj-acme');
@@ -809,14 +1354,35 @@ describe('createActivities — resolveRepoConfig', () => {
     } as any;
     const activities = createActivities(deps);
     const plan = {
-      toCreate: [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: { focus: 'auth' }, enabled: true, timezone: 'UTC', overlap: 'skip' }],
-      toUpdate: [], toDelete: [], toPause: [], toResume: [],
+      toCreate: [
+        {
+          name: 'nb',
+          workflow: 'whiteboxBugHunt',
+          schedule: '0 2 * * *',
+          input: { focus: 'auth' },
+          enabled: true,
+          timezone: 'UTC',
+          overlap: 'skip',
+        },
+      ],
+      toUpdate: [],
+      toDelete: [],
+      toPause: [],
+      toResume: [],
     } as any;
     await activities.applyScheduleChanges('acme', 'acme/web', plan);
     const arg = create.mock.calls[0][0];
     expect(arg.action.args[0]).toMatchObject({ repo: 'acme/web', project: 'acme', focus: 'auth' });
-    expect(arg.memo).toMatchObject({ project: 'acme', agentName: 'nb', workflowType: 'whiteboxBugHunt' });
-    expect(arg.searchAttributes).toMatchObject({ project: ['acme'], agentName: ['nb'], workflowType: ['whiteboxBugHunt'] });
+    expect(arg.memo).toMatchObject({
+      project: 'acme',
+      agentName: 'nb',
+      workflowType: 'whiteboxBugHunt',
+    });
+    expect(arg.searchAttributes).toMatchObject({
+      project: ['acme'],
+      agentName: ['nb'],
+      workflowType: ['whiteboxBugHunt'],
+    });
   });
 
   it('applyScheduleChanges updates an existing schedule via an updater function, matching the real ScheduleHandle.update contract', async () => {
@@ -828,19 +1394,41 @@ describe('createActivities — resolveRepoConfig', () => {
     // so an already-existing schedule's stale taskQueue (e.g. an unslugified
     // project name) could never actually be corrected by reconcile.
     const update = vi.fn(async (updateFn: (previous: unknown) => unknown) => {
-      update.lastResult = await updateFn({ action: { taskQueue: 'proj-Artem private agents' }, spec: { cronExpressions: ['0 */2 * * *'], timezone: 'UTC' } });
+      update.lastResult = await updateFn({
+        action: { taskQueue: 'proj-Artem private agents' },
+        spec: { cronExpressions: ['0 */2 * * *'], timezone: 'UTC' },
+      });
     }) as any;
     const getHandle = vi.fn(() => ({ update }));
     const deps = {
       ...buildDeps(),
       scheduleClient: { getHandle } as any,
-      registry: [{ project: 'Artem private agents', repo: 'est1908/agents', trackerType: 'github' as const, token: 't' }],
+      registry: [
+        {
+          project: 'Artem private agents',
+          repo: 'est1908/agents',
+          trackerType: 'github' as const,
+          token: 't',
+        },
+      ],
     } as any;
     const activities = createActivities(deps);
     const plan = {
       toCreate: [],
-      toUpdate: [{ name: 'gdebenz-watch', workflow: 'productOwnerReview', schedule: '0 */2 * * *', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip' }],
-      toDelete: [], toPause: [], toResume: [],
+      toUpdate: [
+        {
+          name: 'gdebenz-watch',
+          workflow: 'productOwnerReview',
+          schedule: '0 */2 * * *',
+          input: {},
+          enabled: true,
+          timezone: 'UTC',
+          overlap: 'skip',
+        },
+      ],
+      toDelete: [],
+      toPause: [],
+      toResume: [],
     } as any;
     await activities.applyScheduleChanges('Artem private agents', 'est1908/agents', plan);
     expect(getHandle).toHaveBeenCalledWith('agent:Artem private agents:gdebenz-watch');
@@ -857,13 +1445,26 @@ describe('createActivities — resolveRepoConfig', () => {
       registry: [],
     } as any;
     const activities = createActivities(deps);
-    const spec = { name: 'mon', workflow: 'rollbarMonitor', schedule: 'continuous', input: {}, enabled: true, timezone: 'UTC', overlap: 'skip', taskQueue: 'proj-acme' } as any;
+    const spec = {
+      name: 'mon',
+      workflow: 'rollbarMonitor',
+      schedule: 'continuous',
+      input: {},
+      enabled: true,
+      timezone: 'UTC',
+      overlap: 'skip',
+      taskQueue: 'proj-acme',
+    } as any;
     await activities.startContinuousAgent('acme', 'acme/web', spec);
     const [wf, opts] = start.mock.calls[0];
     expect(wf).toBe('rollbarMonitor');
     expect(opts.workflowId).toBe('agent:acme:mon');
     expect(opts.taskQueue).toBe('proj-acme');
-    expect(opts.memo).toMatchObject({ project: 'acme', agentName: 'mon', workflowType: 'rollbarMonitor' });
+    expect(opts.memo).toMatchObject({
+      project: 'acme',
+      agentName: 'mon',
+      workflowType: 'rollbarMonitor',
+    });
     expect(opts.searchAttributes).toMatchObject({ project: ['acme'] });
     expect(opts.args[0]).toMatchObject({ repo: 'acme/web', project: 'acme' });
   });
@@ -904,6 +1505,94 @@ describe('createActivities — resolveRepoConfig', () => {
     await activities.terminateContinuousAgent('agent:acme:mon');
     expect(terminate).toHaveBeenCalledWith('agent removed from manifest');
   });
+
+  it('listAgentSchedules surfaces the real task queue from describe() for matched schedules', async () => {
+    const LEGACY_ENGINE_QUEUE = 'agentops-devcycle';
+    const describe = vi.fn().mockResolvedValue({
+      action: {
+        taskQueue: LEGACY_ENGINE_QUEUE,
+        workflowType: 'whiteboxBugHunt',
+      },
+    } as any);
+    const getHandle = vi.fn((_id: string) => ({ describe }));
+    const deps = {
+      ...buildDeps(),
+      scheduleClient: {
+        getHandle,
+        list: async function* () {
+          yield {
+            scheduleId: 'agent:acme:nightly',
+            action: { workflowType: 'whiteboxBugHunt' },
+            schedule: { spec: { cronExpressions: ['0 2 * * *'], timezone: 'UTC' } },
+          } as any;
+        },
+      } as any,
+    } as any;
+    const activities = createActivities(deps);
+
+    const schedules = await activities.listAgentSchedules('acme');
+
+    expect(schedules).toHaveLength(1);
+    expect(schedules[0]).toMatchObject({
+      id: 'agent:acme:nightly',
+      taskQueue: LEGACY_ENGINE_QUEUE,
+      workflow: 'whiteboxBugHunt',
+    });
+    expect(getHandle).toHaveBeenCalledWith('agent:acme:nightly');
+    expect(describe).toHaveBeenCalled();
+  });
+
+  it('listAgentSchedules degrades to undefined taskQueue when describe() throws', async () => {
+    const describe = vi.fn().mockRejectedValue(new Error('describe failed'));
+    const getHandle = vi.fn((_id: string) => ({ describe }));
+    const deps = {
+      ...buildDeps(),
+      scheduleClient: {
+        getHandle,
+        list: async function* () {
+          yield {
+            scheduleId: 'agent:acme:nightly',
+            action: { workflowType: 'whiteboxBugHunt' },
+            schedule: { spec: { cronExpressions: ['0 2 * * *'], timezone: 'UTC' } },
+          } as any;
+        },
+      } as any,
+    } as any;
+    const activities = createActivities(deps);
+
+    const schedules = await activities.listAgentSchedules('acme');
+
+    expect(schedules).toHaveLength(1);
+    expect(schedules[0]).toMatchObject({
+      id: 'agent:acme:nightly',
+      taskQueue: undefined,
+      workflow: 'whiteboxBugHunt', // from summary since describe failed
+    });
+  });
+
+  it('listAgentSchedules skips describe() for non-matching ids', async () => {
+    const describe = vi.fn();
+    const getHandle = vi.fn((_id: string) => ({ describe }));
+    const deps = {
+      ...buildDeps(),
+      scheduleClient: {
+        getHandle,
+        list: async function* () {
+          yield {
+            scheduleId: 'agent:other:nightly',
+            action: { workflowType: 'whiteboxBugHunt' },
+            schedule: { spec: { cronExpressions: ['0 2 * * *'], timezone: 'UTC' } },
+          } as any;
+        },
+      } as any,
+    } as any;
+    const activities = createActivities(deps);
+
+    await activities.listAgentSchedules('acme');
+
+    expect(getHandle).not.toHaveBeenCalled();
+    expect(describe).not.toHaveBeenCalled();
+  });
 });
 
 describe('createActivities — scratch workspace lifecycle', () => {
@@ -916,5 +1605,369 @@ describe('createActivities — scratch workspace lifecycle', () => {
 
     await activities.cleanupScratchWorkspace(workspaceRef);
     expect((deps.workspaces as MemoryWorkspaceManager).isScratchCleanedUp(workspaceRef)).toBe(true);
+  });
+});
+
+describe('createActivities — repository sessions', () => {
+  const repositorySession = {
+    workspaceRef: 'session-ref',
+    repositories: [
+      { repo: 'acme/app', relativePath: 'repositories/acme/app', commit: 'a'.repeat(40) },
+    ],
+  };
+  const registry: ResolvedProjectEntry[] = [
+    {
+      project: 'acme',
+      repo: 'acme/app',
+      readRepositories: ['acme/shared'],
+      trackerType: 'github',
+      token: 'not-a-real-token',
+    },
+  ];
+
+  it('records only operational repository-session create attributes', async () => {
+    const { projectContext } = await import('./project-context');
+    const exporter = new InMemorySpanExporter();
+    const provider = new NodeTracerProvider({
+      spanProcessors: [new SimpleSpanProcessor(exporter)],
+    });
+    provider.register();
+    const span = provider.getTracer('test').startSpan('CreateRepositorySession');
+    const commit = 'b'.repeat(40);
+    const activities = createActivities({
+      ...buildDeps(),
+      registry: [{ ...registry[0], readRepositories: ['acme/shared', 'acme/private-repo'] }],
+      workspaces: {
+        ...buildDeps().workspaces,
+        prepareRepositorySession: vi.fn().mockResolvedValue({
+          workspaceRef: 'session-ref',
+          repositories: [
+            { repo: 'acme/private-repo', relativePath: 'repositories/acme/private-repo', commit },
+          ],
+        }),
+      } as Workspaces,
+    });
+
+    await context.with(trace.setSpan(context.active(), span), () =>
+      projectContext.run({ project: 'acme' }, () =>
+        activities.createRepositorySession({
+          taskId: 'safe-task',
+          repositories: [{ repo: 'acme/private-repo', ref: 'private-ref' }],
+        }),
+      ),
+    );
+    span.end();
+    const [recorded] = exporter.getFinishedSpans();
+    await provider.shutdown();
+
+    expect(recorded.attributes).toMatchObject({
+      'agentops.project': 'acme',
+      'agentops.task_id': 'safe-task',
+      'agentops.repository.count': 1,
+      'agentops.workspace.kind': 'repository-session',
+      'agentops.workspace.operation': 'create',
+      'agentops.workspace.outcome': 'success',
+    });
+    expect(Object.values(recorded.attributes).join(' ')).not.toContain('acme/private-repo');
+    expect(Object.values(recorded.attributes).join(' ')).not.toContain('private-ref');
+    expect(Object.values(recorded.attributes).join(' ')).not.toContain(commit);
+    expect(Object.keys(recorded.attributes)).not.toContain('agentops.repository.names');
+    expect(Object.keys(recorded.attributes)).not.toContain('agentops.repository.commits');
+  });
+
+  it.each([
+    { taskId: 'task', repositories: [], label: 'an empty repository list' },
+    {
+      taskId: 'task',
+      repositories: Array.from({ length: 6 }, () => ({ repo: 'acme/app' })),
+      label: 'too many repositories',
+    },
+    { taskId: 'task', repositories: [{ repo: 'acme/not a repo' }], label: 'an invalid name' },
+    {
+      taskId: 'task',
+      repositories: [{ repo: 'acme/app', ref: 'bad ref' }],
+      label: 'an invalid ref',
+    },
+    {
+      taskId: 'task',
+      repositories: [{ repo: 'acme/app' }, { repo: 'ACME/APP' }],
+      label: 'a case-insensitive duplicate',
+    },
+  ])(
+    'rejects $label before authorization or workspace access',
+    async ({ label: _label, ...raw }) => {
+      const prepareRepositorySession = vi.fn();
+      const activities = createActivities({
+        ...buildDeps(),
+        registry,
+        workspaces: { ...buildDeps().workspaces, prepareRepositorySession } as Workspaces,
+      });
+
+      const error = await activities.createRepositorySession(raw as never).catch((e) => e);
+      expect(error).toMatchObject({ type: 'RepositorySessionValidationError', nonRetryable: true });
+      expect(prepareRepositorySession).not.toHaveBeenCalled();
+    },
+  );
+
+  it('validates and authorizes a complete create request before preparing a session', async () => {
+    const { projectContext } = await import('./project-context');
+    const prepareRepositorySession = vi.fn().mockResolvedValue(repositorySession);
+    const deps = {
+      ...buildDeps(),
+      registry,
+      workspaces: { ...buildDeps().workspaces, prepareRepositorySession } as Workspaces,
+    };
+    const activities = createActivities(deps);
+
+    const malformed: unknown = {
+      taskId: 'task',
+      repositories: [{ repo: 'acme/app' }],
+      unexpected: true,
+    };
+    const validationError = await activities
+      .createRepositorySession(malformed as never)
+      .catch((e) => e);
+    expect(validationError).toMatchObject({
+      type: 'RepositorySessionValidationError',
+      nonRetryable: true,
+    });
+    expect(prepareRepositorySession).not.toHaveBeenCalled();
+
+    const unknownCallerError = await projectContext
+      .run({ project: 'unknown' }, () =>
+        activities.createRepositorySession({
+          taskId: 'task',
+          repositories: [{ repo: 'acme/app' }],
+        }),
+      )
+      .catch((e) => e);
+    expect(unknownCallerError).toMatchObject({
+      type: 'ProjectAuthorizationError',
+      nonRetryable: true,
+    });
+    expect(prepareRepositorySession).not.toHaveBeenCalled();
+
+    const authorizationError = await projectContext
+      .run({ project: 'acme' }, () =>
+        activities.createRepositorySession({
+          taskId: 'task',
+          repositories: [{ repo: 'acme/app' }, { repo: 'other/private' }],
+        }),
+      )
+      .catch((e) => e);
+    expect(authorizationError).toMatchObject({
+      type: 'ProjectAuthorizationError',
+      nonRetryable: true,
+    });
+    expect(prepareRepositorySession).not.toHaveBeenCalled();
+
+    await projectContext.run({ project: 'acme' }, () =>
+      activities.createRepositorySession({
+        taskId: 'task',
+        repositories: [{ repo: 'acme/app' }, { repo: 'acme/shared', ref: 'feature/session' }],
+      }),
+    );
+    expect(prepareRepositorySession).toHaveBeenCalledWith('acme', {
+      taskId: 'task',
+      repositories: [{ repo: 'acme/app' }, { repo: 'acme/shared', ref: 'feature/session' }],
+    });
+  });
+
+  it('requires a caller for create and cleanup', async () => {
+    const prepareRepositorySession = vi
+      .fn()
+      .mockResolvedValue({ workspaceRef: 'bad', repositories: [] });
+    const cleanupRepositorySession = vi.fn().mockRejectedValue(new WorkspaceError('gone', true));
+    const deps = {
+      ...buildDeps(),
+      registry,
+      workspaces: {
+        ...buildDeps().workspaces,
+        prepareRepositorySession,
+        cleanupRepositorySession,
+      } as Workspaces,
+    };
+    const activities = createActivities(deps);
+
+    const createError = await activities
+      .createRepositorySession({ taskId: 'task', repositories: [{ repo: 'acme/app' }] })
+      .catch((e) => e);
+    expect(createError).toMatchObject({ type: 'ProjectAuthorizationError', nonRetryable: true });
+    expect(prepareRepositorySession).not.toHaveBeenCalled();
+
+    const cleanupError = await activities
+      .cleanupRepositorySession({ workspaceRef: 'session-ref' })
+      .catch((e) => e);
+    expect(cleanupError).toMatchObject({ type: 'ProjectAuthorizationError', nonRetryable: true });
+    expect(cleanupRepositorySession).not.toHaveBeenCalled();
+  });
+
+  it('validates session manager output and maps cleanup workspace errors with the caller project', async () => {
+    const { projectContext } = await import('./project-context');
+    const prepareRepositorySession = vi
+      .fn()
+      .mockResolvedValue({ workspaceRef: 'bad', repositories: [] });
+    const cleanupRepositorySession = vi
+      .fn()
+      .mockRejectedValue(new WorkspaceError('wrong owner', true));
+    const activities = createActivities({
+      ...buildDeps(),
+      registry,
+      workspaces: {
+        ...buildDeps().workspaces,
+        prepareRepositorySession,
+        cleanupRepositorySession,
+      } as Workspaces,
+    });
+
+    const outputError = await projectContext
+      .run({ project: 'acme' }, () =>
+        activities.createRepositorySession({
+          taskId: 'task',
+          repositories: [{ repo: 'acme/app' }],
+        }),
+      )
+      .catch((e) => e);
+    expect(outputError).toMatchObject({
+      type: 'RepositorySessionResultValidationError',
+      nonRetryable: false,
+    });
+
+    const cleanupError = await projectContext
+      .run({ project: 'acme' }, () =>
+        activities.cleanupRepositorySession({ workspaceRef: 'session-ref' }),
+      )
+      .catch((e) => e);
+    expect(cleanupRepositorySession).toHaveBeenCalledWith('acme', 'session-ref');
+    expect(cleanupError).toMatchObject({ type: 'WorkspaceError', nonRetryable: true });
+
+    const malformedError = await projectContext
+      .run({ project: 'acme' }, () =>
+        activities.cleanupRepositorySession({ workspaceRef: '', extra: true } as never),
+      )
+      .catch((e) => e);
+    expect(malformedError).toMatchObject({
+      type: 'RepositorySessionValidationError',
+      nonRetryable: true,
+    });
+    expect(cleanupRepositorySession).toHaveBeenCalledTimes(1);
+  });
+
+  it('touches a repository session before rendering or dispatching, and maps touch failures', async () => {
+    const { projectContext } = await import('./project-context');
+    const events: string[] = [];
+    const backend: AgentBackend = {
+      run: async () => {
+        events.push('backend');
+        return { output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 };
+      },
+    };
+    const touchRepositorySession = vi.fn(async () => {
+      events.push('touch');
+    });
+    const prompts = new PromptPack();
+    const render = vi.spyOn(prompts, 'render').mockImplementation((...args) => {
+      events.push('render');
+      return PromptPack.prototype.render.apply(prompts, args);
+    });
+    const activities = createActivities({
+      ...buildDeps(),
+      backends: { stub: backend },
+      prompts,
+      workspaces: { ...buildDeps().workspaces, touchRepositorySession } as Workspaces,
+    });
+    const req = {
+      taskId: 'task',
+      stage: 'implement' as const,
+      attempt: 1,
+      callIndex: 1,
+      backend: 'stub',
+      model: 'stub-v1',
+      promptRef: 'implement.md',
+      promptContext: {
+        taskId: 'task',
+        goal: 'g',
+        fullVerifyFindings: '',
+        reviewFindings: '',
+        prReviewFeedback: '',
+      },
+      workspaceRef: 'session-ref',
+      limits: { maxTokens: 1000, timeoutMs: 60_000 },
+    };
+
+    await projectContext.run({ project: 'acme' }, () => activities.runAgent(req));
+    await projectContext.run({ project: 'acme' }, () => activities.runAgent(req));
+    expect(touchRepositorySession).toHaveBeenCalledTimes(2);
+    expect(touchRepositorySession).toHaveBeenLastCalledWith('acme', 'session-ref');
+    expect(events).toEqual(['touch', 'render', 'backend', 'touch', 'render', 'backend']);
+    expect(render).toHaveBeenCalledTimes(2);
+
+    touchRepositorySession.mockRejectedValueOnce(new WorkspaceError('wrong owner', true));
+    const error = await projectContext.run({ project: 'acme' }, () =>
+      activities.runAgent(req).catch((e) => e),
+    );
+    expect(error).toMatchObject({ type: 'WorkspaceError', nonRetryable: true });
+    expect(events).toHaveLength(6);
+  });
+
+  it('fails closed for a repository session without caller context while keeping legacy refs compatible', async () => {
+    const workspaceManager = new MemoryWorkspaceManager();
+    const session = await workspaceManager.prepareRepositorySession('acme', {
+      taskId: 'task',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    const backend = {
+      run: vi.fn().mockResolvedValue({ output: 'ok', tokensIn: 1, tokensOut: 1, wallMs: 1 }),
+    };
+    const activities = createActivities({
+      ...buildDeps(),
+      backends: { stub: backend },
+      workspaces: workspaceManager,
+    });
+    const req = {
+      taskId: 'task',
+      stage: 'implement' as const,
+      attempt: 1,
+      callIndex: 1,
+      backend: 'stub',
+      model: 'stub-v1',
+      promptRef: 'implement.md',
+      promptContext: {
+        taskId: 'task',
+        goal: 'g',
+        fullVerifyFindings: '',
+        reviewFindings: '',
+        prReviewFeedback: '',
+      },
+      workspaceRef: session.workspaceRef,
+      limits: { maxTokens: 1000, timeoutMs: 60_000 },
+    };
+    const error = await activities.runAgent(req).catch((e) => e);
+    expect(error).toMatchObject({ type: 'WorkspaceError', nonRetryable: true });
+    expect(backend.run).not.toHaveBeenCalled();
+
+    await activities.runAgent({ ...req, workspaceRef: 'memory://scratch/legacy' });
+    expect(backend.run).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces a cross-owner repository-session cleanup rejection as non-retryable', async () => {
+    const { projectContext } = await import('./project-context');
+    const workspaces = new MemoryWorkspaceManager();
+    const session = await workspaces.prepareRepositorySession('acme', {
+      taskId: 'task',
+      repositories: [{ repo: 'acme/app' }],
+    });
+    const activities = createActivities({
+      ...buildDeps(),
+      registry: [...registry, { ...registry[0], project: 'other', repo: 'other/app' }],
+      workspaces,
+    });
+
+    const error = await projectContext
+      .run({ project: 'other' }, () =>
+        activities.cleanupRepositorySession({ workspaceRef: session.workspaceRef }),
+      )
+      .catch((e) => e);
+    expect(error).toMatchObject({ type: 'WorkspaceError', nonRetryable: true });
   });
 });

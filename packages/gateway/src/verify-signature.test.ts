@@ -16,7 +16,9 @@ describe('verifyGithubSignature', () => {
 
   it('rejects a payload signed with the wrong secret', () => {
     const body = Buffer.from('{"action":"labeled"}');
-    expect(verifyGithubSignature(body, sign(body.toString('utf8'), 'wrong-secret'), SECRET)).toBe(false);
+    expect(verifyGithubSignature(body, sign(body.toString('utf8'), 'wrong-secret'), SECRET)).toBe(
+      false,
+    );
   });
 
   it('rejects a tampered payload (signature no longer matches)', () => {

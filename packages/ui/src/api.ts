@@ -100,7 +100,7 @@ async function parseEmptyResponse(res: Response): Promise<void> {
 export async function startRun(input: StartRunRequest): Promise<StartRunResponse> {
   const res = await fetch('/api/platform/runs', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: crudHeaders(true),
     body: JSON.stringify(input),
   });
   return parseJsonResponse(res, StartRunResponseSchema);
@@ -127,7 +127,7 @@ export async function listRepos(): Promise<string[]> {
 export async function startDevCycleRun(input: StartDevCycleRequest): Promise<StartDevCycleResponse> {
   const res = await fetch('/api/devcycle/runs', {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: crudHeaders(true),
     body: JSON.stringify(input),
   });
   return parseJsonResponse(res, StartDevCycleResponseSchema);
@@ -163,43 +163,8 @@ export function siblingTemporalUrl(temporalUrl: string, targetWorkflowId: string
   return `${match[1]}${encodeURIComponent(targetWorkflowId)}`;
 }
 
-// --- managed-project CRUD (design §7) ---
-
-export interface CreateProjectInput {
-  project: string;
-  repo: string;
-  token: string;
-  configJson?: string;
-  // `trackerType` + Linear fields mirror the contract's
-  // CreateManagedProjectRequestSchema (control-projects-api.ts). trackerType
-  // is GitHub by default; when 'linear', linearTeamKey/linearTriggerLabelId/
-  // linearToken are required (server-side superRefine; client mirrors it).
-  trackerType?: 'github' | 'linear';
-  linearTeamKey?: string;
-  linearTriggerLabelId?: string;
-  linearToken?: string;
-}
-
-export interface UpdateProjectInput {
-  token?: string;
-  configJson?: string;
-  // trackerType is immutable identity (like repo/project) -- it never
-  // appears on update. The Linear fields rotate/keep like `token`.
-  linearTeamKey?: string;
-  linearTriggerLabelId?: string;
-  linearToken?: string;
-}
-
-function parseConfigJson(configJson: string | undefined): unknown {
-  if (configJson === undefined) {
-    return undefined;
-  }
-  const trimmed = configJson.trim();
-  if (trimmed === 'null') {
-    return null;
-  }
-  return JSON.parse(trimmed);
-}
+// --- managed projects (read-only -- onboarded by PR to the platform repo,
+// not through this console; POST/PUT/DELETE /api/projects were retired) ---
 
 export async function listProjects(): Promise<ManagedProject[]> {
   const res = await fetch('/api/projects', { headers: crudHeaders(false) });
@@ -211,62 +176,6 @@ export async function getProject(repo: string): Promise<ManagedProject> {
     headers: crudHeaders(false),
   });
   return parseJsonResponse(res, ManagedProjectSchema);
-}
-
-export async function createProject(input: CreateProjectInput): Promise<ManagedProject> {
-  const body: Record<string, unknown> = {
-    project: input.project,
-    repo: input.repo,
-    token: input.token,
-    config: parseConfigJson(input.configJson),
-  };
-  // Only send tracker/Linear keys when present -- the server defaults
-  // trackerType to 'github' and runs the linear-required superRefine.
-  if (input.trackerType) {
-    body.trackerType = input.trackerType;
-  }
-  if (input.linearTeamKey) {
-    body.linearTeamKey = input.linearTeamKey;
-  }
-  if (input.linearTriggerLabelId) {
-    body.linearTriggerLabelId = input.linearTriggerLabelId;
-  }
-  if (input.linearToken) {
-    body.linearToken = input.linearToken;
-  }
-  const res = await fetch('/api/projects', {
-    method: 'POST',
-    headers: crudHeaders(true),
-    body: JSON.stringify(body),
-  });
-  return parseJsonResponse(res, ManagedProjectSchema);
-}
-
-export async function updateProject(
-  repo: string,
-  input: UpdateProjectInput,
-): Promise<ManagedProject> {
-  const payload: Record<string, unknown> = {};
-  if (input.token !== undefined) payload.token = input.token;
-  if (input.configJson !== undefined) payload.config = parseConfigJson(input.configJson);
-  if (input.linearTeamKey !== undefined) payload.linearTeamKey = input.linearTeamKey;
-  if (input.linearTriggerLabelId !== undefined)
-    payload.linearTriggerLabelId = input.linearTriggerLabelId;
-  if (input.linearToken !== undefined) payload.linearToken = input.linearToken;
-  const res = await fetch(`/api/projects/${encodeURIComponent(repo)}`, {
-    method: 'PUT',
-    headers: crudHeaders(true),
-    body: JSON.stringify(payload),
-  });
-  return parseJsonResponse(res, ManagedProjectSchema);
-}
-
-export async function deleteProject(repo: string): Promise<void> {
-  const res = await fetch(`/api/projects/${encodeURIComponent(repo)}`, {
-    method: 'DELETE',
-    headers: crudHeaders(false),
-  });
-  await parseEmptyResponse(res);
 }
 
 // --- agent schedules (SP3 run-from-UI) ---

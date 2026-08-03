@@ -1,7 +1,10 @@
 namespace: dev-agents
 
 image:
-  repository: gitactions.est1908.top/agentic-ops
+  # Public registry (S1). A publicly published chart must not default to a
+  # private registry: an adopter who doesn't override this would get an
+  # unpullable image with no hint why.
+  repository: ghcr.io/est1908-agentic-ops
   workerTag: CHANGEME
   # One shared image runs every agent-CLI backend (claude, pi, ...) — see
   # images/agent-runner/Dockerfile and ARCHITECTURE.md §5.4.
@@ -46,32 +49,16 @@ engineDb:
   user: temporal
   passwordSecretName: postgres-credentials
 
-# Base64 PKCS8 DER private key for decrypting managed-project credentials
-# (docs/superpowers/specs/2026-07-08-managed-project-registry-design.md §5).
-# This -- together with engineDb.host above -- is the *only* project
-# registration mechanism now (the static PROJECT_REGISTRY_JSON registry was
-# removed; see docs/superpowers/specs/2026-07-09-linear-trigger-design.md's
-# DB-only addendum). Unset means the worker/gateway/cli have nothing
-# registered anywhere. Generate with credential-crypto's
-# generateManagedProjectKeyPair() and store the private half SOPS-encrypted.
-projectCredentialPrivateKeySecretName: ""
-
-# Base64 SPKI DER public key matching projectCredentialPrivateKeySecretName's
-# private half (design §5). NOT a secret -- mounted as a plain env var on
-# control ONLY, which can encrypt managed-project tokens it cannot decrypt.
-# The private key never reaches control. Generate with
-# generateManagedProjectKeyPair(); unset => control's /api/projects routes
-# are disabled (503). The platform follow-up PR sets this to the live key
-# (private key is already wired in agentops-platform PR #3).
-projectCredentialPublicKey: ""
-
-# Shared bearer token gating control's /api/projects CRUD routes
-# (CONTROL_CRUD_TOKEN). A SECRET -- sourced from a K8s Secret with a
-# controlCrudToken key. Unset => routes disabled (503). This is app-layer
-# defense-in-depth + the local CLI's auth; GitHub issue #4 (Traefik
-# basic-auth on the control ingress) is STILL REQUIRED before enabling the
-# control ingress publicly (control.ingress.enabled stays false by default).
-projectCrudTokenSecretName: ""
+# Name of the `managed-projects` ConfigMap (docs/superpowers/plans/
+# 2026-07-25-engine-projects-configmap-resolver.md) mounted read-only at
+# /etc/managed-projects on both the worker and gateway. Each project's
+# `<slug>__project.yaml` entry (project/repo/tokenSecret) is read by
+# FileManagedProjectStore; `tokenSecret` names a per-project K8s Secret in
+# this release's namespace that KubeTokenResolver reads directly via the K8s
+# API (see the worker/gateway Roles' secrets:get rule) -- this replaces the
+# now-removed worker/gateway decrypt-in-DB private-key knob and the single
+# shared GITHUB_TOKEN env var.
+managedProjectsConfigMapName: managed-projects
 
 taskQueue: agentops-devcycle
 
@@ -153,12 +140,6 @@ gateway:
   # LINEAR_WEBHOOK_SECRET key -- the shared secret configured on the Linear
   # workspace's webhook, once a `projects` entry sets `trackerType: linear`.
   linearWebhookSecretName: ""
-  # Empty by default -- unset means the ArgoCD project-workers plugin-generator
-  # route (POST /api/v1/getparams.execute) 404s (feature off), same pattern as
-  # linearWebhookSecretName. agentops-platform sets this + creates the matching
-  # Secret (key ARGOCD_PLUGIN_TOKEN) when it swaps the project-workers
-  # ApplicationSet to the plugin generator (project-worker-onboarding spec §5.2).
-  argocdPluginTokenSecretName: ""
   # Disabled by default: this chart ships no real public hostname.
   # agentops-platform's values override sets host + enabled: true once a real
   # domain is pointed at the cluster. clusterIssuer must be a cert-manager

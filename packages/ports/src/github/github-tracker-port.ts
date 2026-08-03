@@ -28,14 +28,22 @@ export class GithubTrackerPort implements TrackerPort {
 
   async removeLabel(ref: string, label: string): Promise<void> {
     const { owner, repo, number } = parseRef(ref);
-    await this.client.rest.issues.removeLabel({ owner, repo, issue_number: number, name: label }).catch((err: unknown) => {
-      if ((err as { status?: number }).status !== 404) throw err;
-    });
+    await this.client.rest.issues
+      .removeLabel({ owner, repo, issue_number: number, name: label })
+      .catch((err: unknown) => {
+        if ((err as { status?: number }).status !== 404) throw err;
+      });
   }
 
   async createIssue(req: CreateIssueRequest): Promise<CreatedIssue> {
     const { owner, repo } = parseRepoSlug(req.repo);
-    const { data } = await this.client.rest.issues.create({ owner, repo, title: req.title, body: req.body, labels: req.labels });
+    const { data } = await this.client.rest.issues.create({
+      owner,
+      repo,
+      title: req.title,
+      body: req.body,
+      labels: req.labels,
+    });
     return { ref: `${req.repo}#${data.number}`, url: data.html_url };
   }
 }

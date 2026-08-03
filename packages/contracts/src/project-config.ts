@@ -1,5 +1,20 @@
 import { z, ZodError } from 'zod';
-import { ModelRefSchema, BrakesSchema, RoutingSchema, StageToggleSchema, TimeoutsSchema } from './model';
+import {
+  ModelRefSchema,
+  BrakesSchema,
+  RoutingSchema,
+  StageToggleSchema,
+  TimeoutsSchema,
+} from './model';
+import {
+  AgentSpecSchema,
+  ProjectWorkerSchema,
+  BUILTIN_WORKFLOW_INPUTS,
+  validateAgentSpecs,
+} from './agents-manifest';
+
+export const AutoMergeModeSchema = z.enum(['disabled', 'label', 'all']);
+export type AutoMergeMode = z.infer<typeof AutoMergeModeSchema>;
 
 export const VerifyServiceReadinessSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('exec'), command: z.array(z.string()).min(1) }),
@@ -30,12 +45,25 @@ export const ProjectConfigSchema = z.object({
   tiers: z.record(z.string(), z.array(ModelRefSchema)).optional(),
   brakes: BrakesSchema,
   timeouts: TimeoutsSchema.optional(),
+  autoMerge: AutoMergeModeSchema.optional(),
+  // Scheduled workflows and the optional Tier-2 worker for this project. These
+  // replace the former standalone `agents.json`; the reconciler reads them from
+  // here. Both optional (undefined when absent, like image/services); per-entry
+  // shapes are strict (see AgentSpecSchema/ProjectWorkerSchema).
+  agents: z.array(AgentSpecSchema).optional(),
+  worker: ProjectWorkerSchema.optional(),
 });
 export type ProjectConfig = z.infer<typeof ProjectConfigSchema>;
 
 export const DEFAULT_PROJECT_CONFIG: Omit<
   ProjectConfig,
-  'fastVerifyCommands' | 'fullVerifyCommands' | 'image' | 'services' | 'initCommands'
+  | 'fastVerifyCommands'
+  | 'fullVerifyCommands'
+  | 'image'
+  | 'services'
+  | 'initCommands'
+  | 'agents'
+  | 'worker'
 > = {
   stages: {},
   routing: {
@@ -49,6 +77,7 @@ export const DEFAULT_PROJECT_CONFIG: Omit<
   },
   escalation: { tier: 'escalation' },
   brakes: { maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 },
+  autoMerge: 'disabled' as const,
 };
 
 export class InvalidProjectConfigError extends Error {
@@ -61,7 +90,9 @@ export class InvalidProjectConfigError extends Error {
 }
 
 function formatZodError(err: ZodError): string {
-  return err.issues.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`).join('; ');
+  return err.issues
+    .map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+    .join('; ');
 }
 
 export function parseProjectConfig(raw: unknown): ProjectConfig {
@@ -77,7 +108,12 @@ export function parseProjectConfig(raw: unknown): ProjectConfig {
     brakes: { ...DEFAULT_PROJECT_CONFIG.brakes, ...rawConfig.brakes },
   };
   try {
-    return ProjectConfigSchema.parse(merged);
+    const config = ProjectConfigSchema.parse(merged);
+    // Manifest-level agent checks the schema can't express (unique names,
+    // per-workflow input validation). Surfaces as a project-config error.
+    const agentError = validateAgentSpecs(config.agents ?? [], BUILTIN_WORKFLOW_INPUTS);
+    if (agentError) throw new InvalidProjectConfigError(agentError);
+    return config;
   } catch (err) {
     if (err instanceof ZodError) {
       throw new InvalidProjectConfigError(formatZodError(err), err.issues);

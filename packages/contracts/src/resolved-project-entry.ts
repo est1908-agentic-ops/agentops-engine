@@ -6,19 +6,20 @@
 // registry-parsing schema exists anymore (see the Linear trigger design
 // doc's DB-only addendum for why the old static PROJECT_REGISTRY_JSON
 // mechanism was removed).
+type BaseResolvedProjectEntry = {
+  project: string;
+  repo: string;
+  readRepositories: string[];
+  token: string;
+};
+
 export type ResolvedProjectEntry =
-  | {
+  | (BaseResolvedProjectEntry & {
       trackerType: 'github';
-      project: string;
-      repo: string;
-      token: string;
-    }
-  | {
+    })
+  | (BaseResolvedProjectEntry & {
       trackerType: 'linear';
-      project: string;
-      repo: string;
-      token: string;
       linearTeamKey: string;
       linearTriggerLabelId: string;
       linearToken: string;
-    };
+    });

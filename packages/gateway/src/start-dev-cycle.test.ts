@@ -26,7 +26,13 @@ describe('startDevCycleForIssue', () => {
     const start = vi.fn().mockResolvedValue(undefined);
     const client = fakeClient(start);
 
-    const result = await startDevCycleForIssue(client, 'agentops-devcycle', 'my-project', event, config);
+    const result = await startDevCycleForIssue(
+      client,
+      'agentops-devcycle',
+      'my-project',
+      event,
+      config,
+    );
 
     expect(result).toEqual({ taskId: 'issue-my-project-42', started: true });
     expect(start).toHaveBeenCalledWith(
@@ -53,7 +59,13 @@ describe('startDevCycleForIssue', () => {
     const start = vi.fn().mockResolvedValue(undefined);
     const client = fakeClient(start);
 
-    const result = await startDevCycleForIssue(client, 'agentops-devcycle', 'Artem private agents', event, config);
+    const result = await startDevCycleForIssue(
+      client,
+      'agentops-devcycle',
+      'Artem private agents',
+      event,
+      config,
+    );
 
     // taskId becomes `agentops/<taskId>` and a workspace dir -> must be slug-safe.
     expect(result.taskId).toBe('issue-artem-private-agents-42');
@@ -62,7 +74,12 @@ describe('startDevCycleForIssue', () => {
       expect.objectContaining({
         // workflow id keeps the human-readable raw project name (Temporal allows it).
         workflowId: 'devcycle:Artem private agents:42',
-        args: [expect.objectContaining({ taskId: 'issue-artem-private-agents-42', project: 'Artem private agents' })],
+        args: [
+          expect.objectContaining({
+            taskId: 'issue-artem-private-agents-42',
+            project: 'Artem private agents',
+          }),
+        ],
       }),
     );
   });
@@ -77,8 +94,20 @@ describe('startDevCycleForIssue', () => {
     const eventA: IssueLabeledEvent = { ...event, repo: 'foo-bar/baz', issueRef: 'foo-bar/baz#42' };
     const eventB: IssueLabeledEvent = { ...event, repo: 'foo/bar-baz', issueRef: 'foo/bar-baz#42' };
 
-    const resultA = await startDevCycleForIssue(client, 'agentops-devcycle', 'project-a', eventA, config);
-    const resultB = await startDevCycleForIssue(client, 'agentops-devcycle', 'project-b', eventB, config);
+    const resultA = await startDevCycleForIssue(
+      client,
+      'agentops-devcycle',
+      'project-a',
+      eventA,
+      config,
+    );
+    const resultB = await startDevCycleForIssue(
+      client,
+      'agentops-devcycle',
+      'project-b',
+      eventB,
+      config,
+    );
 
     expect(resultA.taskId).not.toEqual(resultB.taskId);
   });
@@ -93,10 +122,20 @@ describe('startDevCycleForIssue', () => {
   });
 
   it('treats an already-started workflow as an idempotent no-op, not an error', async () => {
-    const start = vi.fn().mockRejectedValue(new WorkflowExecutionAlreadyStartedError('already started', 'wf-1', 'devCycle'));
+    const start = vi
+      .fn()
+      .mockRejectedValue(
+        new WorkflowExecutionAlreadyStartedError('already started', 'wf-1', 'devCycle'),
+      );
     const client = fakeClient(start);
 
-    const result = await startDevCycleForIssue(client, 'agentops-devcycle', 'my-project', event, config);
+    const result = await startDevCycleForIssue(
+      client,
+      'agentops-devcycle',
+      'my-project',
+      event,
+      config,
+    );
 
     expect(result).toEqual({ taskId: 'issue-my-project-42', started: false });
   });
@@ -105,8 +144,8 @@ describe('startDevCycleForIssue', () => {
     const start = vi.fn().mockRejectedValue(new Error('temporal unreachable'));
     const client = fakeClient(start);
 
-    await expect(startDevCycleForIssue(client, 'agentops-devcycle', 'my-project', event, config)).rejects.toThrow(
-      'temporal unreachable',
-    );
+    await expect(
+      startDevCycleForIssue(client, 'agentops-devcycle', 'my-project', event, config),
+    ).rejects.toThrow('temporal unreachable');
   });
 });

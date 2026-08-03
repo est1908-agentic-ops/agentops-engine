@@ -55,7 +55,7 @@ function fakeChildProcess() {
 }
 
 describe('ClaudeBackend', () => {
-  it('spawns claude with the expected flags and pipes the prompt via stdin, not argv', async () => {
+  it('spawns claude with the expected flags for write stages and pipes the prompt via stdin, not argv', async () => {
     const { child, stdinWrites } = fakeChildProcess();
     const calls: { command: string; args: string[] }[] = [];
     const spawnFn = vi.fn((command: string, args: string[]) => {
@@ -81,6 +81,38 @@ describe('ClaudeBackend', () => {
       'claude-sonnet-5',
       '--dangerously-skip-permissions',
     ]);
+    expect(stdinWrites.join('')).toBe('do the thing');
+  });
+
+  it('spawns claude with --permission-mode plan for read-only stages like bughunt', async () => {
+    const { child, stdinWrites } = fakeChildProcess();
+    const calls: { command: string; args: string[] }[] = [];
+    const spawnFn = vi.fn((command: string, args: string[]) => {
+      calls.push({ command, args });
+      queueMicrotask(() => {
+        child.stdout.end(JSON.stringify({ is_error: false, result: 'findings', usage: { input_tokens: 1, output_tokens: 2 }, duration_ms: 10 }));
+        child.stderr.end('');
+        child.emit('close', 0);
+      });
+      return child;
+    });
+    const backend = new ProcessCliRunner(createClaudeCliSpec(), { spawn: spawnFn as never });
+
+    await backend.run({ ...baseRequest, stage: 'bughunt' });
+
+    expect(calls[0].command).toBe('claude');
+    const args = calls[0].args;
+    expect(args).toContain('-p');
+    expect(args).toContain('--output-format');
+    expect(args).toContain('stream-json');
+    expect(args).toContain('--verbose');
+    expect(args).toContain('--model');
+    expect(args).toContain('claude-sonnet-5');
+    expect(args).toContain('--permission-mode');
+    const permModeIndex = args.indexOf('--permission-mode');
+    expect(permModeIndex).toBeGreaterThanOrEqual(0);
+    expect(args[permModeIndex + 1]).toBe('plan');
+    expect(args).not.toContain('--dangerously-skip-permissions');
     expect(stdinWrites.join('')).toBe('do the thing');
   });
 

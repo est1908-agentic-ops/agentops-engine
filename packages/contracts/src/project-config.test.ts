@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { InvalidProjectConfigError, parseProjectConfig, ProjectConfigSchema } from './project-config';
+import {
+  InvalidProjectConfigError,
+  parseProjectConfig,
+  ProjectConfigSchema,
+} from './project-config';
 
 const validConfig = {
   fastVerifyCommands: ['pnpm lint'],
@@ -98,7 +102,9 @@ describe('ProjectConfigSchema', () => {
   });
 
   it('rejects initCommands when not a string array', () => {
-    expect(() => ProjectConfigSchema.parse({ ...validConfig, initCommands: 'pnpm install' })).toThrow();
+    expect(() =>
+      ProjectConfigSchema.parse({ ...validConfig, initCommands: 'pnpm install' }),
+    ).toThrow();
   });
 });
 
@@ -108,12 +114,20 @@ describe('parseProjectConfig', () => {
     expect(config.fastVerifyCommands).toBeUndefined();
     expect(config.fullVerifyCommands).toBeUndefined();
     expect(config.routing.implement).toEqual({ tier: 'implementation', effort: 'high' });
-    expect(config.brakes).toEqual({ maxImplementAttempts: 3, maxIterations: 6, maxTokens: 200_000, maxBabysitRounds: 5 });
+    expect(config.brakes).toEqual({
+      maxImplementAttempts: 3,
+      maxIterations: 6,
+      maxTokens: 200_000,
+      maxBabysitRounds: 5,
+    });
     expect(config.escalation).toEqual({ tier: 'escalation' });
   });
 
   it('passes verify commands through untouched when supplied', () => {
-    const config = parseProjectConfig({ fastVerifyCommands: ['pnpm lint'], fullVerifyCommands: ['pnpm test'] });
+    const config = parseProjectConfig({
+      fastVerifyCommands: ['pnpm lint'],
+      fullVerifyCommands: ['pnpm test'],
+    });
     expect(config.fastVerifyCommands).toEqual(['pnpm lint']);
     expect(config.fullVerifyCommands).toEqual(['pnpm test']);
   });
@@ -131,7 +145,9 @@ describe('parseProjectConfig', () => {
   });
 
   it('throws InvalidProjectConfigError when a field has the wrong type', () => {
-    expect(() => parseProjectConfig({ brakes: { maxTokens: 'not-a-number' } })).toThrow(InvalidProjectConfigError);
+    expect(() => parseProjectConfig({ brakes: { maxTokens: 'not-a-number' } })).toThrow(
+      InvalidProjectConfigError,
+    );
   });
 
   it('throws InvalidProjectConfigError when raw is not an object', () => {
@@ -153,7 +169,9 @@ describe('parseProjectConfig', () => {
 
     const configured = parseProjectConfig({
       image: 'ghcr.io/example/agentops:latest',
-      services: [{ name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } }],
+      services: [
+        { name: 'redis', image: 'redis:7-alpine', readiness: { type: 'tcpSocket', port: 6379 } },
+      ],
     });
     expect(configured.image).toBe('ghcr.io/example/agentops:latest');
     expect(configured.services).toEqual([
@@ -165,7 +183,9 @@ describe('parseProjectConfig', () => {
     const empty = parseProjectConfig({});
     expect(empty.initCommands).toBeUndefined();
 
-    const configured = parseProjectConfig({ initCommands: ['pnpm install', 'pnpm worktree-setup'] });
+    const configured = parseProjectConfig({
+      initCommands: ['pnpm install', 'pnpm worktree-setup'],
+    });
     expect(configured.initCommands).toEqual(['pnpm install', 'pnpm worktree-setup']);
   });
 
@@ -175,5 +195,68 @@ describe('parseProjectConfig', () => {
 
     const configured = parseProjectConfig({ timeouts: { context: { idleTimeoutMs: 600_000 } } });
     expect(configured.timeouts).toEqual({ context: { idleTimeoutMs: 600_000 } });
+  });
+
+  it('defaults autoMerge to disabled and rejects unknown modes', () => {
+    expect(parseProjectConfig({}).autoMerge).toBe('disabled');
+    expect(parseProjectConfig({ autoMerge: 'label' }).autoMerge).toBe('label');
+    expect(() => parseProjectConfig({ autoMerge: 'sometimes' })).toThrow(InvalidProjectConfigError);
+  });
+});
+
+describe('parseProjectConfig — agents and worker', () => {
+  it('leaves agents and worker undefined when not configured', () => {
+    const config = parseProjectConfig({});
+    expect(config.agents).toBeUndefined();
+    expect(config.worker).toBeUndefined();
+  });
+
+  it('parses agents with per-entry defaults and an optional worker block', () => {
+    const config = parseProjectConfig({
+      agents: [{ name: 'nb', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *' }],
+      worker: { image: 'reg/acme/agentops-worker:abc123', externalSecrets: ['rollbar-token'] },
+    });
+    expect(config.agents).toHaveLength(1);
+    expect(config.agents?.[0]).toMatchObject({
+      name: 'nb',
+      enabled: true,
+      timezone: 'UTC',
+      overlap: 'skip',
+    });
+    expect(config.worker).toEqual({
+      image: 'reg/acme/agentops-worker:abc123',
+      replicas: 1,
+      externalSecrets: ['rollbar-token'],
+    });
+  });
+
+  it('throws InvalidProjectConfigError on duplicate agent names', () => {
+    expect(() =>
+      parseProjectConfig({
+        agents: [
+          { name: 'dup', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *' },
+          { name: 'dup', workflow: 'whiteboxBugHunt', schedule: '0 3 * * *' },
+        ],
+      }),
+    ).toThrow(InvalidProjectConfigError);
+  });
+
+  it('throws InvalidProjectConfigError on invalid built-in agent input', () => {
+    expect(() =>
+      parseProjectConfig({
+        agents: [
+          { name: 'b', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', input: { nope: 1 } },
+        ],
+      }),
+    ).toThrow(InvalidProjectConfigError);
+  });
+
+  it('rejects unknown per-agent keys and a worker block missing its image', () => {
+    expect(() =>
+      parseProjectConfig({
+        agents: [{ name: 'x', workflow: 'whiteboxBugHunt', schedule: '0 2 * * *', oops: 1 }],
+      }),
+    ).toThrow(InvalidProjectConfigError);
+    expect(() => parseProjectConfig({ worker: { replicas: 2 } })).toThrow(InvalidProjectConfigError);
   });
 });

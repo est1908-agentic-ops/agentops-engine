@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
-import { describe, expect, it, vi } from 'vitest';
-import { SpawnCommandRunner } from './spawn-command-runner';
+import { describe, expect, it, vi, afterEach } from 'vitest';
+import { SpawnCommandRunner, INIT_COMMAND_ENV_ALLOWLIST } from './spawn-command-runner';
 
 function fakeSpawn(exitCode: number, stdout: string, stderr: string) {
   const calls: { command: string; options: unknown }[] = [];
@@ -24,6 +24,11 @@ function fakeSpawn(exitCode: number, stdout: string, stderr: string) {
 }
 
 describe('SpawnCommandRunner', () => {
+  const originalEnv = { ...process.env };
+  afterEach(() => {
+    Object.assign(process.env, originalEnv);
+  });
+
   it('runs the given command string through a shell with the given cwd', async () => {
     const { spawnFn, calls } = fakeSpawn(0, 'ok', '');
     const runner = new SpawnCommandRunner({ spawn: spawnFn as never });
@@ -47,7 +52,10 @@ describe('SpawnCommandRunner', () => {
 
   it('resolves (never hangs, never throws) when the process itself fails to spawn', async () => {
     const spawnFn = vi.fn(() => {
-      const child = new EventEmitter() as EventEmitter & { stdout: PassThrough; stderr: PassThrough };
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: PassThrough;
+        stderr: PassThrough;
+      };
       child.stdout = new PassThrough();
       child.stderr = new PassThrough();
       queueMicrotask(() => {
@@ -72,5 +80,54 @@ describe('SpawnCommandRunner', () => {
 
     expect(result.exitCode).toBe(127);
     expect(result.spawnFailed).toBeUndefined();
+  });
+
+  it('scrubs the environment to exclude secrets and only include allowlisted vars', async () => {
+    const { spawnFn, calls } = fakeSpawn(0, '', '');
+    process.env.GITHUB_TOKEN = 'secret-should-not-leak';
+    process.env.PATH = '/usr/bin:/bin';
+    const runner = new SpawnCommandRunner({ spawn: spawnFn as never });
+
+    await runner.run('echo test', { cwd: '/tmp/workspace' });
+
+    const spawnedEnv = calls[0].options as { env: Record<string, string> };
+    expect(spawnedEnv.env).not.toHaveProperty('GITHUB_TOKEN');
+    expect(spawnedEnv.env.PATH).toBe('/usr/bin:/bin');
+    expect(Object.keys(spawnedEnv.env).every((key) => INIT_COMMAND_ENV_ALLOWLIST.includes(key))).toBe(true);
+  });
+
+  it('does not pass process.env by reference; uses a fresh object', async () => {
+    const { spawnFn, calls } = fakeSpawn(0, '', '');
+    process.env.PATH = '/usr/bin';
+    const runner = new SpawnCommandRunner({ spawn: spawnFn as never });
+
+    await runner.run('echo test', { cwd: '/tmp/workspace' });
+
+    const spawnedEnv = calls[0].options as { env: Record<string, string> };
+    expect(spawnedEnv.env).not.toBe(process.env);
+  });
+
+  it('respects the envAllowlist override in constructor', async () => {
+    const { spawnFn, calls } = fakeSpawn(0, '', '');
+    process.env.PATH = '/usr/bin';
+    process.env.HOME = '/home/user';
+    const runner = new SpawnCommandRunner({ spawn: spawnFn as never, envAllowlist: ['PATH'] });
+
+    await runner.run('echo test', { cwd: '/tmp/workspace' });
+
+    const spawnedEnv = calls[0].options as { env: Record<string, string> };
+    expect(spawnedEnv.env).toHaveProperty('PATH');
+    expect(spawnedEnv.env).not.toHaveProperty('HOME');
+  });
+
+  it('skips undefined allowlisted vars so the child does not get empty overrides', async () => {
+    const { spawnFn, calls } = fakeSpawn(0, '', '');
+    delete process.env.TZ;
+    const runner = new SpawnCommandRunner({ spawn: spawnFn as never });
+
+    await runner.run('echo test', { cwd: '/tmp/workspace' });
+
+    const spawnedEnv = calls[0].options as { env: Record<string, string> };
+    expect(spawnedEnv.env).not.toHaveProperty('TZ');
   });
 });

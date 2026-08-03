@@ -3,7 +3,8 @@ import { whiteboxBugHunt } from '@agentops/workflows';
 import { buildTestEnv, teardownTestEnv, type TestEnv } from './helpers';
 import type { ResolvedProjectEntry } from '@agentops/contracts';
 
-const FINDINGS = 'FINDINGS: [{"title":"SQLi in login","detail":"...","severity":"high","location":"src/auth.ts:42"}]';
+const FINDINGS =
+  'FINDINGS: [{"title":"SQLi in login","detail":"...","severity":"high","location":"src/auth.ts:42"}]';
 
 describe('whiteboxBugHunt (SP1 gate)', () => {
   let t: TestEnv;
@@ -19,10 +20,18 @@ describe('whiteboxBugHunt (SP1 gate)', () => {
     t.stub.scriptResponse('bughunt', 1, { output: FINDINGS });
 
     const [first, second] = await t.worker.runUntil(async () => {
-      const h1 = await t.env.client.workflow.start(whiteboxBugHunt, { taskQueue: t.taskQueue, workflowId: 'wbh-1', args: [{ repo: 'acme/webapp' }] });
+      const h1 = await t.env.client.workflow.start(whiteboxBugHunt, {
+        taskQueue: t.taskQueue,
+        workflowId: 'wbh-1',
+        args: [{ repo: 'acme/webapp' }],
+      });
       const r1 = await h1.result();
 
-      const h2 = await t.env.client.workflow.start(whiteboxBugHunt, { taskQueue: t.taskQueue, workflowId: 'wbh-2', args: [{ repo: 'acme/webapp' }] });
+      const h2 = await t.env.client.workflow.start(whiteboxBugHunt, {
+        taskQueue: t.taskQueue,
+        workflowId: 'wbh-2',
+        args: [{ repo: 'acme/webapp' }],
+      });
       const r2 = await h2.result();
 
       return [r1, r2];
@@ -33,6 +42,6 @@ describe('whiteboxBugHunt (SP1 gate)', () => {
     const issue = await t.tracker.getIssue(created[0].ref);
     expect(issue.labels).toContain('bug');
 
-    expect(second).toEqual({ filed: 0, deduped: 1 });   // same fingerprint -> no new issue
+    expect(second).toEqual({ filed: 0, deduped: 1 }); // same fingerprint -> no new issue
   });
 });

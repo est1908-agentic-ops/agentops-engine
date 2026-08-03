@@ -39,7 +39,9 @@ export function nextRepairAction(state: RepairState): RepairAction {
 
   const attemptsExhausted = state.implementAttempts >= state.brakes.maxImplementAttempts;
   if (attemptsExhausted) {
-    return state.diffEmpty ? { kind: 'block', reason: 'max-attempts' } : { kind: 'open-pr-exhausted' };
+    return state.diffEmpty
+      ? { kind: 'block', reason: 'max-attempts' }
+      : { kind: 'open-pr-exhausted' };
   }
 
   const isFinalAttempt = state.implementAttempts === state.brakes.maxImplementAttempts - 1;

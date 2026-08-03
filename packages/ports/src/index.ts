@@ -11,5 +11,6 @@ export * from './github/github-scm-port';
 export * from './github/build-github-ports';
 export * from './github/clone-url';
 export * from './github/project-scoped-ports';
-export * from './linear/linear-client';
+export type { LinearClient, LinearIssueData } from './linear/linear-client';
 export * from './linear/linear-tracker-port';
+export * from './linear/build-linear-ports';

@@ -41,12 +41,7 @@ import type { CliSpec } from '../cli-spec';
 import { ProcessCliAuthError, ProcessCliProcessError } from '../process-cli-runner';
 import { FakeBatchApi } from './fake-batch-api';
 import type { V1Job } from './k8s-types';
-import {
-  agentOpsArtifactPaths,
-  buildAgentJob,
-  K8sJobRunner,
-  k8sJobName,
-} from './k8s-job-runner';
+import { agentOpsArtifactPaths, buildAgentJob, K8sJobRunner, k8sJobName } from './k8s-job-runner';
 
 // Simulates the readNamespacedJobStatus K8s API call hanging (e.g. an
 // unreachable API server) for the first `hangsLeft` polls before behaving
@@ -59,7 +54,10 @@ class HangThenRealBatchApi extends FakeBatchApi {
     super();
   }
 
-  override async readNamespacedJobStatus(name: string, namespace: string): Promise<{ body: V1Job }> {
+  override async readNamespacedJobStatus(
+    name: string,
+    namespace: string,
+  ): Promise<{ body: V1Job }> {
     if (this.hangsLeft > 0) {
       this.hangsLeft--;
       return new Promise<{ body: V1Job }>(() => {});
@@ -99,7 +97,9 @@ describe('k8sJobName', () => {
     const primary = { ...baseRequest, model: 'zai/glm-5.2' };
     const fallback = { ...baseRequest, model: 'openrouter/deepseek-v4-pro' };
     expect(k8sJobName(primary)).not.toBe(k8sJobName(fallback));
-    expect(agentOpsArtifactPaths(primary).outFile).not.toBe(agentOpsArtifactPaths(fallback).outFile);
+    expect(agentOpsArtifactPaths(primary).outFile).not.toBe(
+      agentOpsArtifactPaths(fallback).outFile,
+    );
   });
 
   // Cross-backend session-limit fallback (TierFallbackBackend) can run the
@@ -122,7 +122,11 @@ describe('buildAgentJob', () => {
       buildAgentJob(
         baseRequest,
         createClaudeCliSpec({ image: 'ghcr.io/CHANGEME/agentops-engine/agent-claude:CHANGEME' }),
-        { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+        {
+          namespace: 'dev-agents',
+          workspacePvcName: 'workspace-tasks',
+          workspaceMountPath: '/workspace/tasks',
+        },
         paths,
       ),
     ).toThrow(/CHANGEME/);
@@ -135,13 +139,17 @@ describe('buildAgentJob', () => {
       buildAgentJob(
         { ...baseRequest, image: 'ghcr.io/CHANGEME/some-project:CHANGEME' },
         createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
-        { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+        {
+          namespace: 'dev-agents',
+          workspacePvcName: 'workspace-tasks',
+          workspaceMountPath: '/workspace/tasks',
+        },
         paths,
       ),
     ).toThrow(/CHANGEME/);
   });
 
-  it('builds the expected Job shape with shell-safe positional args', () => {
+  it('builds the expected Job shape with shell-safe positional args for write stages', () => {
     const paths = agentOpsArtifactPaths(baseRequest);
     const job = buildAgentJob(
       baseRequest,
@@ -187,14 +195,55 @@ describe('buildAgentJob', () => {
       { name: 'OUT_FILE', value: paths.outFile },
       { name: 'ERR_FILE', value: paths.errFile },
     ]);
-    expect(container?.volumeMounts).toEqual([{ name: 'workspace-tasks', mountPath: '/workspace/tasks' }]);
-    expect(job.spec?.template?.spec?.securityContext).toEqual({ runAsNonRoot: true, runAsUser: 1000 });
+    expect(container?.volumeMounts).toEqual([
+      { name: 'workspace-tasks', mountPath: '/workspace/tasks/task-1', subPath: 'task-1' },
+    ]);
+    expect(job.spec?.template?.spec?.securityContext).toEqual({
+      runAsNonRoot: true,
+      runAsUser: 1000,
+    });
     expect(container?.securityContext).toEqual({
       runAsNonRoot: true,
       runAsUser: 1000,
       allowPrivilegeEscalation: false,
     });
     expect(container?.envFrom).toBeUndefined();
+  });
+
+  it('builds a K8s Job with --permission-mode plan for read-only stages like bughunt', () => {
+    const paths = agentOpsArtifactPaths({ ...baseRequest, stage: 'bughunt' });
+    const job = buildAgentJob(
+      { ...baseRequest, stage: 'bughunt' },
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+      },
+      paths,
+    );
+
+    const container = job.spec?.template?.spec?.containers?.[0];
+    const command = container?.command ?? [];
+
+    // The command array contains: ['/bin/sh', '-c', '<script>', 'claude', '-p', '--output-format', ...]
+    // Find the index of 'claude' to get the argv portion
+    const claudeIndex = command.indexOf('claude');
+    expect(claudeIndex).toBeGreaterThanOrEqual(0);
+
+    const args = command.slice(claudeIndex);
+    expect(args[0]).toBe('claude');
+    expect(args).toContain('-p');
+    expect(args).toContain('--output-format');
+    expect(args).toContain('stream-json');
+    expect(args).toContain('--verbose');
+    expect(args).toContain('--model');
+    expect(args).toContain('claude-sonnet-5');
+    expect(args).toContain('--permission-mode');
+    const permModeIndex = args.indexOf('--permission-mode');
+    expect(permModeIndex).toBeGreaterThanOrEqual(0);
+    expect(args[permModeIndex + 1]).toBe('plan');
+    expect(args).not.toContain('--dangerously-skip-permissions');
   });
 
   it('also mounts the base-clone cache PVC when cachePvcName/cacheMountPath are set, so the worktree gitdir resolves in the Job pod', () => {
@@ -217,8 +266,39 @@ describe('buildAgentJob', () => {
       { name: 'workspace-cache', persistentVolumeClaim: { claimName: 'workspace-cache' } },
     ]);
     expect(job.spec?.template?.spec?.containers?.[0]?.volumeMounts).toEqual([
-      { name: 'workspace-tasks', mountPath: '/workspace/tasks' },
+      { name: 'workspace-tasks', mountPath: '/workspace/tasks/task-1', subPath: 'task-1' },
       { name: 'workspace-cache', mountPath: '/workspace/cache' },
+    ]);
+  });
+
+  it('does not expose the shared base-clone cache to a repository-session Job', () => {
+    const req = {
+      ...baseRequest,
+      workspaceRef:
+        '/workspace/tasks/repository-sessions/project-0123456789abcdef/session-fedcba9876543210',
+    };
+    const job = buildAgentJob(
+      req,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+        cachePvcName: 'workspace-cache',
+        cacheMountPath: '/workspace/cache',
+      },
+      agentOpsArtifactPaths(req),
+    );
+
+    expect(job.spec?.template?.spec?.volumes).toEqual([
+      { name: 'workspace-tasks', persistentVolumeClaim: { claimName: 'workspace-tasks' } },
+    ]);
+    expect(job.spec?.template?.spec?.containers?.[0]?.volumeMounts).toEqual([
+      {
+        name: 'workspace-tasks',
+        mountPath: req.workspaceRef,
+        subPath: 'repository-sessions/project-0123456789abcdef/session-fedcba9876543210',
+      },
     ]);
   });
 
@@ -227,7 +307,12 @@ describe('buildAgentJob', () => {
     const job = buildAgentJob(
       baseRequest,
       createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
-      { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks', cachePvcName: 'workspace-cache' },
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+        cachePvcName: 'workspace-cache',
+      },
       paths,
     );
 
@@ -235,8 +320,77 @@ describe('buildAgentJob', () => {
       { name: 'workspace-tasks', persistentVolumeClaim: { claimName: 'workspace-tasks' } },
     ]);
     expect(job.spec?.template?.spec?.containers?.[0]?.volumeMounts).toEqual([
-      { name: 'workspace-tasks', mountPath: '/workspace/tasks' },
+      { name: 'workspace-tasks', mountPath: '/workspace/tasks/task-1', subPath: 'task-1' },
     ]);
+  });
+
+  it.each([
+    [
+      '/workspace/tasks/repository-sessions/owner-0123456789abcdef/session-fedcba9876543210',
+      'repository-sessions/owner-0123456789abcdef/session-fedcba9876543210',
+    ],
+    ['/workspace/tasks/owner-repo/task-1', 'owner-repo/task-1'],
+    ['/workspace/tasks/scratch/project/task-1', 'scratch/project/task-1'],
+  ])('mounts only the requested workspace subPath for %s', (workspaceRef, subPath) => {
+    const req = { ...baseRequest, workspaceRef };
+    const job = buildAgentJob(
+      req,
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+      },
+      agentOpsArtifactPaths(req),
+    );
+
+    expect(job.spec?.template?.spec?.containers?.[0]?.volumeMounts).toEqual([
+      { name: 'workspace-tasks', mountPath: workspaceRef, subPath },
+    ]);
+  });
+
+  it('rejects a malformed repository-session workspace ref instead of treating it as legacy', () => {
+    const req = {
+      ...baseRequest,
+      workspaceRef: '/workspace/tasks/repository-sessions/owner/session',
+    };
+
+    expect(() =>
+      buildAgentJob(
+        req,
+        createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+        {
+          namespace: 'dev-agents',
+          workspacePvcName: 'workspace-tasks',
+          workspaceMountPath: '/workspace/tasks',
+          cachePvcName: 'workspace-cache',
+          cacheMountPath: '/workspace/cache',
+        },
+        agentOpsArtifactPaths(req),
+      ),
+    ).toThrow(/repository session workspaceRef must use the canonical owner\/task path/);
+  });
+
+  it.each([
+    '/workspace/tasks',
+    '/workspace/tasks/../outside',
+    '/workspace/tasks/child/../other',
+    '/workspace/other/task-1',
+    'workspace/tasks/task-1',
+  ])('rejects a non-canonical or out-of-root workspace ref: %s', (workspaceRef) => {
+    const req = { ...baseRequest, workspaceRef };
+    expect(() =>
+      buildAgentJob(
+        req,
+        createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+        {
+          namespace: 'dev-agents',
+          workspacePvcName: 'workspace-tasks',
+          workspaceMountPath: '/workspace/tasks',
+        },
+        agentOpsArtifactPaths(req),
+      ),
+    ).toThrow(/workspaceRef.*configured workspace mount/i);
   });
 
   it('wires envFrom from authSecretName when provided', () => {
@@ -272,7 +426,10 @@ describe('buildAgentJob', () => {
     );
 
     const container = job.spec?.template?.spec?.containers?.[0];
-    expect(job.spec?.template?.spec?.securityContext).toEqual({ runAsNonRoot: true, runAsUser: 2000 });
+    expect(job.spec?.template?.spec?.securityContext).toEqual({
+      runAsNonRoot: true,
+      runAsUser: 2000,
+    });
     expect(container?.securityContext).toEqual({
       runAsNonRoot: true,
       runAsUser: 2000,
@@ -302,7 +459,11 @@ describe('buildAgentJob', () => {
     const job = buildAgentJob(
       { ...baseRequest, image: 'gitactions.est1908.top/acme/agentops:latest' },
       createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
-      { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+      },
       paths,
     );
     const container = job.spec?.template?.spec?.containers?.[0];
@@ -314,7 +475,11 @@ describe('buildAgentJob', () => {
     const job = buildAgentJob(
       baseRequest,
       createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
-      { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+      },
       paths,
     );
     expect(job.spec?.template?.spec?.initContainers).toBeUndefined();
@@ -340,7 +505,11 @@ describe('buildAgentJob', () => {
         ],
       },
       createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
-      { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+      },
       paths,
     );
 
@@ -387,7 +556,11 @@ describe('buildAgentJob', () => {
     const job = buildAgentJob(
       baseRequest,
       createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
-      { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+      },
       paths,
     );
 
@@ -437,7 +610,11 @@ describe('buildAgentJob', () => {
     const job = buildAgentJob(
       baseRequest,
       createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
-      { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: '/workspace/tasks',
+      },
       paths,
     );
 
@@ -452,7 +629,9 @@ describe('buildAgentJob', () => {
     await writeFile(paths.promptFile, 'irrelevant', 'utf8');
 
     const fixturePath = path.join(workspaceRef, 'fake-cli.sh');
-    await writeFile(fixturePath, '#!/bin/sh\necho "$1"\necho "$2" >&2\nexit "$3"\n', { mode: 0o755 });
+    await writeFile(fixturePath, '#!/bin/sh\necho "$1"\necho "$2" >&2\nexit "$3"\n', {
+      mode: 0o755,
+    });
 
     const fakeSpec: CliSpec = {
       image: 'ghcr.io/example/fake:abc',
@@ -467,7 +646,11 @@ describe('buildAgentJob', () => {
     const job = buildAgentJob(
       req,
       fakeSpec,
-      { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' },
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: path.dirname(workspaceRef),
+      },
       paths,
     );
     const [command, ...args] = job.spec?.template?.spec?.containers?.[0].command ?? [];
@@ -475,7 +658,12 @@ describe('buildAgentJob', () => {
 
     const exitCode = await new Promise<number>((resolve, reject) => {
       const child = spawn(command, args, {
-        env: { ...process.env, PROMPT_FILE: paths.promptFile, OUT_FILE: paths.outFile, ERR_FILE: paths.errFile },
+        env: {
+          ...process.env,
+          PROMPT_FILE: paths.promptFile,
+          OUT_FILE: paths.outFile,
+          ERR_FILE: paths.errFile,
+        },
       });
       let stdout = '';
       let stderr = '';
@@ -508,15 +696,18 @@ describe('K8sJobRunner', () => {
 
     const batchApi = new FakeBatchApi();
     let now = 1_000;
-    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
-      namespace: 'dev-agents',
-      workspacePvcName: 'workspace-tasks',
-      workspaceMountPath: '/workspace/tasks',
-      batchApi,
-      pollIntervalMs: 1,
-      now: () => now,
-      heartbeat: () => {},
-    });
+    const runner = new K8sJobRunner(
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: path.dirname(workspaceRef),
+        batchApi,
+        pollIntervalMs: 1,
+        now: () => now,
+        heartbeat: () => {},
+      },
+    );
 
     const runPromise = runner.run(req);
     await vi.waitFor(() => expect(batchApi.creates).toHaveLength(1));
@@ -555,20 +746,23 @@ describe('K8sJobRunner', () => {
       const heartbeats: unknown[] = [];
       const now = 1_000;
       const reachedTwoHeartbeats = deferred<void>();
-      const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
-        namespace: 'dev-agents',
-        workspacePvcName: 'workspace-tasks',
-        workspaceMountPath: '/workspace/tasks',
-        batchApi,
-        pollIntervalMs: 1,
-        now: () => now,
-        heartbeat: (details) => {
-          heartbeats.push(details);
-          if (heartbeats.length === 2) {
-            reachedTwoHeartbeats.resolve();
-          }
+      const runner = new K8sJobRunner(
+        createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+        {
+          namespace: 'dev-agents',
+          workspacePvcName: 'workspace-tasks',
+          workspaceMountPath: path.dirname(workspaceRef),
+          batchApi,
+          pollIntervalMs: 1,
+          now: () => now,
+          heartbeat: (details) => {
+            heartbeats.push(details);
+            if (heartbeats.length === 2) {
+              reachedTwoHeartbeats.resolve();
+            }
+          },
         },
-      });
+      );
 
       const runPromise = runner.run(req);
       const jobName = k8sJobName(req);
@@ -639,20 +833,23 @@ describe('K8sJobRunner', () => {
       const batchApi = new HangThenRealBatchApi(2);
       const heartbeats: unknown[] = [];
       const reachedThreeHeartbeats = deferred<void>();
-      const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
-        namespace: 'dev-agents',
-        workspacePvcName: 'workspace-tasks',
-        workspaceMountPath: '/workspace/tasks',
-        batchApi,
-        pollIntervalMs: 1,
-        statusPollTimeoutMs: 5,
-        heartbeat: (details) => {
-          heartbeats.push(details);
-          if (heartbeats.length === 3) {
-            reachedThreeHeartbeats.resolve();
-          }
+      const runner = new K8sJobRunner(
+        createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+        {
+          namespace: 'dev-agents',
+          workspacePvcName: 'workspace-tasks',
+          workspaceMountPath: path.dirname(workspaceRef),
+          batchApi,
+          pollIntervalMs: 1,
+          statusPollTimeoutMs: 5,
+          heartbeat: (details) => {
+            heartbeats.push(details);
+            if (heartbeats.length === 3) {
+              reachedThreeHeartbeats.resolve();
+            }
+          },
         },
-      });
+      );
 
       const runPromise = runner.run(req);
 
@@ -701,16 +898,19 @@ describe('K8sJobRunner', () => {
     const batchApi = new FakeBatchApi();
     const cancelError = new Error('activity cancelled');
 
-    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
-      namespace: 'dev-agents',
-      workspacePvcName: 'workspace-tasks',
-      workspaceMountPath: '/workspace/tasks',
-      batchApi,
-      pollIntervalMs: 1_000,
-      heartbeat: () => {
-        throw cancelError;
+    const runner = new K8sJobRunner(
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: path.dirname(workspaceRef),
+        batchApi,
+        pollIntervalMs: 1_000,
+        heartbeat: () => {
+          throw cancelError;
+        },
       },
-    });
+    );
 
     await expect(runner.run(req)).rejects.toThrow('activity cancelled');
     expect(batchApi.deletes).toEqual([
@@ -729,18 +929,33 @@ describe('K8sJobRunner', () => {
     await mkdir(paths.dir, { recursive: true });
 
     const batchApi = new FakeBatchApi();
-    const opts = { namespace: 'dev-agents', workspacePvcName: 'workspace-tasks', workspaceMountPath: '/workspace/tasks' };
+    const opts = {
+      namespace: 'dev-agents',
+      workspacePvcName: 'workspace-tasks',
+      workspaceMountPath: path.dirname(workspaceRef),
+    };
     // Simulates a previous Temporal retry of this same activity call: its createNamespacedJob
     // already succeeded, but the runner never reached this point (e.g. the status read that follows
     // failed for an unrelated reason). The Job is still sitting in the cluster under this same name.
-    await batchApi.createNamespacedJob('dev-agents', buildAgentJob(req, createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), opts, paths));
+    await batchApi.createNamespacedJob(
+      'dev-agents',
+      buildAgentJob(
+        req,
+        createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+        opts,
+        paths,
+      ),
+    );
 
-    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
-      ...opts,
-      batchApi,
-      pollIntervalMs: 1,
-      heartbeat: () => {},
-    });
+    const runner = new K8sJobRunner(
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        ...opts,
+        batchApi,
+        pollIntervalMs: 1,
+        heartbeat: () => {},
+      },
+    );
 
     const runPromise = runner.run(req);
     await writeFile(
@@ -770,21 +985,28 @@ describe('K8sJobRunner', () => {
     await mkdir(paths.dir, { recursive: true });
 
     const batchApi = new FakeBatchApi();
-    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
-      namespace: 'dev-agents',
-      workspacePvcName: 'workspace-tasks',
-      workspaceMountPath: '/workspace/tasks',
-      batchApi,
-      pollIntervalMs: 1,
-      heartbeat: () => {},
-    });
+    const runner = new K8sJobRunner(
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: path.dirname(workspaceRef),
+        batchApi,
+        pollIntervalMs: 1,
+        heartbeat: () => {},
+      },
+    );
 
     const runPromise = runner.run(req);
     await vi.waitFor(() => expect(batchApi.creates).toHaveLength(1));
 
     // A stream the CLI never finished (killed mid-run): events but no terminal
     // `result` event, so parseOutput can't produce a result.
-    await writeFile(paths.outFile, '{"type":"system","subtype":"init"}\n{"type":"assistant","message":{}}', 'utf8');
+    await writeFile(
+      paths.outFile,
+      '{"type":"system","subtype":"init"}\n{"type":"assistant","message":{}}',
+      'utf8',
+    );
     batchApi.setJobStatus(k8sJobName(req), { failed: 1 });
 
     await expect(runPromise).rejects.toThrow(ProcessCliProcessError);
@@ -801,14 +1023,17 @@ describe('K8sJobRunner', () => {
     await mkdir(paths.dir, { recursive: true });
 
     const batchApi = new FakeBatchApi();
-    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
-      namespace: 'dev-agents',
-      workspacePvcName: 'workspace-tasks',
-      workspaceMountPath: '/workspace/tasks',
-      batchApi,
-      pollIntervalMs: 1,
-      heartbeat: () => {},
-    });
+    const runner = new K8sJobRunner(
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: path.dirname(workspaceRef),
+        batchApi,
+        pollIntervalMs: 1,
+        heartbeat: () => {},
+      },
+    );
 
     const runPromise = runner.run(req);
     await vi.waitFor(() => expect(batchApi.creates).toHaveLength(1));
@@ -831,15 +1056,18 @@ describe('K8sJobRunner', () => {
 
     const batchApi = new FakeBatchApi();
     let now = 1_000;
-    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
-      namespace: 'dev-agents',
-      workspacePvcName: 'workspace-tasks',
-      workspaceMountPath: '/workspace/tasks',
-      batchApi,
-      pollIntervalMs: 1,
-      now: () => now,
-      heartbeat: () => {},
-    });
+    const runner = new K8sJobRunner(
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: path.dirname(workspaceRef),
+        batchApi,
+        pollIntervalMs: 1,
+        now: () => now,
+        heartbeat: () => {},
+      },
+    );
 
     const runPromise = runner.run(req);
     await vi.waitFor(() => expect(batchApi.creates).toHaveLength(1));
@@ -866,15 +1094,18 @@ describe('K8sJobRunner', () => {
 
     const batchApi = new FakeBatchApi();
     let now = 1_000;
-    const runner = new K8sJobRunner(createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }), {
-      namespace: 'dev-agents',
-      workspacePvcName: 'workspace-tasks',
-      workspaceMountPath: '/workspace/tasks',
-      batchApi,
-      pollIntervalMs: 1,
-      now: () => now,
-      heartbeat: () => {},
-    });
+    const runner = new K8sJobRunner(
+      createClaudeCliSpec({ image: 'ghcr.io/example/agent-claude:abc' }),
+      {
+        namespace: 'dev-agents',
+        workspacePvcName: 'workspace-tasks',
+        workspaceMountPath: path.dirname(workspaceRef),
+        batchApi,
+        pollIntervalMs: 1,
+        now: () => now,
+        heartbeat: () => {},
+      },
+    );
 
     const runPromise = runner.run(req);
     await vi.waitFor(() => expect(batchApi.creates).toHaveLength(1));
@@ -882,7 +1113,9 @@ describe('K8sJobRunner', () => {
 
     now += 150; // exceeds timeoutMs (100ms) even though output just grew
 
-    await expect(runPromise).rejects.toThrow(/exceeded overall 100ms budget despite ongoing output/);
+    await expect(runPromise).rejects.toThrow(
+      /exceeded overall 100ms budget despite ongoing output/,
+    );
     expect(batchApi.deletes).toHaveLength(1);
   });
 });

@@ -1,17 +1,22 @@
 import { describe, it, expect, vi } from 'vitest';
 
-const { executeChild, listManagedProjects, pruneOrphanAgentSchedules, pruneOrphanWorkspaces } = vi.hoisted(() => ({
-  executeChild: vi.fn().mockResolvedValue({}),
-  listManagedProjects: vi.fn().mockResolvedValue([
-    { project: 'a', repo: 'o/a' },
-    { project: 'b', repo: 'o/b' },
-  ]),
-  pruneOrphanAgentSchedules: vi.fn().mockResolvedValue({ deleted: [] }),
-  pruneOrphanWorkspaces: vi.fn().mockResolvedValue({ removed: [] }),
-}));
+const { executeChild, listManagedProjects, pruneOrphanAgentSchedules, pruneOrphanWorkspaces } =
+  vi.hoisted(() => ({
+    executeChild: vi.fn().mockResolvedValue({}),
+    listManagedProjects: vi.fn().mockResolvedValue([
+      { project: 'a', repo: 'o/a' },
+      { project: 'b', repo: 'o/b' },
+    ]),
+    pruneOrphanAgentSchedules: vi.fn().mockResolvedValue({ deleted: [] }),
+    pruneOrphanWorkspaces: vi.fn().mockResolvedValue({ removed: [] }),
+  }));
 
 vi.mock('@temporalio/workflow', () => ({
-  proxyActivities: () => ({ listManagedProjects, pruneOrphanAgentSchedules, pruneOrphanWorkspaces }),
+  proxyActivities: () => ({
+    listManagedProjects,
+    pruneOrphanAgentSchedules,
+    pruneOrphanWorkspaces,
+  }),
   executeChild,
 }));
 
@@ -22,7 +27,10 @@ describe('reconcileAllProjects', () => {
     await reconcileAllProjects();
     expect(listManagedProjects).toHaveBeenCalled();
     expect(executeChild).toHaveBeenCalledTimes(2);
-    expect(executeChild).toHaveBeenCalledWith('configSync', expect.objectContaining({ args: [{ project: 'a', repo: 'o/a' }] }));
+    expect(executeChild).toHaveBeenCalledWith(
+      'configSync',
+      expect.objectContaining({ args: [{ project: 'a', repo: 'o/a' }] }),
+    );
   });
 
   it('sweeps orphaned agent schedules (by project) and orphaned workspaces (by repo) for removed projects', async () => {

@@ -1,4 +1,4 @@
-import { executeChild, proxyActivities, workflowInfo } from '@temporalio/workflow';
+import { executeChild, log, proxyActivities, workflowInfo } from '@temporalio/workflow';
 import type { PlatformAgentInput, PlatformAgentResult, TaskInput } from '@agentops/contracts';
 import { DEFAULT_IDLE_TIMEOUT_MS, PlatformAgentResultSchema } from '@agentops/contracts';
 import { parsePlatformResult, slugifyProject } from '@agentops/policies';
@@ -35,6 +35,7 @@ export async function platform(input: PlatformAgentInput): Promise<PlatformAgent
   const { workspaceRef } = await activities.prepareScratchWorkspace(taskId);
 
   let payload;
+  let primaryError: unknown;
   try {
     for (let call = 1; call <= MAX_RESULT_CALLS; call += 1) {
       const result = await agentActivities.runAgent({
@@ -50,7 +51,11 @@ export async function platform(input: PlatformAgentInput): Promise<PlatformAgent
           hintRepos: (input.hintRepos ?? []).join(', ') || '(none provided)',
         },
         workspaceRef,
-        limits: { maxTokens: PLATFORM_MAX_TOKENS, idleTimeoutMs: PLATFORM_IDLE_TIMEOUT_MS, timeoutMs: PLATFORM_TIMEOUT_MS },
+        limits: {
+          maxTokens: PLATFORM_MAX_TOKENS,
+          idleTimeoutMs: PLATFORM_IDLE_TIMEOUT_MS,
+          timeoutMs: PLATFORM_TIMEOUT_MS,
+        },
       });
       await activities.recordRunStats({
         taskId,
@@ -68,8 +73,24 @@ export async function platform(input: PlatformAgentInput): Promise<PlatformAgent
         break;
       }
     }
+  } catch (err) {
+    primaryError = err;
+    throw err;
   } finally {
-    await activities.cleanupScratchWorkspace(workspaceRef);
+    try {
+      await activities.cleanupScratchWorkspace(workspaceRef);
+    } catch (cleanupErr) {
+      // A cleanup throw must never mask a real in-flight failure: on 2026-07-27 a
+      // cleanupScratchWorkspace path-safety error replaced the underlying runAgent
+      // failure for self-heal-2026-07-25T15:30:00Z-platform and misdirected the
+      // investigation. Log the cleanup error, but re-throw it only when the body
+      // succeeded (then it is the sole error); otherwise let primaryError propagate.
+      log.error('cleanupScratchWorkspace failed', { taskId, error: cleanupErr });
+      if (!primaryError) {
+        // eslint-disable-next-line no-unsafe-finally
+        throw cleanupErr;
+      }
+    }
   }
 
   if (!payload) {

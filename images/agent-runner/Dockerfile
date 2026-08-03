@@ -50,6 +50,13 @@ COPY --chown=1000:1000 skills/design-brainstorm /home/node/.agents/skills/design
 COPY --chown=1000:1000 skills/plan-writer       /home/node/.claude/skills/plan-writer
 COPY --chown=1000:1000 skills/plan-writer       /home/node/.agents/skills/plan-writer
 
+# corepack enables per-repo pnpm version resolution (via packageManager field).
+# Pre-warm pnpm@9.15.9 (this repo's pinned version) at build time so the verify
+# stage can run pnpm commands offline; downstream products with a different
+# packageManager pin still resolve correctly via corepack on first use.
+ENV COREPACK_HOME=/opt/corepack
+RUN corepack enable && corepack prepare pnpm@9.15.9 --activate && chmod -R a+rX "$COREPACK_HOME"
+
 # Numeric, not the name "node": kubelet can't verify a pod's runAsNonRoot
 # against a named image user without a matching explicit runAsUser in the
 # pod spec (see K8sJobRunner's buildAgentJob, which already sets one).

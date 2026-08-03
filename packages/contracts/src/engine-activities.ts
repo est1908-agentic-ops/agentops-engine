@@ -1,5 +1,10 @@
 import type { AgentRunRequest, AgentRunResult } from './agent-run';
 import type { Issue, CreateIssueInput, CreateIssueResult } from './tracker-types';
+import type {
+  CleanupRepositorySessionRequest,
+  CreateRepositorySessionRequest,
+  RepositorySession,
+} from './repository-session';
 
 // The delegatable engine activity surface exposed to Tier-2 project workflows
 // via @agentic-ops/engine-sdk/workflow. This interface + the child-workflow names
@@ -12,11 +17,15 @@ import type { Issue, CreateIssueInput, CreateIssueResult } from './tracker-types
 // expose directly — this is what lets a Tier-2 workflow call `runAgent` with
 // the generic `agent` stage/prompt at all (see docs/authoring-project-workflows.md).
 export interface EngineActivities {
-  runAgent(req: AgentRunRequest): Promise<AgentRunResult & { promptHash: string; promptSource: string }>;
+  runAgent(
+    req: AgentRunRequest,
+  ): Promise<AgentRunResult & { promptHash: string; promptSource: string }>;
   createIssue(req: CreateIssueInput): Promise<CreateIssueResult>;
   getIssue(ref: string): Promise<Issue>;
   commentOnIssue(ref: string, body: string): Promise<void>;
   labelIssue(ref: string, label: string): Promise<void>;
   prepareScratchWorkspace(taskId: string): Promise<{ workspaceRef: string }>;
   cleanupScratchWorkspace(workspaceRef: string): Promise<void>;
+  createRepositorySession(req: CreateRepositorySessionRequest): Promise<RepositorySession>;
+  cleanupRepositorySession(req: CleanupRepositorySessionRequest): Promise<void>;
 }

@@ -24,7 +24,7 @@ function fakeSpawn(exitCode: number, stdout: string, stderr: string) {
 }
 
 describe('SpawnGitCommandRunner', () => {
-  it('prepends the auth header config override when a token is available', async () => {
+  it('passes the auth header via GIT_CONFIG_* env vars, not argv, when a token is available', async () => {
     const { spawnFn, calls } = fakeSpawn(0, 'ok', '');
     const runner = new SpawnGitCommandRunner({
       spawn: spawnFn as never,
@@ -35,14 +35,15 @@ describe('SpawnGitCommandRunner', () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0].command).toBe('git');
-    expect(calls[0].args).toEqual([
-      '-c',
-      'http.extraHeader=Authorization: Basic ' +
-        Buffer.from('x-access-token:secret-token').toString('base64'),
-      'fetch',
-      'origin',
-    ]);
-    expect((calls[0].options as { env: NodeJS.ProcessEnv }).env?.GIT_TERMINAL_PROMPT).toBe('0');
+    expect(calls[0].args).toEqual(['fetch', 'origin']);
+
+    const env = (calls[0].options as { env: NodeJS.ProcessEnv }).env;
+    expect(env?.GIT_CONFIG_COUNT).toBe('1');
+    expect(env?.GIT_CONFIG_KEY_0).toBe('http.extraHeader');
+    expect(env?.GIT_CONFIG_VALUE_0).toBe(
+      'Authorization: Basic ' + Buffer.from('x-access-token:secret-token').toString('base64')
+    );
+    expect(env?.GIT_TERMINAL_PROMPT).toBe('0');
   });
 
   it('omits the config override entirely when no token is available', async () => {
@@ -52,6 +53,11 @@ describe('SpawnGitCommandRunner', () => {
     await runner.run(['worktree', 'list'], { cwd: '/tmp/repo' });
 
     expect(calls[0].args).toEqual(['worktree', 'list']);
+
+    const env = (calls[0].options as { env: NodeJS.ProcessEnv }).env;
+    expect(env?.GIT_CONFIG_COUNT).toBeUndefined();
+    expect(env?.GIT_CONFIG_KEY_0).toBeUndefined();
+    expect(env?.GIT_CONFIG_VALUE_0).toBeUndefined();
   });
 
   it('resolves with stdout, stderr, and exit code on any exit (never throws itself)', async () => {
@@ -60,7 +66,11 @@ describe('SpawnGitCommandRunner', () => {
 
     const result = await runner.run(['status'], { cwd: '/tmp/repo' });
 
-    expect(result).toEqual({ stdout: 'partial output', stderr: 'fatal: not a git repository', exitCode: 1 });
+    expect(result).toEqual({
+      stdout: 'partial output',
+      stderr: 'fatal: not a git repository',
+      exitCode: 1,
+    });
   });
 
   it('runs with the given cwd', async () => {
@@ -74,7 +84,10 @@ describe('SpawnGitCommandRunner', () => {
 
   it('resolves (never hangs, never throws) when the process itself fails to spawn', async () => {
     const spawnFn = vi.fn(() => {
-      const child = new EventEmitter() as EventEmitter & { stdout: PassThrough; stderr: PassThrough };
+      const child = new EventEmitter() as EventEmitter & {
+        stdout: PassThrough;
+        stderr: PassThrough;
+      };
       child.stdout = new PassThrough();
       child.stderr = new PassThrough();
       queueMicrotask(() => {

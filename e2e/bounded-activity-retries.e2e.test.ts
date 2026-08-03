@@ -37,7 +37,10 @@ describe('DevCycle e2e: bounded activity retries', () => {
     env = await TestWorkflowEnvironment.createTimeSkipping();
     const alwaysFailingWorkspaces: Workspaces = {
       prepare: async () => {
-        throw new WorkspaceError("git worktree add failed: fatal: a branch named 'agentops/x' already exists", false);
+        throw new WorkspaceError(
+          "git worktree add failed: fatal: a branch named 'agentops/x' already exists",
+          false,
+        );
       },
       cleanup: async () => {},
       prepareScratch: async () => ({ workspaceRef: 'memory://scratch/x' }),
@@ -66,7 +69,12 @@ describe('DevCycle e2e: bounded activity retries', () => {
         fullVerifyCommands: [],
         stages: {},
         routing: {},
-        brakes: { maxImplementAttempts: 3, maxIterations: 10, maxTokens: 500_000, maxBabysitRounds: 5 },
+        brakes: {
+          maxImplementAttempts: 3,
+          maxIterations: 10,
+          maxTokens: 500_000,
+          maxBabysitRounds: 5,
+        },
       },
     };
 

@@ -1,4 +1,8 @@
-import { workflowInfo, type WorkflowInterceptorsFactory, type WorkflowOutboundCallsInterceptor } from '@temporalio/workflow';
+import {
+  workflowInfo,
+  type WorkflowInterceptorsFactory,
+  type WorkflowOutboundCallsInterceptor,
+} from '@temporalio/workflow';
 import { defaultPayloadConverter } from '@temporalio/common';
 import { PROJECT_HEADER_KEY, readProjectFromMemo } from '@agentops/contracts';
 
@@ -14,13 +18,20 @@ class ProjectOutbound implements WorkflowOutboundCallsInterceptor {
   }
   async scheduleActivity(input: any, next: any) {
     const p = this.project();
-    if (p) input.headers = { ...input.headers, [PROJECT_HEADER_KEY]: defaultPayloadConverter.toPayload(p) };
+    if (p)
+      input.headers = {
+        ...input.headers,
+        [PROJECT_HEADER_KEY]: defaultPayloadConverter.toPayload(p),
+      };
     return next(input);
   }
   async startChildWorkflowExecution(input: any, next: any) {
     const p = this.project();
     if (p) {
-      input.headers = { ...input.headers, [PROJECT_HEADER_KEY]: defaultPayloadConverter.toPayload(p) };
+      input.headers = {
+        ...input.headers,
+        [PROJECT_HEADER_KEY]: defaultPayloadConverter.toPayload(p),
+      };
       input.options = {
         ...input.options,
         memo: { ...(input.options?.memo ?? {}), project: p },
@@ -32,4 +43,6 @@ class ProjectOutbound implements WorkflowOutboundCallsInterceptor {
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
 
-export const interceptors: WorkflowInterceptorsFactory = () => ({ outbound: [new ProjectOutbound()] });
+export const interceptors: WorkflowInterceptorsFactory = () => ({
+  outbound: [new ProjectOutbound()],
+});

@@ -20,16 +20,26 @@ describe('PromptPack', () => {
 
   it('renders every built-in stage template without throwing, given the right context', () => {
     const pack = new PromptPack();
-    expect(() => pack.render('context.md', { taskId: 't1', goal: 'g', issueBody: '' })).not.toThrow();
+    expect(() =>
+      pack.render('context.md', { taskId: 't1', goal: 'g', issueBody: '' }),
+    ).not.toThrow();
     expect(() => pack.render('assess.md', { taskId: 't1', goal: 'g' })).not.toThrow();
     expect(() => pack.render('design.md', { taskId: 't1', goal: 'g' })).not.toThrow();
     expect(() => pack.render('plan.md', { taskId: 't1', goal: 'g' })).not.toThrow();
-    const impl = pack.render('implement.md', { taskId: 't1', goal: 'g', fullVerifyFindings: '', reviewFindings: '', prReviewFeedback: '' });
+    const impl = pack.render('implement.md', {
+      taskId: 't1',
+      goal: 'g',
+      fullVerifyFindings: '',
+      reviewFindings: '',
+      prReviewFeedback: '',
+    });
     expect(impl).toContain('Task t1');
     expect(impl).toContain('docs/superpowers/specs/t1-design.md');
     expect(impl).toContain('docs/superpowers/plans/t1-plan.md');
     expect(impl).toContain('Unresolved PR review comments to address');
-    expect(() => pack.render('full_verify.md', { taskId: 't1', goal: 'g', verifyCommands: '' })).not.toThrow();
+    expect(() =>
+      pack.render('full_verify.md', { taskId: 't1', goal: 'g', verifyCommands: '' }),
+    ).not.toThrow();
     expect(() => pack.render('review.md', { taskId: 't1', goal: 'g' })).not.toThrow();
   });
 
@@ -64,10 +74,26 @@ describe('PromptPack', () => {
 
   it('renders the generic agent template with instructions and the FINDINGS contract', () => {
     const pack = new PromptPack();
-    const rendered = pack.render('agent.md', { taskId: 'agent-1', instructions: 'Look for feature gaps.' });
+    const rendered = pack.render('agent.md', {
+      taskId: 'agent-1',
+      instructions: 'Look for feature gaps.',
+    });
     expect(rendered).toContain('Task agent-1');
     expect(rendered).toContain('Look for feature gaps.');
     expect(rendered).toContain('FINDINGS:');
+  });
+
+  it('renders caller instructions and the exact JSON sentinel contract', () => {
+    const rendered = new PromptPack().render('generic-task.md', {
+      taskId: 't1',
+      instructions: 'Inspect both repositories.',
+      outputContract: '{"verdict":"string"}',
+    });
+    expect(rendered).toContain('Inspect both repositories.');
+    expect(rendered).toContain('AGENT_RESULT:');
+    expect(rendered.trimEnd().split('\n').at(-1)).toBe(
+      'AGENT_RESULT: {"replace":"with the required JSON value"}',
+    );
   });
 
   it('throws a clear error for an unknown template ref', () => {

@@ -25,9 +25,9 @@ describe('feedbackHash', () => {
   });
 
   it('changes when ciStatus changes', () => {
-    expect(feedbackHash(feedback({ ciStatus: 'green', unresolvedThreads: 0, comments: [] }))).not.toBe(
-      feedbackHash(feedback()),
-    );
+    expect(
+      feedbackHash(feedback({ ciStatus: 'green', unresolvedThreads: 0, comments: [] })),
+    ).not.toBe(feedbackHash(feedback()));
   });
 
   it('is insensitive to comment ordering', () => {

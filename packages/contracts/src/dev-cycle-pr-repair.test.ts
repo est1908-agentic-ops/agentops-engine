@@ -35,4 +35,25 @@ describe('DevCyclePrRepairInputSchema', () => {
     const parsed = DevCyclePrRepairInputSchema.parse(input);
     expect(parsed.headBranch).toBe('feature/fix-review');
   });
+
+  it('rejects invalid headBranch names', () => {
+    expect(
+      DevCyclePrRepairInputSchema.safeParse({
+        taskId: 't3',
+        project: 'p',
+        repo: 'o/r',
+        prRef: 'o/r#1',
+        headBranch: '--upload-pack=/tmp/x',
+      }).success,
+    ).toBe(false);
+    expect(
+      DevCyclePrRepairInputSchema.safeParse({
+        taskId: 't4',
+        project: 'p',
+        repo: 'o/r',
+        prRef: 'o/r#2',
+        headBranch: '-x',
+      }).success,
+    ).toBe(false);
+  });
 });

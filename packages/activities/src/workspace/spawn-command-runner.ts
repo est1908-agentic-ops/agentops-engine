@@ -13,18 +13,34 @@ export interface CommandRunner {
 
 export interface SpawnCommandRunnerOptions {
   spawn?: typeof nodeSpawn;
+  envAllowlist?: string[];
 }
+
+export const INIT_COMMAND_ENV_ALLOWLIST = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'LC_CTYPE', 'TZ', 'TERM', 'SHELL'];
 
 export class SpawnCommandRunner implements CommandRunner {
   private readonly spawnFn: typeof nodeSpawn;
+  private readonly envAllowlist: string[];
 
   constructor(opts: SpawnCommandRunnerOptions = {}) {
     this.spawnFn = opts.spawn ?? nodeSpawn;
+    this.envAllowlist = opts.envAllowlist ?? INIT_COMMAND_ENV_ALLOWLIST;
+  }
+
+  private buildEnv(): Record<string, string> {
+    const env: Record<string, string> = {};
+    for (const key of this.envAllowlist) {
+      const value = process.env[key];
+      if (value !== undefined) {
+        env[key] = value;
+      }
+    }
+    return env;
   }
 
   async run(command: string, opts: { cwd: string }): Promise<CommandResult> {
     return new Promise((resolve) => {
-      const child = this.spawnFn(command, { cwd: opts.cwd, shell: true, env: process.env });
+      const child = this.spawnFn(command, { cwd: opts.cwd, shell: true, env: this.buildEnv() });
       let stdout = '';
       let stderr = '';
       let settled = false;

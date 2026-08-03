@@ -23,7 +23,11 @@ describe('normalizeRepo', () => {
 
 describe('parseRef', () => {
   it('parses "owner/repo#123"', () => {
-    expect(parseRef('octocat/hello-world#42')).toEqual({ owner: 'octocat', repo: 'hello-world', number: 42 });
+    expect(parseRef('octocat/hello-world#42')).toEqual({
+      owner: 'octocat',
+      repo: 'hello-world',
+      number: 42,
+    });
   });
 
   it('throws a clear error on malformed input', () => {
@@ -36,10 +40,20 @@ describe('parseRef', () => {
 describe('parseRepoSlug', () => {
   it('parses "owner/repo"', () => {
     expect(parseRepoSlug('octocat/hello-world')).toEqual({ owner: 'octocat', repo: 'hello-world' });
+    expect(parseRepoSlug('acme_org/repo.name_v1')).toEqual({
+      owner: 'acme_org',
+      repo: 'repo.name_v1',
+    });
   });
 
   it('throws a clear error on malformed input', () => {
     expect(() => parseRepoSlug('octocat/hello-world#42')).toThrow(/expected "owner\/repo"/);
     expect(() => parseRepoSlug('just-a-name')).toThrow();
+    expect(() => parseRepoSlug('acme/repo?ref=main')).toThrow();
+    expect(() => parseRepoSlug('acme /repo')).toThrow();
+    expect(() => parseRepoSlug(' acme/repo')).toThrow();
+    expect(() => parseRepoSlug('acme/repo name')).toThrow();
+    expect(() => parseRepoSlug('./repo')).toThrow();
+    expect(() => parseRepoSlug('acme/..')).toThrow();
   });
 });

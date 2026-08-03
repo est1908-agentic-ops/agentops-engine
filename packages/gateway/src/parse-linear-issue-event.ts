@@ -25,7 +25,9 @@ interface LinearIssueWebhookPayload {
 // project lookup has to happen between parsing and label-matching. See
 // matchesLinearTriggerLabel and docs/superpowers/specs/2026-07-09-linear-trigger-design.md.
 function asStringArray(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === 'string')
+    : [];
 }
 
 export function parseLinearIssueEvent(payload: unknown): LinearIssueEvent | null {
@@ -58,9 +60,14 @@ export function parseLinearIssueEvent(payload: unknown): LinearIssueEvent | null
   // be empty," making an unrelated edit (title, state, assignee, ...) on an
   // already-labeled issue look like a fresh "labeled" event and re-trigger
   // devCycle under the same (already-completed) workflow id.
-  const updatedFromHasLabelIds = body.action === 'update' && body.updatedFrom != null && 'labelIds' in body.updatedFrom;
+  const updatedFromHasLabelIds =
+    body.action === 'update' && body.updatedFrom != null && 'labelIds' in body.updatedFrom;
   const previousLabelIds =
-    body.action !== 'update' ? undefined : updatedFromHasLabelIds ? asStringArray(body.updatedFrom?.labelIds) : labelIds;
+    body.action !== 'update'
+      ? undefined
+      : updatedFromHasLabelIds
+        ? asStringArray(body.updatedFrom?.labelIds)
+        : labelIds;
   return {
     teamKey: identifier.slice(0, separatorIndex),
     identifier,
@@ -77,7 +84,10 @@ export function parseLinearIssueEvent(payload: unknown): LinearIssueEvent | null
 // label and a `create` where the issue already carries it; false if the
 // label was already present before this particular change (some other field
 // changed, not a fresh "labeled" event).
-export function matchesLinearTriggerLabel(event: LinearIssueEvent, triggerLabelId: string): boolean {
+export function matchesLinearTriggerLabel(
+  event: LinearIssueEvent,
+  triggerLabelId: string,
+): boolean {
   if (!event.labelIds.includes(triggerLabelId)) {
     return false;
   }

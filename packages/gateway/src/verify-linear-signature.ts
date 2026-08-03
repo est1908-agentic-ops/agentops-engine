@@ -12,7 +12,11 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 // making a secondary check as strict as the HMAC verification itself.
 const MAX_WEBHOOK_AGE_MS = 5 * 60 * 1000;
 
-export function verifyLinearSignature(rawBody: Buffer, signatureHeader: string | undefined, secret: string): boolean {
+export function verifyLinearSignature(
+  rawBody: Buffer,
+  signatureHeader: string | undefined,
+  secret: string,
+): boolean {
   if (!signatureHeader) {
     return false;
   }

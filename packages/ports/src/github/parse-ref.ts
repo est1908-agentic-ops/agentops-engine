@@ -5,9 +5,17 @@ export interface ParsedRef {
 }
 
 export function parseRef(ref: string): ParsedRef {
+  const parsed = tryParseRef(ref);
+  if (!parsed) {
+    throw new Error(`parseRef: expected "owner/repo#number", got "${ref}"`);
+  }
+  return parsed;
+}
+
+export function tryParseRef(ref: string): ParsedRef | null {
   const match = /^([^/]+)\/([^#]+)#(\d+)$/.exec(ref);
   if (!match) {
-    throw new Error(`parseRef: expected "owner/repo#number", got "${ref}"`);
+    return null;
   }
   return { owner: match[1], repo: match[2], number: Number(match[3]) };
 }
@@ -38,8 +46,16 @@ export interface ParsedRepoSlug {
 }
 
 export function parseRepoSlug(repo: string): ParsedRepoSlug {
-  const match = /^([^/]+)\/([^/#]+)$/.exec(repo);
-  if (!match) {
+  const match = /^([^/]+)\/([^/]+)$/.exec(repo);
+  if (
+    !match ||
+    !/^[A-Za-z0-9_.-]+$/.test(match[1]) ||
+    !/^[A-Za-z0-9_.-]+$/.test(match[2]) ||
+    match[1] === '.' ||
+    match[1] === '..' ||
+    match[2] === '.' ||
+    match[2] === '..'
+  ) {
     throw new Error(`parseRepoSlug: expected "owner/repo", got "${repo}"`);
   }
   return { owner: match[1], repo: match[2] };

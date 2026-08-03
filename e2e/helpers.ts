@@ -12,6 +12,7 @@ import { StubBackend, type AgentBackend } from '@agentops/backends';
 import { MemoryScmPort, MemoryTrackerPort } from '@agentops/ports';
 import { PromptPack } from '@agentops/prompts';
 import type { ResolvedProjectEntry } from '@agentops/contracts';
+import type { PrLandingState } from '@agentops/contracts';
 import type { DevCycleActivities, DevCycleState, PlatformActivities } from '@agentops/workflows';
 import { createWorker, type TracingSetup } from '@agentops/worker';
 
@@ -96,4 +97,20 @@ export async function waitForStatus(
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
   throw new Error(`timed out waiting for status in [${statuses.join(', ')}]`);
+}
+
+export async function waitForLandingOutcome(
+  handle: WorkflowHandle<(input: never) => Promise<PrLandingState>>,
+  outcomes: Array<PrLandingState['outcome']>,
+  timeoutMs = 30_000,
+): Promise<PrLandingState> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const state = await handle.query('state');
+    if (outcomes.includes(state.outcome)) {
+      return state as PrLandingState;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`timed out waiting for landing outcome in [${outcomes.join(', ')}]`);
 }

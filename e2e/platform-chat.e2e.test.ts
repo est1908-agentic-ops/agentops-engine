@@ -45,9 +45,14 @@ describe('platformChat e2e (stub backend)', () => {
       output:
         'Found a flaky test.\nCHAT_TURN: {"message":"I can fix the flaky test in acme/webapp. Approve?","pending":{"kind":"proposal","proposal":{"type":"fix","repo":"acme/webapp","goal":"fix the flaky test","reason":"test fails intermittently"}}}',
     });
-    stub.scriptResponse('platform', 1, {
-      output: 'CHAT_TURN: {"message":"Fix started.","done":true}',
-    }, 2);
+    stub.scriptResponse(
+      'platform',
+      1,
+      {
+        output: 'CHAT_TURN: {"message":"Fix started.","done":true}',
+      },
+      2,
+    );
     stub.scriptResponse('implement', 1, { output: 'diff --git a/x.ts b/x.ts (fix)' });
     stub.scriptResponse('full_verify', 1, { output: 'FULL: PASS' });
     stub.scriptResponse('review', 1, { output: 'VERDICT: PASS' });

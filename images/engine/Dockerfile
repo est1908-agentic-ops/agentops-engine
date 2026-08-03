@@ -41,7 +41,26 @@ RUN --mount=type=cache,target=/pnpm-store,uid=1000,gid=1000,sharing=locked \
 USER root
 
 FROM deps AS base
-COPY --chown=1000:1000 . .
+# Explicit allowlist, NOT `COPY . .`. These images are published PUBLICLY, and
+# `COPY . .` put the entire private repo into them -- 56 internal design specs
+# under docs/, .github/ workflows, .claude/, e2e/, charts/, .env.example. The
+# root .dockerignore lists every one of those and was not applied: the proof was
+# finding .dockerignore ITSELF at /app/.dockerignore in the published image.
+#
+# An allowlist does not depend on .dockerignore semantics at all, which is the
+# point -- it cannot silently stop working the way an ignore file did.
+#
+# package.json / pnpm-lock.yaml / pnpm-workspace.yaml are NOT repeated here:
+# this stage forks from `deps`, which already copied them (and the per-package
+# manifests) before installing.
+#
+# Runtime needs, verified: the app runs from source via tsx, so it needs
+# packages/ plus the tsconfig chain that resolves its path aliases. The only
+# runtime file reads are packages/prompts (templatesDir) and packages/control
+# (serve-static over packages/ui's build output) -- neither reaches outside
+# packages/. Adding a new runtime read of a repo-root file means adding it here.
+COPY --chown=1000:1000 tsconfig.base.json tsconfig.json ./
+COPY --chown=1000:1000 packages ./packages
 
 # worker forks from `deps` (before the source COPY), not `base`, so this
 # apt-get's cache key only depends on the manifest/lockfile chain, not on
@@ -65,8 +84,12 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
     && apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates
-COPY --chown=1000:1000 . .
+    && apt-get install -y --no-install-recommends git ca-certificates util-linux
+# Same explicit allowlist as `base` -- see the comment there. Repeated rather
+# than shared because `worker` deliberately forks from `deps`, not `base`, to
+# keep the apt-get layer's cache key off the source digest.
+COPY --chown=1000:1000 tsconfig.base.json tsconfig.json ./
+COPY --chown=1000:1000 packages ./packages
 # Numeric, not the name "node": kubelet can't verify a pod's runAsNonRoot
 # against a named image user without a matching explicit runAsUser in the
 # pod spec (see charts/engine's podSecurityContext/containerSecurityContext).

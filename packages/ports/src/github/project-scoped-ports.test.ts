@@ -8,7 +8,29 @@ import { createProjectScopedPorts, type ProjectScopedPortsEntry } from './projec
 function fakeScm(): ScmPort {
   return {
     openPr: vi.fn().mockResolvedValue({ prRef: 'r#1', url: 'https://x' }),
-    getPrFeedback: vi.fn().mockResolvedValue({ ciStatus: 'green', unresolvedThreads: 0, comments: [] } satisfies PrFeedback),
+    getPrFeedback: vi
+      .fn()
+      .mockResolvedValue({
+        ciStatus: 'green',
+        unresolvedThreads: 0,
+        comments: [],
+      } satisfies PrFeedback),
+    getPrSnapshot: vi.fn().mockResolvedValue({
+      prRef: 'owner/repo-b#7',
+      headSha: 'abc',
+      headRepo: 'owner/repo-b',
+      headBranch: 'feature/x',
+      checkoutRef: 'refs/pull/7/head',
+      labels: [],
+      state: 'open',
+      draft: false,
+      mergeable: true,
+      mergedHeadSha: null,
+      ciStatus: 'green',
+      unresolvedThreads: 0,
+      comments: [],
+    }),
+    mergePr: vi.fn().mockResolvedValue({ kind: 'merged', headSha: 'abc', mergeCommitSha: 'def' }),
     push: vi.fn().mockResolvedValue(undefined),
     readFile: vi.fn().mockResolvedValue('content'),
   };
@@ -69,6 +91,23 @@ describe('createProjectScopedPorts', () => {
     expect(entryA.tracker.getIssue).toHaveBeenCalledWith('owner/repo-a#3');
     expect(entryA.tracker.comment).toHaveBeenCalledWith('owner/repo-a#3', 'hello');
     expect(entryB.tracker.label).toHaveBeenCalledWith('owner/repo-b#7', 'bug');
+  });
+
+  it('routes getPrSnapshot and mergePr by the repo parsed from prRef', async () => {
+    const entryA = buildEntry('owner/repo-a');
+    const entryB = buildEntry('owner/repo-b');
+    const { scm } = createProjectScopedPorts([entryA, entryB]);
+
+    await scm.getPrSnapshot('owner/repo-b#7');
+    await scm.mergePr({ prRef: 'owner/repo-b#7', expectedHeadSha: 'abc' });
+
+    expect(entryB.scm.getPrSnapshot).toHaveBeenCalledWith('owner/repo-b#7');
+    expect(entryB.scm.mergePr).toHaveBeenCalledWith({
+      prRef: 'owner/repo-b#7',
+      expectedHeadSha: 'abc',
+    });
+    expect(entryA.scm.getPrSnapshot).not.toHaveBeenCalled();
+    expect(entryA.scm.mergePr).not.toHaveBeenCalled();
   });
 
   it('routes push by the explicit repo argument', async () => {
