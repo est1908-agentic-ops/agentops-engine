@@ -32,7 +32,7 @@ worker's already-constructed `managedProjectDeps` into `createActivities`, and
 call:
 
 ```ts
-resolveProjectConfig(deps.managedProjectDeps, deps.scm, repo)
+resolveProjectConfig(deps.managedProjectDeps, deps.scm, repo);
 ```
 
 The dependency stays optional for local and test callers. With no managed store,
