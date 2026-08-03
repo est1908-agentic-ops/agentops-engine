@@ -20,6 +20,7 @@ An operator registers a project with `trackerType: 'linear'`. Adding the configu
 - **Full `TaskEvent` unification.** The GitHub path (`parseIssueLabeledEvent` / `startDevCycleForIssue`) is left exactly as-is — a new, parallel `parseLinearIssueEvent` / `startDevCycleForLinearIssue` pair is added rather than refactoring both trackers onto one shared type. Collapsing them is future work once a third tracker makes the duplication actually hurt (same "small, deliberate duplication, named, not urgent" call the original gateway design made for `loadTaskConfig`).
 - **Public exposure of `/webhooks/linear`.** Same unresolved DNS/TLS question the GitHub route already has, not reopened here.
 - **Workspace-level `issueAddLabel` calls from the workflow.** `TrackerPort.label()` is implemented for interface completeness (and unit-tested) but `devCycle` doesn't call it today for either tracker — confirmed by reading `dev-cycle.ts`, which only calls `getIssue` and `commentOnIssue`.
+- **Linear label removal on the `devCycle` hot path.** At the time of this design, `removeLabel()` was not expected to be called by `devCycle`.
 
 ## Design
 
@@ -126,3 +127,26 @@ Same day, before this PR merged: confirmed with Artem that `agentops-platform` d
 - **Deleted:** `packages/contracts/src/project-registry.ts`(+test), `packages/activities/src/load-project-registry.ts`(+test), `packages/gateway/src/resolve-linear-project.ts`(+test), `packages/control/src/read-registry-repos.ts`(+test), `charts/engine/templates/_helpers.tpl`.
 - **Changed:** `packages/contracts/src/{managed-project,control-projects-api}.ts`(+tests) — Linear fields; `packages/activities/src/{postgres-managed-project-store,resolve-managed-projects}.ts`(+tests) — schema + DB-only resolution + linear-team-key lookup; `packages/gateway/src/{create-gateway-server,main}.ts`(+tests); `packages/worker/src/main.ts`(+test); `packages/cli/src/main.ts`(+tests); `packages/control/src/{create-control-server,main}.ts`(+tests); `charts/engine/{values.yaml,templates/{deployment,gateway-deployment,control-deployment}.yaml}` + regenerated `tests/render.golden.yaml`.
 - **Docs:** this file, `docs/{ARCHITECTURE,MILESTONES}.md`, `README.md`, `packages/{gateway,control}/README.md`.
+
+## Addendum: Linear label cleanup on devCycle (2026-08-04)
+
+`devCycle` now removes `agent:working` after opening a PR, so Linear
+`removeLabel()` is on the workflow's hot path when a project uses Linear for
+tracking and GitHub for SCM. The previous non-goal is therefore superseded:
+leaving the method stubbed caused a run to fail after the PR had already been
+created.
+
+The implementation is intentionally idempotent for parity with
+`GithubTrackerPort.removeLabel`, which swallows a 404. If the team label does
+not exist, or the issue never carried it, cleanup resolves as a no-op. This is
+necessary because cleanup can run on paths where `agent:working` was never
+applied, and successful work must not be turned into a failed workflow.
+
+Removal inherits the same non-atomic read-then-write caveat documented for
+`label()`: Linear's issue update replaces the complete `labelIds` set, so a
+concurrent label edit between the read and write can be lost.
+
+`createIssue()` remains deliberately stubbed. Nothing on the `devCycle` path
+calls it; `whiteboxBugHunt` remains GitHub-tracker-only. Implementing it would
+require a Linear team-ID lookup and an `issueCreate` mutation that the narrow
+client does not currently provide, which is outside this change's scope.

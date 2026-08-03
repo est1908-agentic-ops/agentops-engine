@@ -92,4 +92,45 @@ describe('LinearTrackerPort', () => {
       /no label named "missing"/,
     );
   });
+
+  it('removeLabel removes the resolved label id from the existing set', async () => {
+    const client = fakeClient({
+      getIssue: vi.fn().mockResolvedValue({ ...issue, labelIds: ['existing-label-uuid', 'agentops-label-uuid'] }),
+      findLabelId: vi.fn().mockResolvedValue('agentops-label-uuid'),
+    });
+    const port = new LinearTrackerPort(client);
+
+    await port.removeLabel('linear:ENG-123', 'agentops');
+
+    expect(client.findLabelId).toHaveBeenCalledWith('ENG', 'agentops');
+    expect(client.setLabelIds).toHaveBeenCalledWith('issue-uuid', ['existing-label-uuid']);
+  });
+
+  it('removeLabel is a no-op when the issue does not carry the label', async () => {
+    const client = fakeClient({
+      getIssue: vi.fn().mockResolvedValue(issue),
+      findLabelId: vi.fn().mockResolvedValue('agentops-label-uuid'),
+    });
+    const port = new LinearTrackerPort(client);
+
+    await port.removeLabel('linear:ENG-123', 'agentops');
+
+    expect(client.setLabelIds).not.toHaveBeenCalled();
+  });
+
+  it('removeLabel is a no-op when the team has no such label', async () => {
+    const client = fakeClient({ findLabelId: vi.fn().mockResolvedValue(null) });
+    const port = new LinearTrackerPort(client);
+
+    // Deliberate GitHub-404 parity: an unknown label is an idempotent no-op.
+    await expect(port.removeLabel('linear:ENG-123', 'missing')).resolves.toBeUndefined();
+
+    expect(client.getIssue).not.toHaveBeenCalled();
+  });
+
+  it('removeLabel rejects a non-linear ref', async () => {
+    const port = new LinearTrackerPort(fakeClient());
+
+    await expect(port.removeLabel('octocat/hello-world#1', 'agentops')).rejects.toThrow(/expected a "linear:" ref/);
+  });
 });
