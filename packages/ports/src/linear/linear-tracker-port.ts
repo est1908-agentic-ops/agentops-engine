@@ -48,8 +48,28 @@ export class LinearTrackerPort implements TrackerPort {
     await this.client.setLabelIds(issue.id, [...issue.labelIds, labelId]);
   }
 
-  async removeLabel(_ref: string, _label: string): Promise<void> {
-    throw new Error('LinearTrackerPort.removeLabel not implemented (SP1 focuses on GitHub trackers)');
+  // Idempotent to match GithubTrackerPort.removeLabel's swallowed 404s: an
+  // unknown team label or a label the issue never carried is a no-op. This is
+  // important because devCycle can call dropAgentWorking() when agent:working
+  // was never applied, and that cleanup must not fail successful work.
+  //
+  // Like label(), this is a read-then-write operation. Linear's issueUpdate
+  // replaces the complete labelIds set, so a concurrent label edit between
+  // these calls can be lost; this method is not atomic.
+  async removeLabel(ref: string, label: string): Promise<void> {
+    const { teamKey, identifier } = requireLinearRef(ref);
+    const labelId = await this.client.findLabelId(teamKey, label);
+    if (!labelId) {
+      return;
+    }
+    const issue = await this.client.getIssue(identifier);
+    if (!issue.labelIds.includes(labelId)) {
+      return;
+    }
+    await this.client.setLabelIds(
+      issue.id,
+      issue.labelIds.filter((current) => current !== labelId),
+    );
   }
 
   async createIssue(_req: CreateIssueRequest): Promise<CreatedIssue> {
