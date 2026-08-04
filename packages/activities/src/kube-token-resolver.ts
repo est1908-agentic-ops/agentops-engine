@@ -1,15 +1,11 @@
 import { CoreV1Api, KubeConfig } from '@kubernetes/client-node';
 
-const TOKEN_KEY = 'GITHUB_TOKEN';
-
 /**
- * Resolves a project's GitHub token by reading a Kubernetes Secret by name
- * at request time -- one Secret per project (`tokenSecret` on the managed
- * project's `project.yaml`), not a single shared `GITHUB_TOKEN` env var (that
- * design was superseded; see resolve-managed-projects.ts's
- * `ManagedProjectRegistryDeps.resolveToken`).
+ * Resolves a credential by reading an explicit key from a Kubernetes Secret
+ * at request time. Managed-project fields select the provider-specific key;
+ * the Secret name and key are both part of the credential identity.
  *
- * Caches by Secret name for the process lifetime: a token doesn't rotate
+ * Caches by Secret name and key for the process lifetime: a token doesn't rotate
  * more often than a pod restart cadence in this design, and re-reading the
  * Secret on every webhook/task-start would mean one K8s API round-trip per
  * call. `api` is injectable so tests can supply a fake instead of hitting a
@@ -33,22 +29,31 @@ export class KubeTokenResolver {
     }
   }
 
-  async get(secretName: string): Promise<string> {
-    const cached = this.cache.get(secretName);
+  async get(secretName: string, key: string): Promise<string> {
+    const cacheKey = `${secretName}\0${key}`;
+    const cached = this.cache.get(cacheKey);
     if (cached !== undefined) {
       return cached;
     }
 
-    const secret = await this.api.readNamespacedSecret({ name: secretName, namespace: this.namespace });
-    const encoded = secret.data?.[TOKEN_KEY];
+    let secret;
+    try {
+      secret = await this.api.readNamespacedSecret({ name: secretName, namespace: this.namespace });
+    } catch (error) {
+      throw new Error(
+        `KubeTokenResolver: failed to read Secret "${secretName}" in namespace "${this.namespace}" for key "${key}"`,
+        { cause: error },
+      );
+    }
+    const encoded = secret.data?.[key];
     if (!encoded) {
       throw new Error(
-        `KubeTokenResolver: Secret "${secretName}" in namespace "${this.namespace}" has no "${TOKEN_KEY}" key`,
+        `KubeTokenResolver: Secret "${secretName}" in namespace "${this.namespace}" has no "${key}" key`,
       );
     }
 
     const token = Buffer.from(encoded, 'base64').toString('utf8');
-    this.cache.set(secretName, token);
+    this.cache.set(cacheKey, token);
     return token;
   }
 }

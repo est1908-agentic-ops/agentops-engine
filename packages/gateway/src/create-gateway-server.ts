@@ -263,11 +263,8 @@ async function handleLinearWebhook(
     return;
   }
 
-  const entry = await resolveManagedProjectEntryByLinearTeamKey(
-    deps.managedProjectDeps,
-    event.teamKey,
-  );
-  if (!entry || entry.trackerType !== 'linear') {
+  const managedProject = await deps.managedProjectDeps?.store.getByLinearTeamKey(event.teamKey);
+  if (!managedProject || managedProject.trackerType !== 'linear') {
     console.warn(
       `gateway: no project registered for Linear team "${event.teamKey}" — ignoring issue event`,
     );
@@ -275,13 +272,29 @@ async function handleLinearWebhook(
     return;
   }
 
-  if (!matchesLinearTriggerLabel(event, entry.linearTriggerLabelId)) {
+  if (!managedProject.linearTriggerLabelId) {
+    console.warn(
+      `gateway: Linear webhook trigger disabled for project "${managedProject.project}" — ignoring issue event`,
+    );
+    res.writeHead(202).end('Linear webhook trigger disabled for this project');
+    return;
+  }
+
+  if (!matchesLinearTriggerLabel(event, managedProject.linearTriggerLabelId)) {
     // Label present but not a fresh trigger-label add — do nothing.
     res.writeHead(204).end();
     return;
   }
 
   try {
+    const entry = await resolveManagedProjectEntryByLinearTeamKey(
+      deps.managedProjectDeps,
+      event.teamKey,
+    );
+    if (!entry || entry.trackerType !== 'linear') {
+      res.writeHead(202).end('no project registered for this team');
+      return;
+    }
     const scm = deps.buildScm(entry);
     const config = await resolveProjectConfig(deps.managedProjectDeps, scm, entry.repo);
     const result = await startDevCycleForLinearIssue(

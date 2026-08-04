@@ -40,14 +40,13 @@ describe('ManagedProjectSchema', () => {
     expect(parsed.config?.brakes.maxTokens).toBe(200_000);
   });
 
-  it('parses a valid linear-tracked project', () => {
+  it('parses a Linear-tracked project without webhook trigger configuration', () => {
     const parsed = ManagedProjectSchema.parse({
       id: '3fa85f64-5717-4562-b3fc-2c963f66afa6',
       project: 'acme-web',
       repo: 'acme/web',
       trackerType: 'linear',
       linearTeamKey: 'ENG',
-      linearTriggerLabelId: 'label-uuid',
       credentialSet: true,
       linearCredentialSet: true,
       config: null,
@@ -57,6 +56,7 @@ describe('ManagedProjectSchema', () => {
     expect(parsed.trackerType).toBe('linear');
     if (parsed.trackerType === 'linear') {
       expect(parsed.linearTeamKey).toBe('ENG');
+      expect(parsed.linearTriggerLabelId).toBeUndefined();
     }
   });
 

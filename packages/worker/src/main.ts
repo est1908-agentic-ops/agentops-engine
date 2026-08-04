@@ -69,6 +69,86 @@ export interface ActivityWiring {
   workspaces: Workspaces;
 }
 
+/**
+ * Keeps the activity-facing port objects stable while allowing their complete
+ * project-scoped implementation to be replaced after a ConfigMap refresh.
+ * An activity already in flight keeps the implementation selected when its
+ * method was called; the next activity call sees the replacement.
+ */
+export function createRefreshableActivityWiring(initial: ActivityWiring): {
+  wiring: ActivityWiring;
+  replace: (next: ActivityWiring) => void;
+} {
+  let current = initial;
+  return {
+    wiring: {
+      scm: {
+        openPr: (req) => current.scm.openPr(req),
+        getPrFeedback: (prRef) => current.scm.getPrFeedback(prRef),
+        getPrSnapshot: (prRef) => current.scm.getPrSnapshot(prRef),
+        mergePr: (req) => current.scm.mergePr(req),
+        push: (repo, workspaceRef, branch, contentHash) =>
+          current.scm.push(repo, workspaceRef, branch, contentHash),
+        readFile: (repo, path) => current.scm.readFile(repo, path),
+      },
+      tracker: {
+        getIssue: (ref) => current.tracker.getIssue(ref),
+        comment: (ref, body) => current.tracker.comment(ref, body),
+        label: (ref, label) => current.tracker.label(ref, label),
+        removeLabel: (ref, label) => current.tracker.removeLabel(ref, label),
+        createIssue: (req) => current.tracker.createIssue(req),
+      },
+      workspaces: {
+        prepare: (taskId, repo, initCommands, headBranch, headRef) =>
+          current.workspaces.prepare(taskId, repo, initCommands, headBranch, headRef),
+        cleanup: (workspaceRef, repo) => current.workspaces.cleanup(workspaceRef, repo),
+        prepareScratch: (taskId) => current.workspaces.prepareScratch(taskId),
+        cleanupScratch: (workspaceRef) => current.workspaces.cleanupScratch(workspaceRef),
+        prepareRepositorySession: (ownerProject, req) =>
+          current.workspaces.prepareRepositorySession(ownerProject, req),
+        cleanupRepositorySession: (ownerProject, workspaceRef) =>
+          current.workspaces.cleanupRepositorySession(ownerProject, workspaceRef),
+        touchRepositorySession: (ownerProject, workspaceRef) =>
+          current.workspaces.touchRepositorySession(ownerProject, workspaceRef),
+        pruneOrphans: (liveRepos, liveProjects) =>
+          current.workspaces.pruneOrphans(liveRepos, liveProjects),
+        readFile: (workspaceRef, relativePath) =>
+          current.workspaces.readFile(workspaceRef, relativePath),
+      },
+    },
+    replace: (next) => {
+      current = next;
+    },
+  };
+}
+
+export function createManagedProjectWiringController(
+  registry: ResolvedProjectEntry[],
+  initialWiring: ActivityWiring,
+  loadRegistry: () => Promise<ResolvedProjectEntry[]>,
+  buildWiring: (nextRegistry: ResolvedProjectEntry[]) => ActivityWiring,
+): { wiring: ActivityWiring; refresh: () => Promise<void> } {
+  const refreshable = createRefreshableActivityWiring(initialWiring);
+  let activeRefresh: Promise<void> | undefined;
+
+  return {
+    wiring: refreshable.wiring,
+    refresh: () => {
+      if (!activeRefresh) {
+        activeRefresh = (async () => {
+          const nextRegistry = await loadRegistry();
+          const nextWiring = buildWiring(nextRegistry);
+          refreshable.replace(nextWiring);
+          registry.splice(0, registry.length, ...nextRegistry);
+        })().finally(() => {
+          activeRefresh = undefined;
+        });
+      }
+      return activeRefresh;
+    },
+  };
+}
+
 export function buildActivityDependencies(
   registry: ResolvedProjectEntry[],
   workspacesDir?: string,
@@ -153,7 +233,7 @@ function buildManagedProjectDeps(): ManagedProjectRegistryDeps {
   const namespace = process.env.AGENT_NAMESPACE ?? 'dev-agents';
   const store = new FileManagedProjectStore(dir);
   const resolver = new KubeTokenResolver(namespace);
-  return { store, resolveToken: (tokenSecret) => resolver.get(tokenSecret) };
+  return { store, resolveToken: (tokenSecret, key) => resolver.get(tokenSecret, key) };
 }
 
 // The workspace-tasks PVC is mounted at this path in both the engine-worker
@@ -403,6 +483,7 @@ export async function buildFiledFindingStore(): Promise<FiledFindingStore> {
 // + a cleanup fn for the refresh timer. When no DB is configured, returns
 // undefined and resolveTier falls back to DEFAULT_TIERS (the hardcoded seed).
 const TIER_REFRESH_INTERVAL_MS = 60_000;
+const MANAGED_PROJECT_REFRESH_INTERVAL_MS = 60_000;
 
 export async function buildGlobalTiers(pool: Pool | undefined): Promise<{
   tiers: Record<string, import('@agentops/contracts').ModelRef[]> | undefined;
@@ -461,13 +542,28 @@ async function main(): Promise<void> {
   // Require a non-empty registry in-cluster: an empty one there is a
   // ConfigMap mount/population failure, and the in-memory fallback would
   // silently corrupt workflow history (see buildActivityDependencies).
-  const { scm, tracker, workspaces } = buildActivityDependencies(
+  const workspacesDir = resolveWorkspacesDir(inCluster);
+  const cacheDir = resolveCacheDir(inCluster);
+  const projectWiringController = createManagedProjectWiringController(
     registry,
-    resolveWorkspacesDir(inCluster),
-    resolveCacheDir(inCluster),
-    inCluster,
-    inCluster,
+    buildActivityDependencies(registry, workspacesDir, cacheDir, inCluster, inCluster),
+    () => loadManagedProjectRegistry(managedProjectDeps),
+    (nextRegistry) =>
+      buildActivityDependencies(nextRegistry, workspacesDir, cacheDir, inCluster, inCluster),
   );
+  const { scm, tracker, workspaces } = projectWiringController.wiring;
+  const managedProjectRefreshTimer = setInterval(
+    () => {
+      void projectWiringController.refresh().catch((err) => {
+        console.warn(
+          'agentops worker: managed-project refresh failed (keeping previous wiring)',
+          err,
+        );
+      });
+    },
+    MANAGED_PROJECT_REFRESH_INTERVAL_MS,
+  );
+  if (typeof managedProjectRefreshTimer.unref === 'function') managedProjectRefreshTimer.unref();
   console.log(
     registry.length > 0
       ? `agentops worker: LIVE mode — ${registry.length} project(s) registered: ${registry
@@ -612,6 +708,7 @@ async function main(): Promise<void> {
   try {
     await Promise.all([worker.run(), legacyWorker.run()]);
   } finally {
+    clearInterval(managedProjectRefreshTimer);
     stopTierRefresh();
     await tracing?.shutdown();
   }

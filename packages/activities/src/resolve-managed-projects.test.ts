@@ -56,8 +56,11 @@ describe('resolveManagedProjectEntry', () => {
       tokenSecret: 'github-token',
     });
     const store = new FileManagedProjectStore(dir);
-    const resolveToken = async (tokenSecret: string) =>
-      tokenSecret === 'github-token' ? 'ghp_x' : 'wrong-secret';
+    const resolvedRequests: Array<[string, string | undefined]> = [];
+    const resolveToken = async (tokenSecret: string, key?: string) => {
+      resolvedRequests.push([tokenSecret, key]);
+      return tokenSecret === 'github-token' ? 'ghp_x' : 'wrong-secret';
+    };
 
     const resolved = await resolveManagedProjectEntry({ store, resolveToken }, 'acme/web');
 
@@ -68,6 +71,7 @@ describe('resolveManagedProjectEntry', () => {
       token: 'ghp_x',
       readRepositories: [],
     });
+    expect(resolvedRequests).toEqual([['github-token', 'GITHUB_TOKEN']]);
   });
 
   it('returns null when no deps are configured at all', async () => {
@@ -148,16 +152,15 @@ describe('loadManagedProjectRegistry', () => {
       tokenSecret: 'linear-github-token',
       trackerType: 'linear',
       linearTeamKey: 'ENG',
-      linearTriggerLabelId: 'trigger-label',
       linearTokenSecret: 'linear-token',
       readRepositories: ['Acme/Docs'],
     });
-    const resolvedSecrets: string[] = [];
+    const resolvedSecrets: Array<[string, string | undefined]> = [];
 
     const entries = await loadManagedProjectRegistry({
       store: new FileManagedProjectStore(dir),
-      resolveToken: async (secret) => {
-        resolvedSecrets.push(secret);
+      resolveToken: async (secret, key?: string) => {
+        resolvedSecrets.push([secret, key]);
         return `token-for-${secret}`;
       },
     });
@@ -176,11 +179,14 @@ describe('loadManagedProjectRegistry', () => {
         trackerType: 'linear',
         token: 'token-for-linear-github-token',
         linearTeamKey: 'ENG',
-        linearTriggerLabelId: 'trigger-label',
         linearToken: 'token-for-linear-token',
         readRepositories: ['acme/docs'],
       },
     ]);
-    expect(resolvedSecrets).toEqual(['github-token', 'linear-github-token', 'linear-token']);
+    expect(resolvedSecrets).toEqual([
+      ['github-token', 'GITHUB_TOKEN'],
+      ['linear-github-token', 'GITHUB_TOKEN'],
+      ['linear-token', 'LINEAR_API_TOKEN'],
+    ]);
   });
 });
