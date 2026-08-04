@@ -5,10 +5,15 @@ import { MemoryScmPort } from '@agentops/ports';
 import { createGatewayServer, type GatewayDeps } from './create-gateway-server';
 
 const SECRET = 'shared-secret';
+const LINEAR_SECRET = 'linear-secret';
 const TRIGGER_LABEL = 'agentops';
 
 function sign(body: string): string {
   return `sha256=${createHmac('sha256', SECRET).update(body).digest('hex')}`;
+}
+
+function signLinear(body: string): string {
+  return createHmac('sha256', LINEAR_SECRET).update(body).digest('hex');
 }
 
 function labeledPayload(overrides: Record<string, unknown> = {}) {
@@ -31,6 +36,10 @@ interface FakeManagedRow {
   repo: string;
   token: string;
   config?: unknown;
+  trackerType?: 'github' | 'linear';
+  linearTeamKey?: string;
+  linearTriggerLabelId?: string;
+  linearToken?: string;
 }
 
 // The same fake-store shape resolve-managed-projects.test.ts uses -- this
@@ -41,6 +50,25 @@ interface FakeManagedRow {
 // name) has its own dedicated tests.
 function fakeManagedProjectDeps(rows: FakeManagedRow[]): GatewayDeps['managedProjectDeps'] {
   function toManagedProject(row: FakeManagedRow) {
+    if (row.trackerType === 'linear') {
+      return {
+        id: '1',
+        project: row.project,
+        repo: row.repo,
+        credentialSet: true,
+        config: row.config ?? null,
+        createdAt: '',
+        updatedAt: '',
+        trackerType: 'linear' as const,
+        tokenSecret: row.token,
+        linearTeamKey: row.linearTeamKey!,
+        ...(row.linearTriggerLabelId
+          ? { linearTriggerLabelId: row.linearTriggerLabelId }
+          : {}),
+        linearCredentialSet: true,
+        linearTokenSecret: row.linearToken ?? 'linear-token',
+      };
+    }
     return {
       id: '1',
       project: row.project,
@@ -59,10 +87,62 @@ function fakeManagedProjectDeps(rows: FakeManagedRow[]): GatewayDeps['managedPro
         const row = rows.find((r) => r.repo === repo);
         return row ? toManagedProject(row) : null;
       },
+      async getByLinearTeamKey(teamKey: string) {
+        const row = rows.find(
+          (candidate) =>
+            candidate.trackerType === 'linear' && candidate.linearTeamKey === teamKey,
+        );
+        return row ? toManagedProject(row) : null;
+      },
     } as never,
     resolveToken: async (tokenSecret: string) => tokenSecret,
   };
 }
+
+describe('createGatewayServer Linear route', () => {
+  it('acknowledges but does not start a task when the project has no trigger label', async () => {
+    const start = vi.fn().mockResolvedValue(undefined);
+    const server = createGatewayServer({
+      client: { workflow: { start } } as never,
+      taskQueue: 'agentops-devcycle',
+      webhookSecret: SECRET,
+      linearWebhookSecret: LINEAR_SECRET,
+      triggerLabel: TRIGGER_LABEL,
+      buildScm: () => new MemoryScmPort(),
+      managedProjectDeps: fakeManagedProjectDeps([
+        {
+          project: 'linear-project',
+          repo: 'octocat/hello-world',
+          token: 'github-token',
+          trackerType: 'linear',
+          linearTeamKey: 'ENG',
+          linearToken: 'linear-token',
+        },
+      ]),
+    });
+    await new Promise<void>((resolve) => server.listen(0, resolve));
+    const port = (server.address() as AddressInfo).port;
+
+    try {
+      const body = JSON.stringify({
+        action: 'update',
+        type: 'Issue',
+        data: { identifier: 'ENG-123', title: 'Fix the widget', labelIds: ['label-uuid'] },
+        updatedFrom: { labelIds: [] },
+        webhookTimestamp: Date.now(),
+      });
+      const res = await post(port, '/webhooks/linear', body, {
+        'content-type': 'application/json',
+        'linear-signature': signLinear(body),
+      });
+
+      expect(res.status).toBe(202);
+      expect(start).not.toHaveBeenCalled();
+    } finally {
+      server.close();
+    }
+  });
+});
 
 describe('createGatewayServer GitHub route', () => {
   let server: ReturnType<typeof createGatewayServer>;

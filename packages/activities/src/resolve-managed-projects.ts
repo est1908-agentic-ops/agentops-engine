@@ -49,7 +49,9 @@ async function buildResolvedEntry(
       readRepositories: managedProject.readRepositories ?? [],
       token,
       linearTeamKey: managedProject.linearTeamKey,
-      linearTriggerLabelId: managedProject.linearTriggerLabelId,
+      ...(managedProject.linearTriggerLabelId
+        ? { linearTriggerLabelId: managedProject.linearTriggerLabelId }
+        : {}),
       linearToken,
     };
   } else {

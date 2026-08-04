@@ -12,4 +12,10 @@ describe('ResolvedProjectEntry', () => {
       IsRequired<Extract<ResolvedProjectEntry, { trackerType: 'linear' }>, 'readRepositories'>
     >().toEqualTypeOf<true>();
   });
+
+  it('does not require Linear webhook trigger configuration', () => {
+    expectTypeOf<
+      IsRequired<Extract<ResolvedProjectEntry, { trackerType: 'linear' }>, 'linearTriggerLabelId'>
+    >().toEqualTypeOf<false>();
+  });
 });

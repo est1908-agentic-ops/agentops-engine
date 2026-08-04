@@ -20,6 +20,6 @@ export type ResolvedProjectEntry =
   | (BaseResolvedProjectEntry & {
       trackerType: 'linear';
       linearTeamKey: string;
-      linearTriggerLabelId: string;
+      linearTriggerLabelId?: string;
       linearToken: string;
     });

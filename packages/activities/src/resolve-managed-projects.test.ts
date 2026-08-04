@@ -152,7 +152,6 @@ describe('loadManagedProjectRegistry', () => {
       tokenSecret: 'linear-github-token',
       trackerType: 'linear',
       linearTeamKey: 'ENG',
-      linearTriggerLabelId: 'trigger-label',
       linearTokenSecret: 'linear-token',
       readRepositories: ['Acme/Docs'],
     });
@@ -180,7 +179,6 @@ describe('loadManagedProjectRegistry', () => {
         trackerType: 'linear',
         token: 'token-for-linear-github-token',
         linearTeamKey: 'ENG',
-        linearTriggerLabelId: 'trigger-label',
         linearToken: 'token-for-linear-token',
         readRepositories: ['acme/docs'],
       },

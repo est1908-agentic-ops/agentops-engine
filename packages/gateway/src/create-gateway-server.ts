@@ -275,6 +275,14 @@ async function handleLinearWebhook(
     return;
   }
 
+  if (!entry.linearTriggerLabelId) {
+    console.warn(
+      `gateway: Linear webhook trigger disabled for project "${entry.project}" — ignoring issue event`,
+    );
+    res.writeHead(202).end('Linear webhook trigger disabled for this project');
+    return;
+  }
+
   if (!matchesLinearTriggerLabel(event, entry.linearTriggerLabelId)) {
     // Label present but not a fresh trigger-label add — do nothing.
     res.writeHead(204).end();

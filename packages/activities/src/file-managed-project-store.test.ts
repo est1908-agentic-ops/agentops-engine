@@ -8,16 +8,34 @@ import { FileManagedProjectStore } from './file-managed-project-store';
 function writeProjectFiles(
   dir: string,
   slug: string,
-  fields: { project: string; repo: string; tokenSecret: string; readRepositories?: unknown },
+  fields: {
+    project: string;
+    repo: string;
+    tokenSecret: string;
+    readRepositories?: unknown;
+    trackerType?: 'github' | 'linear';
+    linearTeamKey?: string;
+    linearTriggerLabelId?: string;
+    linearTokenSecret?: string;
+  },
   config?: unknown,
 ): void {
-  const readRepositories =
+  const optionalFields = [
     fields.readRepositories === undefined
       ? ''
-      : `readRepositories: ${JSON.stringify(fields.readRepositories)}\n`;
+      : `readRepositories: ${JSON.stringify(fields.readRepositories)}\n`,
+    fields.trackerType === undefined ? '' : `trackerType: ${fields.trackerType}\n`,
+    fields.linearTeamKey === undefined ? '' : `linearTeamKey: ${fields.linearTeamKey}\n`,
+    fields.linearTriggerLabelId === undefined
+      ? ''
+      : `linearTriggerLabelId: ${fields.linearTriggerLabelId}\n`,
+    fields.linearTokenSecret === undefined
+      ? ''
+      : `linearTokenSecret: ${fields.linearTokenSecret}\n`,
+  ].join('');
   writeFileSync(
     join(dir, `${slug}__project.yaml`),
-    `project: ${fields.project}\nrepo: ${fields.repo}\ntokenSecret: ${fields.tokenSecret}\n${readRepositories}`,
+    `project: ${fields.project}\nrepo: ${fields.repo}\ntokenSecret: ${fields.tokenSecret}\n${optionalFields}`,
   );
   if (config !== undefined) {
     writeFileSync(join(dir, `${slug}__agentops.json`), JSON.stringify(config));
@@ -79,6 +97,30 @@ describe('FileManagedProjectStore', () => {
 
     expect(result?.config).toBeNull();
     expect(result?.readRepositories).toEqual([]);
+  });
+
+  it('loads a Linear tracker without enabling webhook-triggered tasks', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    writeProjectFiles(dir, 'linear', {
+      project: 'Linear App',
+      repo: 'https://github.com/acme/linear',
+      tokenSecret: 'github-token',
+      trackerType: 'linear',
+      linearTeamKey: 'ENG',
+      linearTokenSecret: 'linear-token',
+    });
+    const store = new FileManagedProjectStore(dir);
+
+    const managed = await store.get('acme/linear');
+
+    expect(managed).toMatchObject({
+      project: 'Linear App',
+      trackerType: 'linear',
+      linearTeamKey: 'ENG',
+      linearTokenSecret: 'linear-token',
+    });
+    expect(managed).not.toHaveProperty('linearTriggerLabelId');
+    expect(await store.getByLinearTeamKey('ENG')).toEqual(managed);
   });
 
   it('normalizes configured read repositories to short lowercase owner/name form', async () => {

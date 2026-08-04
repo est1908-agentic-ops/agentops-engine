@@ -223,8 +223,14 @@ function ProjectDetail({ project }: { project: ManagedProject }) {
       <dd>
         {project.trackerType === 'linear' ? (
           <span>
-            Linear · team <code>{project.linearTeamKey}</code> · trigger label{' '}
-            <code>{project.linearTriggerLabelId}</code>
+            Linear · team <code>{project.linearTeamKey}</code> ·{' '}
+            {project.linearTriggerLabelId ? (
+              <>
+                trigger label <code>{project.linearTriggerLabelId}</code>
+              </>
+            ) : (
+              'webhook trigger disabled'
+            )}
           </span>
         ) : (
           'GitHub'

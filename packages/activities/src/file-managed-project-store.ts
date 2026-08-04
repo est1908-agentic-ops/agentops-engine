@@ -173,12 +173,9 @@ export class FileManagedProjectStore implements ManagedProjectStore {
 
       if (trackerType === 'linear') {
         // Linear tracker: validate Linear-specific fields
-        if (
-          !isNonEmptyString(parsedProject.linearTeamKey) ||
-          !isNonEmptyString(parsedProject.linearTriggerLabelId)
-        ) {
+        if (!isNonEmptyString(parsedProject.linearTeamKey)) {
           throw new Error(
-            `FileManagedProjectStore: "${entry}" (slug "${slug}") with trackerType "linear" must have non-empty string "linearTeamKey" and "linearTriggerLabelId" fields`,
+            `FileManagedProjectStore: "${entry}" (slug "${slug}") with trackerType "linear" must have a non-empty string "linearTeamKey" field`,
           );
         }
         // Linear projects also need tokenSecret for the GitHub/Linear API resolver
@@ -253,7 +250,9 @@ export class FileManagedProjectStore implements ManagedProjectStore {
           credentialSet: true,
           tokenSecret: parsedProject.tokenSecret as string,
           linearTeamKey: parsedProject.linearTeamKey as string,
-          linearTriggerLabelId: parsedProject.linearTriggerLabelId as string,
+          ...(isNonEmptyString(parsedProject.linearTriggerLabelId)
+            ? { linearTriggerLabelId: parsedProject.linearTriggerLabelId }
+            : {}),
           linearCredentialSet: true,
           linearTokenSecret: isNonEmptyString(parsedProject.linearTokenSecret)
             ? (parsedProject.linearTokenSecret as string)
