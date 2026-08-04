@@ -25,7 +25,8 @@ development path reads that same requested key from the environment.
 contracts. `linearTeamKey` and `linearTokenSecret` remain necessary for Linear
 issue operations. When the global Linear webhook route is enabled but a resolved
 project has no trigger label, the gateway acknowledges the event without
-starting `devCycle`.
+starting `devCycle`. The gateway checks this stored metadata before resolving
+either credential, so a disabled trigger has no Kubernetes Secret dependency.
 
 The `linear:TEAM-number` tracker reference remains unchanged. It is an explicit
 provider tag at a serialized workflow boundary, not inference from object shape.

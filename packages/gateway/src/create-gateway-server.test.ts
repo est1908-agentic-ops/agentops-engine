@@ -102,23 +102,26 @@ function fakeManagedProjectDeps(rows: FakeManagedRow[]): GatewayDeps['managedPro
 describe('createGatewayServer Linear route', () => {
   it('acknowledges but does not start a task when the project has no trigger label', async () => {
     const start = vi.fn().mockResolvedValue(undefined);
+    const managedProjectDeps = fakeManagedProjectDeps([
+      {
+        project: 'linear-project',
+        repo: 'octocat/hello-world',
+        token: 'github-token',
+        trackerType: 'linear',
+        linearTeamKey: 'ENG',
+        linearToken: 'linear-token',
+      },
+    ]);
+    const resolveToken = vi.spyOn(managedProjectDeps!, 'resolveToken');
+    const buildScm = vi.fn(() => new MemoryScmPort());
     const server = createGatewayServer({
       client: { workflow: { start } } as never,
       taskQueue: 'agentops-devcycle',
       webhookSecret: SECRET,
       linearWebhookSecret: LINEAR_SECRET,
       triggerLabel: TRIGGER_LABEL,
-      buildScm: () => new MemoryScmPort(),
-      managedProjectDeps: fakeManagedProjectDeps([
-        {
-          project: 'linear-project',
-          repo: 'octocat/hello-world',
-          token: 'github-token',
-          trackerType: 'linear',
-          linearTeamKey: 'ENG',
-          linearToken: 'linear-token',
-        },
-      ]),
+      buildScm,
+      managedProjectDeps,
     });
     await new Promise<void>((resolve) => server.listen(0, resolve));
     const port = (server.address() as AddressInfo).port;
@@ -137,6 +140,8 @@ describe('createGatewayServer Linear route', () => {
       });
 
       expect(res.status).toBe(202);
+      expect(resolveToken).not.toHaveBeenCalled();
+      expect(buildScm).not.toHaveBeenCalled();
       expect(start).not.toHaveBeenCalled();
     } finally {
       server.close();
