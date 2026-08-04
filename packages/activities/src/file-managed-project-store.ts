@@ -107,29 +107,20 @@ function parseReadRepositories(
  * `KubeTokenResolver`) that reads the Secret by name; this store itself never
  * reads the Secret or sees the token value.
  *
- * Read-only and read-once: the directory is loaded lazily on first call and
- * cached for the process lifetime. A ConfigMap volume mount is refreshed by
- * the kubelet in the background, but this store never re-reads it after
- * first load -- a pod restart, not a live re-read, is how a ConfigMap change
- * reaches the process (matches how the worker/gateway boot-load the
- * registry once, per the Phase-2 platform plan).
+ * Read-only and refreshable: each lookup reads the directory again. Kubernetes
+ * updates projected ConfigMap volumes in place, so worker and gateway processes
+ * observe registry changes without a rollout or cross-Application sync ordering.
+ * The registry is small and lookups happen at workflow/webhook boundaries, not
+ * in an inner execution loop, making fresh reads preferable to stale caching.
  */
 export class FileManagedProjectStore implements ManagedProjectStore {
-  private cache: Promise<{
-    byRepo: Map<string, ManagedProject>;
-    byLinearTeamKey: Map<string, ManagedProject>;
-  }> | null = null;
-
   constructor(private readonly dir: string) {}
 
   private load(): Promise<{
     byRepo: Map<string, ManagedProject>;
     byLinearTeamKey: Map<string, ManagedProject>;
   }> {
-    if (!this.cache) {
-      this.cache = this.readAll();
-    }
-    return this.cache;
+    return this.readAll();
   }
 
   private async readAll(): Promise<{

@@ -211,6 +211,33 @@ describe('FileManagedProjectStore', () => {
     expect(await store.get('acme/other')).toBeNull();
   });
 
+  it('observes project files updated after the first lookup', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    writeProjectFiles(dir, 'demo', {
+      project: 'Demo App',
+      repo: 'https://github.com/acme/demo',
+      tokenSecret: 'github-token',
+    });
+    const store = new FileManagedProjectStore(dir);
+
+    expect((await store.get('acme/demo'))?.trackerType).toBe('github');
+
+    writeProjectFiles(dir, 'demo', {
+      project: 'Demo App',
+      repo: 'https://github.com/acme/demo',
+      tokenSecret: 'github-token',
+      trackerType: 'linear',
+      linearTeamKey: 'ENG',
+      linearTokenSecret: 'linear-token',
+    });
+
+    expect(await store.getByLinearTeamKey('ENG')).toMatchObject({
+      trackerType: 'linear',
+      linearTeamKey: 'ENG',
+      linearTokenSecret: 'linear-token',
+    });
+  });
+
   it('throws naming the slug when __agentops.json fails ProjectConfig validation', async () => {
     dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
     writeProjectFiles(

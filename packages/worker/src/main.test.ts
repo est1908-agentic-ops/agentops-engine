@@ -1,15 +1,73 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryWorkspaceManager, WorkspaceManager } from '@agentops/activities';
 import { MemoryScmPort, MemoryTrackerPort } from '@agentops/ports';
 import {
   assertLiveBackendConfig,
   buildActivityDependencies,
+  createManagedProjectWiringController,
   resolveCacheDir,
   resolveWorkspacesDir,
 } from './main';
+
+describe('createManagedProjectWiringController', () => {
+  it('loads a new registry and routes later activity calls through its replacement wiring', async () => {
+    const firstGetIssue = vi.fn().mockResolvedValue({ id: 'first' });
+    const secondGetIssue = vi.fn().mockResolvedValue({ id: 'second' });
+    const base = buildActivityDependencies([]);
+    const trackerWithGetIssue = (getIssue: typeof firstGetIssue) => ({
+      getIssue,
+      comment: vi.fn(),
+      label: vi.fn(),
+      removeLabel: vi.fn(),
+      createIssue: vi.fn(),
+    });
+    const first = {
+      ...base,
+      tracker: trackerWithGetIssue(firstGetIssue),
+    };
+    const second = {
+      ...base,
+      tracker: trackerWithGetIssue(secondGetIssue),
+    };
+    const nextRegistry = [
+      {
+        project: 'demo',
+        repo: 'octocat/demo',
+        trackerType: 'linear' as const,
+        linearTeamKey: 'DX',
+        token: 'fake-token',
+        linearToken: 'linear-token',
+        readRepositories: [],
+      },
+    ];
+    const mutableRegistry = [
+      {
+        project: 'demo',
+        repo: 'octocat/demo',
+        trackerType: 'github' as const,
+        token: 'fake-token',
+        readRepositories: [],
+      },
+    ];
+    const controller = createManagedProjectWiringController(
+      mutableRegistry,
+      first,
+      async () => nextRegistry,
+      () => second,
+    );
+
+    await controller.wiring.tracker.getIssue('linear:DX-1');
+    await controller.refresh();
+    await controller.wiring.tracker.getIssue('linear:DX-2');
+
+    expect(firstGetIssue).toHaveBeenCalledWith('linear:DX-1');
+    expect(secondGetIssue).toHaveBeenCalledWith('linear:DX-2');
+    expect(mutableRegistry).toEqual(nextRegistry);
+  });
+});
 
 const validLiveEnv: NodeJS.ProcessEnv = {
   AGENT_RUNNER_IMAGE: 'gitactions.est1908.top/agentic-ops/agent-runner:abc123',
