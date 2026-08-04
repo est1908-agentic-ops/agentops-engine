@@ -29,7 +29,7 @@ function buildGatewayManagedProjectDeps(): ManagedProjectRegistryDeps {
   const namespace = process.env.AGENT_NAMESPACE ?? 'dev-agents';
   const store = new FileManagedProjectStore(dir);
   const resolver = new KubeTokenResolver(namespace);
-  return { store, resolveToken: (tokenSecret) => resolver.get(tokenSecret) };
+  return { store, resolveToken: (tokenSecret, key) => resolver.get(tokenSecret, key) };
 }
 
 async function main(): Promise<void> {

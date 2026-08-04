@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { loadProjectConfig } from '@agentops/activities';
 import type { ManagedProjectStore } from '@agentops/contracts';
 import { GithubScmPort, MemoryScmPort } from '@agentops/ports';
-import { buildControlRequest, buildStartScmPort, cmdProject, controlBaseUrl, controlCrudHeaders, parseFlags, seedDemoAgentopsConfig } from './main';
+import { buildCliManagedProjectDeps, buildControlRequest, buildStartScmPort, cmdProject, controlBaseUrl, controlCrudHeaders, parseFlags, seedDemoAgentopsConfig } from './main';
 
 describe('seedDemoAgentopsConfig', () => {
   it('produces a config that keeps every stage on the stub backend', async () => {
@@ -30,6 +30,23 @@ describe('parseFlags', () => {
 
   it('throws when a flag value looks like another flag', () => {
     expect(() => parseFlags(['--goal', '--repo', 'o/r'])).toThrow(/missing value for --goal/);
+  });
+});
+
+describe('buildCliManagedProjectDeps', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('reads the requested provider token from the local environment', async () => {
+    vi.stubEnv('KUBERNETES_SERVICE_HOST', '');
+    vi.stubEnv('MANAGED_PROJECTS_DIR', '/tmp/unused-managed-projects');
+    vi.stubEnv('GITHUB_TOKEN', 'ghp_local');
+    vi.stubEnv('LINEAR_API_TOKEN', 'lin_local');
+    const deps = buildCliManagedProjectDeps();
+
+    await expect(deps.resolveToken('project-token', 'GITHUB_TOKEN')).resolves.toBe('ghp_local');
+    await expect(deps.resolveToken('project-token', 'LINEAR_API_TOKEN')).resolves.toBe('lin_local');
   });
 });
 

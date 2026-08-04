@@ -8,10 +8,13 @@ export interface ManagedProjectRegistryDeps {
    * actual token value -- per-project, not a single shared `GITHUB_TOKEN`
    * (that design was superseded). The real implementation is
    * `KubeTokenResolver.get`, bound to a namespace; the cli's local-dev path
-   * (no in-cluster API available) falls back to reading `GITHUB_TOKEN` from
-   * the environment instead (see packages/cli/src/main.ts).
+   * (no in-cluster API available) reads the same requested key from the
+   * environment instead (see packages/cli/src/main.ts).
    */
-  resolveToken: (tokenSecret: string) => Promise<string>;
+  resolveToken: (
+    tokenSecret: string,
+    key: 'GITHUB_TOKEN' | 'LINEAR_API_TOKEN',
+  ) => Promise<string>;
 }
 
 async function buildResolvedEntry(
@@ -36,8 +39,8 @@ async function buildResolvedEntry(
       );
     }
 
-    const token = await deps.resolveToken(managedProject.tokenSecret);
-    const linearToken = await deps.resolveToken(managedProject.linearTokenSecret);
+    const token = await deps.resolveToken(managedProject.tokenSecret, 'GITHUB_TOKEN');
+    const linearToken = await deps.resolveToken(managedProject.linearTokenSecret, 'LINEAR_API_TOKEN');
 
     return {
       trackerType: 'linear',
@@ -57,7 +60,7 @@ async function buildResolvedEntry(
       );
     }
 
-    const token = await deps.resolveToken(managedProject.tokenSecret);
+    const token = await deps.resolveToken(managedProject.tokenSecret, 'GITHUB_TOKEN');
 
     return {
       trackerType: 'github',

@@ -88,18 +88,18 @@ export async function buildStartScmPort(
 // Per-project tokens, read from a mounted managed-projects ConfigMap dir and
 // resolved via the K8s API by Secret name -- same wiring as worker/gateway,
 // except the cli can run outside the cluster (a developer's laptop), where
-// there's no API server to read a Secret from. In that case, fall back to a
-// single GITHUB_TOKEN env var so `engine start` still works locally against
-// a manually populated/pointed-at MANAGED_PROJECTS_DIR.
-function buildCliManagedProjectDeps(): ManagedProjectRegistryDeps {
+// there's no API server to read a Secret from. In that case, read the same
+// provider-specific key from the environment so `engine start` still works
+// locally against a manually populated/pointed-at MANAGED_PROJECTS_DIR.
+export function buildCliManagedProjectDeps(): ManagedProjectRegistryDeps {
   const dir = process.env.MANAGED_PROJECTS_DIR ?? '/etc/managed-projects';
   const store = new FileManagedProjectStore(dir);
   if (!process.env.KUBERNETES_SERVICE_HOST) {
-    return { store, resolveToken: async () => process.env.GITHUB_TOKEN ?? '' };
+    return { store, resolveToken: async (_tokenSecret, key) => process.env[key] ?? '' };
   }
   const namespace = process.env.AGENT_NAMESPACE ?? 'dev-agents';
   const resolver = new KubeTokenResolver(namespace);
-  return { store, resolveToken: (tokenSecret) => resolver.get(tokenSecret) };
+  return { store, resolveToken: (tokenSecret, key) => resolver.get(tokenSecret, key) };
 }
 
 async function getClient(): Promise<Client> {
