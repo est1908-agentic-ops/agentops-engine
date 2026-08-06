@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_PROJECT_CONFIG } from '@agentops/contracts';
 import { FileManagedProjectStore } from './file-managed-project-store';
 
@@ -148,8 +148,9 @@ describe('FileManagedProjectStore', () => {
     ['contains a current-directory repository segment', ['./repo']],
     ['contains a parent-directory repository segment', ['acme/..']],
     ['contains a full URL', ['https://github.com/acme/shared']],
-  ])('rejects readRepositories when it %s', async (_description, readRepositories) => {
+  ])('skips readRepositories validation error and returns null: %s', async (_description, readRepositories) => {
     dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     writeProjectFiles(dir, 'demo', {
       project: 'Demo App',
       repo: 'https://github.com/acme/demo',
@@ -157,13 +158,17 @@ describe('FileManagedProjectStore', () => {
       readRepositories,
     });
 
-    await expect(new FileManagedProjectStore(dir).get('acme/demo')).rejects.toThrow(
-      /readRepositories/,
-    );
+    const result = await new FileManagedProjectStore(dir).get('acme/demo');
+
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/readRepositories/));
+
+    warnSpy.mockRestore();
   });
 
-  it('rejects duplicate read repositories case-insensitively', async () => {
+  it('skips duplicate read repositories and returns null', async () => {
     dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     writeProjectFiles(dir, 'demo', {
       project: 'Demo App',
       repo: 'https://github.com/acme/demo',
@@ -171,11 +176,17 @@ describe('FileManagedProjectStore', () => {
       readRepositories: ['Acme/Shared', 'acme/shared'],
     });
 
-    await expect(new FileManagedProjectStore(dir).get('acme/demo')).rejects.toThrow(/duplicate/i);
+    const result = await new FileManagedProjectStore(dir).get('acme/demo');
+
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/duplicate/i));
+
+    warnSpy.mockRestore();
   });
 
-  it('rejects the primary repository in readRepositories case-insensitively', async () => {
+  it('skips primary repository in readRepositories and returns null', async () => {
     dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     writeProjectFiles(dir, 'demo', {
       project: 'Demo App',
       repo: 'https://github.com/acme/demo',
@@ -183,7 +194,12 @@ describe('FileManagedProjectStore', () => {
       readRepositories: ['Acme/Demo'],
     });
 
-    await expect(new FileManagedProjectStore(dir).get('acme/demo')).rejects.toThrow(/primary/i);
+    const result = await new FileManagedProjectStore(dir).get('acme/demo');
+
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/primary/i));
+
+    warnSpy.mockRestore();
   });
 
   it('finds a project by its project name via getByProject', async () => {
@@ -238,8 +254,9 @@ describe('FileManagedProjectStore', () => {
     });
   });
 
-  it('throws naming the slug when __agentops.json fails ProjectConfig validation', async () => {
+  it('skips a project with invalid __agentops.json and returns null', async () => {
     dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     writeProjectFiles(
       dir,
       'broken',
@@ -252,6 +269,93 @@ describe('FileManagedProjectStore', () => {
     );
     const store = new FileManagedProjectStore(dir);
 
-    await expect(store.get('acme/broken')).rejects.toThrow(/broken/);
+    const result = await store.get('acme/broken');
+
+    expect(result).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringMatching(/broken/));
+
+    warnSpy.mockRestore();
+  });
+
+  it('skips a malformed project file and returns only the valid project', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Write a valid project
+    writeProjectFiles(dir, 'valid', {
+      project: 'Valid App',
+      repo: 'https://github.com/acme/valid',
+      tokenSecret: 'github-token',
+    });
+
+    // Write a malformed project (missing required "repo" field)
+    writeFileSync(
+      join(dir, 'malformed__project.yaml'),
+      'project: Malformed App\ntokenSecret: github-token\n',
+    );
+
+    const store = new FileManagedProjectStore(dir);
+
+    // list() should skip the malformed project and return only the valid one
+    const list = await store.list();
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ project: 'Valid App', repo: 'acme/valid' });
+
+    // get() for the valid project should work
+    expect(await store.get('acme/valid')).toMatchObject({ project: 'Valid App' });
+
+    // get() for the bad project should return null
+    expect(await store.get('acme/malformed')).toBeNull();
+
+    // Verify console.warn was called for the malformed file
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/FileManagedProjectStore: skipping.*malformed.*slug "malformed"/),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('skips a project with an invalid __agentops.json and returns the valid project', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    // Write a valid project without config
+    writeProjectFiles(dir, 'valid', {
+      project: 'Valid App',
+      repo: 'https://github.com/acme/valid',
+      tokenSecret: 'github-token',
+    });
+
+    // Write a project with valid __project.yaml but invalid __agentops.json
+    writeProjectFiles(
+      dir,
+      'bad-config',
+      {
+        project: 'Bad Config App',
+        repo: 'https://github.com/acme/bad-config',
+        tokenSecret: 'github-token',
+      },
+      { autoMerge: 'not-a-real-mode' }, // fails ProjectConfig validation
+    );
+
+    const store = new FileManagedProjectStore(dir);
+
+    const list = await store.list();
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ project: 'Valid App', repo: 'acme/valid' });
+
+    expect(await store.get('acme/bad-config')).toBeNull();
+
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/FileManagedProjectStore: skipping.*bad-config.*slug "bad-config"/),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('still throws when readdir fails (directory not found)', async () => {
+    const store = new FileManagedProjectStore('/nonexistent/directory/path');
+
+    await expect(store.list()).rejects.toThrow();
   });
 });

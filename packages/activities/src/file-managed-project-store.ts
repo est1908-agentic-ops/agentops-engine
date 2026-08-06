@@ -139,126 +139,132 @@ export class FileManagedProjectStore implements ManagedProjectStore {
       }
       const slug = match[1];
 
-      let rawProject: unknown;
       try {
-        rawProject = parseYaml(await readFile(join(this.dir, entry), 'utf8'));
-      } catch (err) {
-        throw new Error(
-          `FileManagedProjectStore: failed to parse "${entry}" (slug "${slug}"): ${(err as Error).message}`,
-          { cause: err },
-        );
-      }
-      const parsedProject = rawProject as RawManagedProjectFile | null;
-      if (
-        typeof parsedProject !== 'object' ||
-        parsedProject === null ||
-        !isNonEmptyString(parsedProject.project) ||
-        !isNonEmptyString(parsedProject.repo)
-      ) {
-        throw new Error(
-          `FileManagedProjectStore: "${entry}" (slug "${slug}") must have non-empty string "project" and "repo" fields`,
-        );
-      }
-
-      const trackerType = parsedProject.trackerType === 'linear' ? 'linear' : 'github';
-
-      if (trackerType === 'linear') {
-        // Linear tracker: validate Linear-specific fields
-        if (!isNonEmptyString(parsedProject.linearTeamKey)) {
-          throw new Error(
-            `FileManagedProjectStore: "${entry}" (slug "${slug}") with trackerType "linear" must have a non-empty string "linearTeamKey" field`,
-          );
-        }
-        // Linear projects also need tokenSecret for the GitHub/Linear API resolver
-        if (!isNonEmptyString(parsedProject.tokenSecret)) {
-          throw new Error(
-            `FileManagedProjectStore: "${entry}" (slug "${slug}") with trackerType "linear" must have non-empty string "tokenSecret" field`,
-          );
-        }
-      } else {
-        // GitHub tracker: validate GitHub-specific fields
-        if (!isNonEmptyString(parsedProject.tokenSecret)) {
-          throw new Error(
-            `FileManagedProjectStore: "${entry}" (slug "${slug}") with trackerType "github" must have non-empty string "tokenSecret" field`,
-          );
-        }
-      }
-
-      const configFileName = `${slug}${CONFIG_FILE_SUFFIX}`;
-      let config: ProjectConfig | null = null;
-      if (entrySet.has(configFileName)) {
-        let rawConfig: unknown;
+        let rawProject: unknown;
         try {
-          rawConfig = JSON.parse(await readFile(join(this.dir, configFileName), 'utf8'));
+          rawProject = parseYaml(await readFile(join(this.dir, entry), 'utf8'));
         } catch (err) {
           throw new Error(
-            `FileManagedProjectStore: "${configFileName}" (slug "${slug}") is not valid JSON: ${(err as Error).message}`,
+            `FileManagedProjectStore: failed to parse "${entry}" (slug "${slug}"): ${(err as Error).message}`,
             { cause: err },
           );
         }
-        try {
-          config = parseProjectConfig(rawConfig);
-        } catch (err) {
-          if (err instanceof InvalidProjectConfigError) {
-            throw new InvalidProjectConfigError(
-              `FileManagedProjectStore: "${configFileName}" (slug "${slug}"): ${err.message}`,
-              err.issues,
+        const parsedProject = rawProject as RawManagedProjectFile | null;
+        if (
+          typeof parsedProject !== 'object' ||
+          parsedProject === null ||
+          !isNonEmptyString(parsedProject.project) ||
+          !isNonEmptyString(parsedProject.repo)
+        ) {
+          throw new Error(
+            `FileManagedProjectStore: "${entry}" (slug "${slug}") must have non-empty string "project" and "repo" fields`,
+          );
+        }
+
+        const trackerType = parsedProject.trackerType === 'linear' ? 'linear' : 'github';
+
+        if (trackerType === 'linear') {
+          // Linear tracker: validate Linear-specific fields
+          if (!isNonEmptyString(parsedProject.linearTeamKey)) {
+            throw new Error(
+              `FileManagedProjectStore: "${entry}" (slug "${slug}") with trackerType "linear" must have a non-empty string "linearTeamKey" field`,
             );
           }
-          throw err;
+          // Linear projects also need tokenSecret for the GitHub/Linear API resolver
+          if (!isNonEmptyString(parsedProject.tokenSecret)) {
+            throw new Error(
+              `FileManagedProjectStore: "${entry}" (slug "${slug}") with trackerType "linear" must have non-empty string "tokenSecret" field`,
+            );
+          }
+        } else {
+          // GitHub tracker: validate GitHub-specific fields
+          if (!isNonEmptyString(parsedProject.tokenSecret)) {
+            throw new Error(
+              `FileManagedProjectStore: "${entry}" (slug "${slug}") with trackerType "github" must have non-empty string "tokenSecret" field`,
+            );
+          }
         }
-      }
 
-      const repo = normalizeRepo(parsedProject.repo);
-      const readRepositories = parseReadRepositories(
-        parsedProject.readRepositories,
-        repo,
-        entry,
-        slug,
-      );
-      // id/createdAt/updatedAt are DB-row artifacts of ManagedProjectSchema
-      // that have no meaning for a file-backed, read-only store -- the slug
-      // stands in for id (stable and unique per the ConfigMap key contract)
-      // and a fixed epoch stands in for the timestamps. This object is never
-      // run through ManagedProjectSchema.parse() (id isn't a real UUID), the
-      // same "constructed, not re-validated" convention ResolvedProjectEntry
-      // already uses.
-      const baseFields = {
-        id: slug,
-        project: parsedProject.project,
-        repo,
-        readRepositories,
-        config,
-        createdAt: new Date(0).toISOString(),
-        updatedAt: new Date(0).toISOString(),
-      };
+        const configFileName = `${slug}${CONFIG_FILE_SUFFIX}`;
+        let config: ProjectConfig | null = null;
+        if (entrySet.has(configFileName)) {
+          let rawConfig: unknown;
+          try {
+            rawConfig = JSON.parse(await readFile(join(this.dir, configFileName), 'utf8'));
+          } catch (err) {
+            throw new Error(
+              `FileManagedProjectStore: "${configFileName}" (slug "${slug}") is not valid JSON: ${(err as Error).message}`,
+              { cause: err },
+            );
+          }
+          try {
+            config = parseProjectConfig(rawConfig);
+          } catch (err) {
+            if (err instanceof InvalidProjectConfigError) {
+              throw new InvalidProjectConfigError(
+                `FileManagedProjectStore: "${configFileName}" (slug "${slug}"): ${err.message}`,
+                err.issues,
+              );
+            }
+            throw err;
+          }
+        }
 
-      let managedProject: ManagedProject;
-      if (trackerType === 'linear') {
-        managedProject = {
-          ...baseFields,
-          trackerType: 'linear',
-          credentialSet: true,
-          tokenSecret: parsedProject.tokenSecret as string,
-          linearTeamKey: parsedProject.linearTeamKey as string,
-          ...(isNonEmptyString(parsedProject.linearTriggerLabelId)
-            ? { linearTriggerLabelId: parsedProject.linearTriggerLabelId }
-            : {}),
-          linearCredentialSet: true,
-          linearTokenSecret: isNonEmptyString(parsedProject.linearTokenSecret)
-            ? (parsedProject.linearTokenSecret as string)
-            : undefined,
+        const repo = normalizeRepo(parsedProject.repo);
+        const readRepositories = parseReadRepositories(
+          parsedProject.readRepositories,
+          repo,
+          entry,
+          slug,
+        );
+        // id/createdAt/updatedAt are DB-row artifacts of ManagedProjectSchema
+        // that have no meaning for a file-backed, read-only store -- the slug
+        // stands in for id (stable and unique per the ConfigMap key contract)
+        // and a fixed epoch stands in for the timestamps. This object is never
+        // run through ManagedProjectSchema.parse() (id isn't a real UUID), the
+        // same "constructed, not re-validated" convention ResolvedProjectEntry
+        // already uses.
+        const baseFields = {
+          id: slug,
+          project: parsedProject.project,
+          repo,
+          readRepositories,
+          config,
+          createdAt: new Date(0).toISOString(),
+          updatedAt: new Date(0).toISOString(),
         };
-        byLinearTeamKey.set(managedProject.linearTeamKey, managedProject);
-      } else {
-        managedProject = {
-          ...baseFields,
-          trackerType: 'github',
-          credentialSet: true,
-          tokenSecret: parsedProject.tokenSecret as string,
-        };
+
+        let managedProject: ManagedProject;
+        if (trackerType === 'linear') {
+          managedProject = {
+            ...baseFields,
+            trackerType: 'linear',
+            credentialSet: true,
+            tokenSecret: parsedProject.tokenSecret as string,
+            linearTeamKey: parsedProject.linearTeamKey as string,
+            ...(isNonEmptyString(parsedProject.linearTriggerLabelId)
+              ? { linearTriggerLabelId: parsedProject.linearTriggerLabelId }
+              : {}),
+            linearCredentialSet: true,
+            linearTokenSecret: isNonEmptyString(parsedProject.linearTokenSecret)
+              ? (parsedProject.linearTokenSecret as string)
+              : undefined,
+          };
+          byLinearTeamKey.set(managedProject.linearTeamKey, managedProject);
+        } else {
+          managedProject = {
+            ...baseFields,
+            trackerType: 'github',
+            credentialSet: true,
+            tokenSecret: parsedProject.tokenSecret as string,
+          };
+        }
+        byRepo.set(repo, managedProject);
+      } catch (err) {
+        console.warn(
+          `FileManagedProjectStore: skipping "${entry}" (slug "${slug}"): ${(err as Error).message}`,
+        );
       }
-      byRepo.set(repo, managedProject);
     }
 
     return { byRepo, byLinearTeamKey };

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FileManagedProjectStore } from './file-managed-project-store';
 import { loadManagedProjectRegistry, resolveManagedProjectEntry } from './resolve-managed-projects';
 
@@ -188,5 +188,108 @@ describe('loadManagedProjectRegistry', () => {
       ['linear-github-token', 'GITHUB_TOKEN'],
       ['linear-token', 'LINEAR_API_TOKEN'],
     ]);
+  });
+
+  it('skips a project when token resolution fails, continuing with other projects', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    writeProjectFiles(dir, 'good', {
+      project: 'Good Project',
+      repo: 'https://github.com/acme/good',
+      tokenSecret: 'good-token',
+    });
+    writeProjectFiles(dir, 'bad', {
+      project: 'Bad Project',
+      repo: 'https://github.com/acme/bad',
+      tokenSecret: 'bad-token',
+    });
+
+    const resolveToken = async (tokenSecret: string) => {
+      if (tokenSecret === 'bad-token') {
+        throw new Error('Secret not found in Kubernetes');
+      }
+      return `token-for-${tokenSecret}`;
+    };
+
+    const entries = await loadManagedProjectRegistry({
+      store: new FileManagedProjectStore(dir),
+      resolveToken,
+    });
+
+    // Should only include the good project
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      project: 'Good Project',
+      repo: 'acme/good',
+    });
+
+    // Verify console.warn was called for the bad project
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/loadManagedProjectRegistry: skipping.*Bad Project.*acme\/bad/),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('skips a Linear project missing linearTokenSecret during registry load', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    writeProjectFiles(dir, 'good', {
+      project: 'Good Project',
+      repo: 'https://github.com/acme/good',
+      tokenSecret: 'github-token',
+    });
+    writeProjectFiles(dir, 'bad-linear', {
+      project: 'Bad Linear Project',
+      repo: 'https://github.com/acme/bad-linear',
+      tokenSecret: 'github-token',
+      trackerType: 'linear',
+      linearTeamKey: 'ENG',
+      // Missing linearTokenSecret
+    });
+
+    const entries = await loadManagedProjectRegistry({
+      store: new FileManagedProjectStore(dir),
+      resolveToken: async () => 'token',
+    });
+
+    // Should only include the good project
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      project: 'Good Project',
+    });
+
+    // Verify console.warn was called
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/loadManagedProjectRegistry: skipping.*Bad Linear Project/),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('single-lookup resolveManagedProjectEntry still propagates errors', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    writeProjectFiles(dir, 'demo', {
+      project: 'Demo Project',
+      repo: 'https://github.com/acme/demo',
+      tokenSecret: 'demo-token',
+    });
+
+    const resolveToken = async () => {
+      throw new Error('Token resolution failed');
+    };
+
+    // Single-lookup should propagate the error, not skip
+    await expect(
+      resolveManagedProjectEntry(
+        {
+          store: new FileManagedProjectStore(dir),
+          resolveToken,
+        },
+        'acme/demo',
+      ),
+    ).rejects.toThrow('Token resolution failed');
   });
 });

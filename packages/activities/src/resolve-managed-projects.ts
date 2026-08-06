@@ -126,9 +126,15 @@ export async function loadManagedProjectRegistry(
   const managedProjects = await deps.store.list();
   const entries: ResolvedProjectEntry[] = [];
   for (const project of managedProjects) {
-    const resolved = await resolveOne(deps, project.repo);
-    if (resolved) {
-      entries.push(resolved);
+    try {
+      const resolved = await resolveOne(deps, project.repo);
+      if (resolved) {
+        entries.push(resolved);
+      }
+    } catch (err) {
+      console.warn(
+        `loadManagedProjectRegistry: skipping "${project.project}" (${project.repo}): ${(err as Error).message}`,
+      );
     }
   }
   return entries;
