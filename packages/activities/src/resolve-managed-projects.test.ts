@@ -292,4 +292,87 @@ describe('loadManagedProjectRegistry', () => {
       ),
     ).rejects.toThrow('Token resolution failed');
   });
+
+  it('loads registry with exactly one list() call and no get() calls', async () => {
+    dir = mkdtempSync(join(tmpdir(), 'agentops-managed-projects-'));
+    writeProjectFiles(dir, 'a', {
+      project: 'project-a',
+      repo: 'https://github.com/acme/a',
+      tokenSecret: 'github-token',
+    });
+    writeProjectFiles(dir, 'b', {
+      project: 'project-b',
+      repo: 'https://github.com/acme/b',
+      tokenSecret: 'github-token',
+    });
+    const store = new FileManagedProjectStore(dir);
+
+    const listSpy = vi.spyOn(store, 'list');
+    const getSpy = vi.spyOn(store, 'get');
+
+    const entries = await loadManagedProjectRegistry({
+      store,
+      resolveToken: async () => 'ghp_x',
+    });
+
+    // Should resolve both projects
+    expect(entries).toHaveLength(2);
+
+    // Should call list() exactly once
+    expect(listSpy).toHaveBeenCalledTimes(1);
+
+    // Should never call get() for per-project re-fetches
+    expect(getSpy).not.toHaveBeenCalled();
+
+    listSpy.mockRestore();
+    getSpy.mockRestore();
+  });
+
+  it('loads registry from list() snapshot even when get() would return different results', async () => {
+    // Mock store where list() and get() disagree to simulate mid-load inconsistency
+    const store = {
+      list: async () => [
+        {
+          id: '550e8400-e29b-41d4-a716-446655440001',
+          project: 'consistent-project',
+          repo: 'https://github.com/acme/consistent',
+          tokenSecret: 'token-secret',
+          trackerType: 'github' as const,
+          readRepositories: [],
+          credentialSet: true,
+          config: null,
+          createdAt: '2026-08-07T00:00:00Z',
+          updatedAt: '2026-08-07T00:00:00Z',
+        },
+      ],
+      get: async () => null, // Would return null if called
+      getByProject: async () => null,
+      getByLinearTeamKey: async () => null,
+    };
+
+    const listSpy = vi.spyOn(store, 'list');
+    const getSpy = vi.spyOn(store, 'get');
+
+    const entries = await loadManagedProjectRegistry({
+      store,
+      resolveToken: async () => 'ghp_x',
+    });
+
+    // Should successfully resolve the project from list() snapshot
+    expect(entries).toHaveLength(1);
+    expect(entries[0]).toMatchObject({
+      project: 'consistent-project',
+      repo: 'acme/consistent',
+      token: 'ghp_x',
+    });
+
+    // Should call list() once
+    expect(listSpy).toHaveBeenCalledTimes(1);
+
+    // Should never call get() - build is from list() snapshot
+    expect(getSpy).not.toHaveBeenCalled();
+
+    listSpy.mockRestore();
+    getSpy.mockRestore();
+  });
 });
