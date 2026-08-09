@@ -1,4 +1,5 @@
 import type { MergePrRequest, MergePrResult, PrFeedback, PrSnapshot } from '@agentops/contracts';
+import { ApplicationFailure } from '@temporalio/common';
 import type { GitCommandRunner } from '../git/git-command-runner';
 import type { OpenPrRequest, OpenPrResult, ScmPort } from '../scm-port';
 import type { GithubClient } from './github-client';
@@ -55,6 +56,19 @@ type CiSignal = 'green' | 'failed' | 'pending' | 'unknown' | 'none';
 function isNotAccessible(err: unknown): boolean {
   const status = (err as { status?: number }).status;
   return status === 403 || status === 404;
+}
+
+// GitHub permanently rejects a push that touches .github/workflows/** when the token
+// lacks the `workflow` scope, with a stderr like:
+//   ! [remote rejected] ... (refusing to allow a Personal Access Token to create or
+//    update workflow `.github/workflows/x.yml` without `workflow` scope)
+// The "OAuth App"/"GitHub App" phrasings are the same underlying missing-scope refusal.
+// This is permanent until a human changes the token scopes, so it must fail fast rather
+// than burn all of Temporal's retry attempts. Match narrowly on the two stable,
+// GitHub-authored fragments to avoid misclassifying transient refusals as permanent.
+export function isPermanentPushPermissionRejection(stderr: string): boolean {
+  const s = stderr.toLowerCase();
+  return s.includes('refusing to allow a') && s.includes('without `workflow` scope');
 }
 
 // Not every non-'success' conclusion is a failure: 'skipped' (e.g. a
@@ -286,7 +300,11 @@ export class GithubScmPort implements ScmPort {
     // task ever pushes to agentops/<taskId>, so clobbering it here is safe.
     const result = await this.git.run(['push', '--force', 'origin', branch], { cwd: workspaceRef });
     if (result.exitCode !== 0) {
-      throw new Error(`GithubScmPort.push: git push failed: ${result.stderr}`);
+      const message = `GithubScmPort.push: git push failed: ${result.stderr}`;
+      if (isPermanentPushPermissionRejection(result.stderr)) {
+        throw ApplicationFailure.nonRetryable(message, 'GitPushPermissionError');
+      }
+      throw new Error(message);
     }
   }
 
