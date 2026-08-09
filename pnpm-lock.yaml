@@ -267,6 +267,9 @@ importers:
       '@octokit/rest':
         specifier: ^21.1.1
         version: 21.1.1
+      '@temporalio/common':
+        specifier: ^1.11.0
+        version: 1.19.0
 
   packages/prompts: {}
 

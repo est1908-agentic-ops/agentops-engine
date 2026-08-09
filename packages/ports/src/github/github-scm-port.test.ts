@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ApplicationFailure } from '@temporalio/common';
 import type { GitCommandRunner } from '../git/git-command-runner';
 import type { GithubClient } from './github-client';
-import { GithubScmPort } from './github-scm-port';
+import { GithubScmPort, isPermanentPushPermissionRejection } from './github-scm-port';
 
 function defaultPrData(overrides: Record<string, unknown> = {}) {
   return {
@@ -258,16 +259,103 @@ describe('GithubScmPort — push', () => {
     ]);
   });
 
-  it('throws if the push fails', async () => {
+  it('throws a plain Error for generic push failures (e.g. non-fast-forward)', async () => {
     const client = fakeClient();
     const git: GitCommandRunner = {
       run: vi.fn().mockResolvedValue({ stdout: '', stderr: 'rejected', exitCode: 1 }),
     };
     const scm = new GithubScmPort(client, git);
 
-    await expect(
-      scm.push('octocat/hello-world', '/tmp/workspace', 'agentops/t1', 'hash-1'),
-    ).rejects.toThrow(/rejected/);
+    try {
+      await scm.push('octocat/hello-world', '/tmp/workspace', 'agentops/t1', 'hash-1');
+      throw new Error('should have thrown');
+    } catch (err) {
+      // Verify it's a plain Error, not a non-retryable ApplicationFailure
+      expect(err).toBeInstanceOf(Error);
+      expect(err).not.toBeInstanceOf(ApplicationFailure);
+      expect(err).toMatchObject({ message: expect.stringContaining('rejected') });
+    }
+  });
+
+  it('throws a non-retryable ApplicationFailure for permanent workflow scope rejections (Personal Access Token)', async () => {
+    const client = fakeClient();
+    const git: GitCommandRunner = {
+      run: vi.fn().mockResolvedValue({
+        stdout: '',
+        stderr:
+          '! [remote rejected] agentops/t1 -> agentops/t1 (refusing to allow a Personal Access Token to create or update workflow `.github/workflows/ci.yml` without `workflow` scope)',
+        exitCode: 1,
+      }),
+    };
+    const scm = new GithubScmPort(client, git);
+
+    try {
+      await scm.push('octocat/hello-world', '/tmp/workspace', 'agentops/t1', 'hash-1');
+      throw new Error('should have thrown');
+    } catch (thrownErr) {
+      expect(thrownErr).toBeInstanceOf(ApplicationFailure);
+      expect(thrownErr).toHaveProperty('type', 'GitPushPermissionError');
+      expect(thrownErr).toHaveProperty('nonRetryable', true);
+      expect((thrownErr as ApplicationFailure).message).toContain('refusing to allow a Personal Access Token');
+    }
+  });
+
+  it('throws a non-retryable ApplicationFailure for permanent workflow scope rejections (OAuth App)', async () => {
+    const client = fakeClient();
+    const git: GitCommandRunner = {
+      run: vi.fn().mockResolvedValue({
+        stdout: '',
+        stderr:
+          '! [remote rejected] agentops/t1 -> agentops/t1 (refusing to allow an OAuth App to create or update workflow `.github/workflows/ci.yml` without `workflow` scope)',
+        exitCode: 1,
+      }),
+    };
+    const scm = new GithubScmPort(client, git);
+
+    try {
+      await scm.push('octocat/hello-world', '/tmp/workspace', 'agentops/t1', 'hash-1');
+      throw new Error('should have thrown');
+    } catch (thrownErr) {
+      expect(thrownErr).toBeInstanceOf(ApplicationFailure);
+      expect(thrownErr).toHaveProperty('type', 'GitPushPermissionError');
+      expect(thrownErr).toHaveProperty('nonRetryable', true);
+    }
+  });
+});
+
+describe('isPermanentPushPermissionRejection', () => {
+  it('returns true for Personal Access Token workflow scope rejection', () => {
+    const stderr =
+      '! [remote rejected] agentops/t1 -> agentops/t1 (refusing to allow a Personal Access Token to create or update workflow `.github/workflows/ci.yml` without `workflow` scope)';
+    expect(isPermanentPushPermissionRejection(stderr)).toBe(true);
+  });
+
+  it('returns true for OAuth App workflow scope rejection', () => {
+    const stderr =
+      '! [remote rejected] agentops/t1 -> agentops/t1 (refusing to allow an OAuth App to create or update workflow `.github/workflows/ci.yml` without `workflow` scope)';
+    expect(isPermanentPushPermissionRejection(stderr)).toBe(true);
+  });
+
+  it('returns false for non-fast-forward rejection', () => {
+    const stderr = '! [rejected] agentops/t1 -> agentops/t1 (non-fast-forward)';
+    expect(isPermanentPushPermissionRejection(stderr)).toBe(false);
+  });
+
+  it('returns false for empty stderr', () => {
+    expect(isPermanentPushPermissionRejection('')).toBe(false);
+  });
+
+  it('returns false if only one of the required fragments is present', () => {
+    const onlyRefusing = 'refusing to allow a Personal Access Token to do something';
+    const onlyScope = 'without `workflow` scope';
+    expect(isPermanentPushPermissionRejection(onlyRefusing)).toBe(false);
+    expect(isPermanentPushPermissionRejection(onlyScope)).toBe(false);
+  });
+
+  it('is case-insensitive', () => {
+    const stderr =
+      '! [remote rejected] agentops/t1 -> agentops/t1 (REFUSING TO ALLOW A Personal Access Token to create or update workflow `.github/workflows/ci.yml` WITHOUT `WORKFLOW` SCOPE)';
+    expect(isPermanentPushPermissionRejection(stderr)).toBe(true);
   });
 });
 
