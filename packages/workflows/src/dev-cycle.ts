@@ -3,6 +3,7 @@ import {
   condition,
   defineQuery,
   defineSignal,
+  log,
   patched,
   proxyActivities,
   setHandler,
@@ -103,12 +104,22 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
   // first stage can possibly block.
   let effectiveBrakes: Brakes;
 
+  const forwardToLandingChild = (
+    signalName: typeof prLandingCancelSignal | typeof prLandingResumeSignal,
+  ): void => {
+    const child = landingChild;
+    if (!child) return;
+    child.signal(signalName).catch((error) => {
+      log.warn('failed to forward signal to prLanding child', { signalName, error });
+    });
+  };
+
   setHandler(stopSignal, () => {
     stopRequested = true;
   });
   setHandler(cancelSignal, () => {
     cancelled = true;
-    void landingChild?.signal(prLandingCancelSignal);
+    forwardToLandingChild(prLandingCancelSignal);
   });
   setHandler(clarifySignal, (_text: string) => {
     // M0 stores no clarification text yet — later milestones feed it back into
@@ -127,7 +138,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
     }
     state.status = 'running';
     state.blockReason = null;
-    void landingChild?.signal(prLandingResumeSignal);
+    forwardToLandingChild(prLandingResumeSignal);
   });
   setHandler(stateQuery, () => state);
 
