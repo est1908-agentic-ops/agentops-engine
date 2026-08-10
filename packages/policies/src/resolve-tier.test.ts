@@ -32,9 +32,9 @@ describe('resolveTier', () => {
 
   it('preserves entry effort when no override is provided', () => {
     const result = resolveTier(undefined, 'implementation');
-    // The third default entry (zai/glm-5.2) ships with effort 'low'; the
-    // others have their own or none. Just assert the override isn't applied.
-    expect(result[0]?.effort).not.toBe('low');
+    // The primary default entry ships with effort 'high'. Just assert the
+    // override isn't applied when none is provided.
+    expect(result[0]?.effort).toBe('high');
   });
 
   it('throws a clear error when the tier is found in neither project-local nor global', () => {
