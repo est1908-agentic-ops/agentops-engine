@@ -147,6 +147,52 @@ describe('createGatewayServer Linear route', () => {
       server.close();
     }
   });
+
+  it('rejects a Linear webhook body that exceeds maxWebhookBodyBytes with 413', async () => {
+    const start = vi.fn().mockResolvedValue(undefined);
+    const managedProjectDeps = fakeManagedProjectDeps([
+      {
+        project: 'linear-project',
+        repo: 'octocat/hello-world',
+        token: 'github-token',
+        trackerType: 'linear',
+        linearTeamKey: 'ENG',
+        linearToken: 'linear-token',
+        linearTriggerLabelId: 'label-uuid',
+      },
+    ]);
+    const oversizeServer = createGatewayServer({
+      client: { workflow: { start } } as never,
+      taskQueue: 'agentops-devcycle',
+      webhookSecret: SECRET,
+      linearWebhookSecret: LINEAR_SECRET,
+      triggerLabel: TRIGGER_LABEL,
+      buildScm: () => new MemoryScmPort(),
+      managedProjectDeps,
+      maxWebhookBodyBytes: 16,
+    });
+    await new Promise<void>((resolve) => oversizeServer.listen(0, resolve));
+    const oversizePort = (oversizeServer.address() as AddressInfo).port;
+
+    try {
+      const body = JSON.stringify({
+        action: 'update',
+        type: 'Issue',
+        data: { identifier: 'ENG-123', title: 'Fix the widget', labelIds: ['label-uuid'] },
+        updatedFrom: { labelIds: [] },
+        webhookTimestamp: Date.now(),
+      });
+      const res = await post(oversizePort, '/webhooks/linear', body, {
+        'content-type': 'application/json',
+        'linear-signature': signLinear(body),
+      });
+
+      expect(res.status).toBe(413);
+      expect(start).not.toHaveBeenCalled();
+    } finally {
+      oversizeServer.close();
+    }
+  });
 });
 
 describe('createGatewayServer GitHub route', () => {
@@ -292,6 +338,62 @@ describe('createGatewayServer GitHub route', () => {
     expect(res.status).toBe(202);
     expect(start).not.toHaveBeenCalled();
     noDbServer.close();
+  });
+
+  it('rejects a GitHub webhook body that exceeds maxWebhookBodyBytes with 413', async () => {
+    start = vi.fn().mockResolvedValue(undefined);
+    const managedProjectDeps = fakeManagedProjectDeps([
+      { project: 'my-project', repo: 'octocat/hello-world', token: 't' },
+    ]);
+    const oversizeServer = createGatewayServer({
+      client: { workflow: { start } } as never,
+      taskQueue: 'agentops-devcycle',
+      webhookSecret: SECRET,
+      triggerLabel: TRIGGER_LABEL,
+      buildScm: () => new MemoryScmPort(),
+      managedProjectDeps,
+      maxWebhookBodyBytes: 16,
+    });
+    await new Promise<void>((resolve) => oversizeServer.listen(0, resolve));
+    const oversizePort = (oversizeServer.address() as AddressInfo).port;
+
+    const body = JSON.stringify(labeledPayload());
+    const res = await post(oversizePort, '/webhooks/github', body, {
+      'content-type': 'application/json',
+      'x-github-event': 'issues',
+      'x-hub-signature-256': sign(body),
+    });
+    expect(res.status).toBe(413);
+    expect(start).not.toHaveBeenCalled();
+    oversizeServer.close();
+  });
+
+  it('allows a normal-sized GitHub webhook even with a small maxWebhookBodyBytes if signature is valid', async () => {
+    start = vi.fn().mockResolvedValue(undefined);
+    const managedProjectDeps = fakeManagedProjectDeps([
+      { project: 'my-project', repo: 'octocat/hello-world', token: 't' },
+    ]);
+    const tightLimitServer = createGatewayServer({
+      client: { workflow: { start } } as never,
+      taskQueue: 'agentops-devcycle',
+      webhookSecret: SECRET,
+      triggerLabel: TRIGGER_LABEL,
+      buildScm: () => new MemoryScmPort(),
+      managedProjectDeps,
+      maxWebhookBodyBytes: 4096,
+    });
+    await new Promise<void>((resolve) => tightLimitServer.listen(0, resolve));
+    const tightPort = (tightLimitServer.address() as AddressInfo).port;
+
+    const body = JSON.stringify(labeledPayload());
+    const res = await post(tightPort, '/webhooks/github', body, {
+      'content-type': 'application/json',
+      'x-github-event': 'issues',
+      'x-hub-signature-256': sign(body),
+    });
+    expect(res.status).toBe(202);
+    expect(start).toHaveBeenCalledTimes(1);
+    tightLimitServer.close();
   });
 });
 

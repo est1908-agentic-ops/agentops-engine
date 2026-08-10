@@ -12,13 +12,16 @@ import {
 } from '@agentops/contracts';
 import { platformChat } from '@agentops/workflows';
 import type { ControlDeps } from './create-control-server';
-import { listRunsByType, readJsonBody, type HandlerResponse } from './handler-util';
+import { listRunsByType, readJsonBody, isPayloadTooLarge, DEFAULT_MAX_BODY_BYTES, type HandlerResponse } from './handler-util';
 
 export async function handleStartChat(deps: ControlDeps, req: IncomingMessage): Promise<HandlerResponse> {
   let rawBody: unknown;
   try {
-    rawBody = await readJsonBody(req);
-  } catch {
+    rawBody = await readJsonBody(req, deps.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES);
+  } catch (err) {
+    if (isPayloadTooLarge(err)) {
+      return { status: 413, body: { error: 'payload too large' } };
+    }
     return { status: 400, body: { error: 'invalid JSON body' } };
   }
   const parsed = StartChatRequestSchema.safeParse(rawBody);
@@ -75,8 +78,11 @@ export async function handleGetChat(deps: ControlDeps, chatId: string): Promise<
 export async function handleSendTurn(deps: ControlDeps, chatId: string, req: IncomingMessage): Promise<HandlerResponse> {
   let rawBody: unknown;
   try {
-    rawBody = await readJsonBody(req);
-  } catch {
+    rawBody = await readJsonBody(req, deps.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES);
+  } catch (err) {
+    if (isPayloadTooLarge(err)) {
+      return { status: 413, body: { error: 'payload too large' } };
+    }
     return { status: 400, body: { error: 'invalid JSON body' } };
   }
   const parsed = SendTurnRequestSchema.safeParse(rawBody);
@@ -91,8 +97,11 @@ export async function handleSendTurn(deps: ControlDeps, chatId: string, req: Inc
 export async function handleDecision(deps: ControlDeps, chatId: string, req: IncomingMessage): Promise<HandlerResponse> {
   let rawBody: unknown;
   try {
-    rawBody = await readJsonBody(req);
-  } catch {
+    rawBody = await readJsonBody(req, deps.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES);
+  } catch (err) {
+    if (isPayloadTooLarge(err)) {
+      return { status: 413, body: { error: 'payload too large' } };
+    }
     return { status: 400, body: { error: 'invalid JSON body' } };
   }
   const parsed = DecisionRequestSchema.safeParse(rawBody);

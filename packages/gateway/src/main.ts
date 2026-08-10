@@ -46,6 +46,15 @@ async function main(): Promise<void> {
   });
   const client = new Client({ connection, namespace: process.env.TEMPORAL_NAMESPACE });
 
+  const maxWebhookBodyBytesStr = process.env.GATEWAY_MAX_WEBHOOK_BODY_BYTES;
+  let maxWebhookBodyBytes: number | undefined;
+  if (maxWebhookBodyBytesStr) {
+    const parsed = Number.parseInt(maxWebhookBodyBytesStr, 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      maxWebhookBodyBytes = parsed;
+    }
+  }
+
   const server = createGatewayServer({
     client,
     taskQueue: TASK_QUEUE,
@@ -54,6 +63,7 @@ async function main(): Promise<void> {
     triggerLabel: process.env.TRIGGER_LABEL ?? DEFAULT_TRIGGER_LABEL,
     buildScm,
     managedProjectDeps,
+    maxWebhookBodyBytes,
   });
 
   const port = Number(process.env.PORT ?? 3000);

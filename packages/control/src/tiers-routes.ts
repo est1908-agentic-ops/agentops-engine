@@ -1,7 +1,7 @@
 import { ModelRefSchema, z } from '@agentops/contracts';
 import type { IncomingMessage } from 'node:http';
 import type { PostgresTierStore } from '@agentops/activities';
-import { readJsonBody, type HandlerResponse } from './handler-util';
+import { readJsonBody, isPayloadTooLarge, DEFAULT_MAX_BODY_BYTES, type HandlerResponse } from './handler-util';
 
 // The full tier table: tier name -> ordered ModelRef[]. PUT replaces it wholesale.
 const TiersTableSchema = z.record(z.string().min(1), z.array(ModelRefSchema));
@@ -57,7 +57,7 @@ export function validateTiersTable(tiers: TiersTableInput): string | null {
   return null;
 }
 
-export async function handleListTiers(deps: { tierStore?: PostgresTierStore }): Promise<HandlerResponse> {
+export async function handleListTiers(deps: { tierStore?: PostgresTierStore; maxBodyBytes?: number }): Promise<HandlerResponse> {
   if (!deps.tierStore) {
     return { status: 503, body: { error: 'tier store unavailable (requires ENGINE_DB_HOST)' } };
   }
@@ -70,7 +70,7 @@ export async function handleListTiers(deps: { tierStore?: PostgresTierStore }): 
 }
 
 export async function handleReplaceTiers(
-  deps: { tierStore?: PostgresTierStore },
+  deps: { tierStore?: PostgresTierStore; maxBodyBytes?: number },
   req: IncomingMessage,
 ): Promise<HandlerResponse> {
   if (!deps.tierStore) {
@@ -78,8 +78,11 @@ export async function handleReplaceTiers(
   }
   let rawBody: unknown;
   try {
-    rawBody = await readJsonBody(req);
-  } catch {
+    rawBody = await readJsonBody(req, deps.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES);
+  } catch (err) {
+    if (isPayloadTooLarge(err)) {
+      return { status: 413, body: { error: 'payload too large' } };
+    }
     return { status: 400, body: { error: 'invalid JSON body' } };
   }
   const parsed = TiersTableSchema.safeParse(rawBody);

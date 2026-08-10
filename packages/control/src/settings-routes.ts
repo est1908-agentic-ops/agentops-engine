@@ -10,13 +10,14 @@ import {
 } from '@agentops/activities';
 import type { Client } from '@temporalio/client';
 import type { IncomingMessage } from 'node:http';
-import { readJsonBody, type HandlerResponse } from './handler-util';
+import { readJsonBody, isPayloadTooLarge, DEFAULT_MAX_BODY_BYTES, type HandlerResponse } from './handler-util';
 
 const SELF_HEAL_SCHEDULE_ID = 'self-heal';
 
 export interface SettingsRouteDeps {
   client: Client;
   engineSettingsStore?: PostgresEngineSettingsStore;
+  maxBodyBytes?: number;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -60,8 +61,11 @@ export async function handleUpdateSelfHealSettings(
   }
   let rawBody: unknown;
   try {
-    rawBody = await readJsonBody(req);
-  } catch {
+    rawBody = await readJsonBody(req, deps.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES);
+  } catch (err) {
+    if (isPayloadTooLarge(err)) {
+      return { status: 413, body: { error: 'payload too large' } };
+    }
     return { status: 400, body: { error: 'invalid JSON body' } };
   }
   const parsed = UpdateSelfHealSettingsRequestSchema.safeParse(rawBody);

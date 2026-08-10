@@ -23,6 +23,15 @@ import {
 import { verifyLinearSignature, isFreshLinearWebhook } from './verify-linear-signature';
 import { startDevCycleForLinearIssue } from './start-dev-cycle-for-linear-issue';
 
+const DEFAULT_MAX_WEBHOOK_BODY_BYTES = 25 * 1024 * 1024;
+
+export class PayloadTooLargeError extends Error {
+  constructor() {
+    super('payload too large');
+    this.name = 'PayloadTooLargeError';
+  }
+}
+
 export interface GatewayDeps {
   client: Client;
   taskQueue: string;
@@ -38,14 +47,69 @@ export interface GatewayDeps {
   // -- only used by tests exercising that fallback; the real gateway (main.ts)
   // always builds one.
   managedProjectDeps?: ManagedProjectRegistryDeps;
+  maxWebhookBodyBytes?: number;
 }
 
-function readRawBody(req: IncomingMessage): Promise<Buffer> {
+function readRawBody(req: IncomingMessage, maxBytes: number): Promise<Buffer> {
   return new Promise((resolve, reject) => {
+    const contentLength = req.headers['content-length'];
+    if (contentLength) {
+      const length = Number.parseInt(contentLength, 10);
+      if (!Number.isNaN(length) && length > maxBytes) {
+        reject(new PayloadTooLargeError());
+        return;
+      }
+    }
+
     const chunks: Buffer[] = [];
-    req.on('data', (chunk: Buffer) => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks)));
-    req.on('error', reject);
+    let totalBytes = 0;
+    let settled = false;
+
+    const cleanup = () => {
+      const reqWithOptionalRemoveListener = req as unknown as { removeListener?: (e: string, cb: (arg?: unknown) => void) => void };
+      if (typeof reqWithOptionalRemoveListener.removeListener === 'function') {
+        reqWithOptionalRemoveListener.removeListener('data', onData as (arg?: unknown) => void);
+        reqWithOptionalRemoveListener.removeListener('end', onEnd as (arg?: unknown) => void);
+        reqWithOptionalRemoveListener.removeListener('error', onError as (arg?: unknown) => void);
+      }
+    };
+
+    const onData = (chunk: Buffer) => {
+      totalBytes += chunk.length;
+      if (totalBytes > maxBytes) {
+        if (!settled) {
+          settled = true;
+          cleanup();
+          reject(new PayloadTooLargeError());
+          const reqWithOptionalDestroy = req as unknown as { destroy?: () => void };
+          if (typeof reqWithOptionalDestroy.destroy === 'function') {
+            reqWithOptionalDestroy.destroy();
+          }
+        }
+        return;
+      }
+      chunks.push(chunk);
+    };
+
+    const onEnd = () => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        resolve(Buffer.concat(chunks));
+      }
+    };
+
+    const onError = (err: Error) => {
+      if (!settled) {
+        settled = true;
+        cleanup();
+        reject(err);
+      }
+    };
+
+    req.on('data', onData);
+    req.on('end', onEnd);
+    req.on('error', onError);
   });
 }
 
@@ -94,7 +158,17 @@ async function handleGithubWebhook(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  const rawBody = await readRawBody(req);
+  let rawBody: Buffer;
+  try {
+    rawBody = await readRawBody(req, deps.maxWebhookBodyBytes ?? DEFAULT_MAX_WEBHOOK_BODY_BYTES);
+  } catch (err) {
+    if (err instanceof PayloadTooLargeError) {
+      res.writeHead(413).end('payload too large');
+      return;
+    }
+    throw err;
+  }
+
   const signature = req.headers['x-hub-signature-256'];
 
   if (
@@ -226,7 +300,17 @@ async function handleLinearWebhook(
   req: IncomingMessage,
   res: ServerResponse,
 ): Promise<void> {
-  const rawBody = await readRawBody(req);
+  let rawBody: Buffer;
+  try {
+    rawBody = await readRawBody(req, deps.maxWebhookBodyBytes ?? DEFAULT_MAX_WEBHOOK_BODY_BYTES);
+  } catch (err) {
+    if (err instanceof PayloadTooLargeError) {
+      res.writeHead(413).end('payload too large');
+      return;
+    }
+    throw err;
+  }
+
   const signature = req.headers['linear-signature'];
 
   if (
