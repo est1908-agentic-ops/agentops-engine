@@ -2,6 +2,7 @@ import {
   AgentScheduleSummarySchema,
   ListAgentSchedulesResponseSchema,
   TriggerAgentResponseSchema,
+  isAgentScheduleId,
 } from '@agentops/contracts';
 import type { ControlDeps } from './create-control-server';
 import type { HandlerResponse } from './handler-util';
@@ -13,7 +14,7 @@ export async function handleListAgents(deps: ControlDeps): Promise<HandlerRespon
   if (lister) {
     for await (const s of lister()) {
       const id = (s as any).scheduleId as string | undefined;
-      if (!id || !id.startsWith('agent:')) continue;
+      if (!id || !isAgentScheduleId(id)) continue;
       const memo = (s as any).memo ?? {};
       const cron =
         (s as any)?.spec?.cronExpressions?.[0] ??
@@ -37,6 +38,9 @@ export async function handleListAgents(deps: ControlDeps): Promise<HandlerRespon
 }
 
 export async function handleTriggerAgent(deps: ControlDeps, scheduleId: string): Promise<HandlerResponse> {
+  if (!isAgentScheduleId(scheduleId)) {
+    return { status: 404, body: { error: `no schedule "${scheduleId}"` } };
+  }
   const handle = (deps.client.schedule as any).getHandle(scheduleId);
   try {
     await handle.trigger();
