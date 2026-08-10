@@ -1,6 +1,9 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import type { TaskInput } from '@agentops/contracts';
 
+const handlers = new Map<string, Function>();
+const logMock = { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() };
+
 const {
   labelIssue,
   unlabelIssue,
@@ -98,8 +101,11 @@ vi.mock('@temporalio/workflow', () => ({
   condition: vi.fn().mockResolvedValue(undefined),
   sleep: vi.fn().mockResolvedValue(undefined),
   defineQuery: vi.fn(() => 'stateQuery'),
-  defineSignal: vi.fn(() => 'signal'),
-  setHandler: vi.fn(),
+  defineSignal: vi.fn((name: string) => name),
+  setHandler: vi.fn((sig: string, handler: Function) => {
+    handlers.set(sig, handler);
+  }),
+  log: logMock,
   patched,
   startChild,
   trace: { getActiveSpan: () => ({ setAttributes: vi.fn() }) },
@@ -207,6 +213,7 @@ describe('devCycle agent:working label lifecycle', () => {
 describe('devCycle shared prLanding handoff', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    handlers.clear();
     vi.mocked(patched).mockReturnValue(true);
     vi.mocked(startChild).mockResolvedValue({
       result: vi.fn().mockResolvedValue({ outcome: 'merged' }),
@@ -238,5 +245,128 @@ describe('devCycle shared prLanding handoff', () => {
     expect(cleanupWorkspace).not.toHaveBeenCalled();
     expect(result.landingOutcome).toBe('merged');
     expect(result.status).toBe('done');
+  });
+});
+
+describe('devCycle child-signal forwarding', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    handlers.clear();
+    logMock.warn.mockClear();
+    vi.mocked(patched).mockReturnValue(true);
+  });
+
+  it('cancel forwarded to an already-closed child does not reject', async () => {
+    const resultDeferred: { resolve?: (val: { outcome: 'merged' }) => void } = {};
+    const resultPromise = new Promise<{ outcome: 'merged' }>((resolve) => {
+      resultDeferred.resolve = resolve;
+    });
+
+    vi.mocked(startChild).mockResolvedValue({
+      result: vi.fn(() => resultPromise),
+      signal: vi.fn().mockRejectedValue(new Error('child already completed')),
+    });
+
+    const unhandledRejections: unknown[] = [];
+    const originalHandler = process.listeners('unhandledRejection')[0];
+    process.on('unhandledRejection', (reason) => {
+      unhandledRejections.push(reason);
+    });
+
+    try {
+      const devCyclePromise = devCycle({
+        taskId: 't',
+        project: 'p',
+        repo: 'o/r',
+        issueRef: 'o/r#5',
+        goal: 'fix',
+        config,
+      });
+
+      // Let the workflow run to the point where landingChild is set
+      await Promise.resolve();
+
+      const cancelHandler = handlers.get('cancel');
+      expect(cancelHandler).toBeDefined();
+      cancelHandler?.();
+
+      // Let the signal rejection be handled
+      await Promise.resolve();
+
+      resultDeferred.resolve?.({ outcome: 'merged' });
+      const result = await devCyclePromise;
+
+      expect(result.landingOutcome).toBe('merged');
+      expect(result.status).toBe('done');
+      expect(unhandledRejections).toHaveLength(0);
+      expect(logMock.warn).toHaveBeenCalledWith(
+        'failed to forward signal to prLanding child',
+        expect.objectContaining({
+          signalName: 'cancel',
+        }),
+      );
+    } finally {
+      process.removeAllListeners('unhandledRejection');
+      if (originalHandler) {
+        process.on('unhandledRejection', originalHandler);
+      }
+    }
+  });
+
+  it('resume forwarded to an already-closed child does not reject', async () => {
+    const resultDeferred: { resolve?: (val: { outcome: 'merged' }) => void } = {};
+    const resultPromise = new Promise<{ outcome: 'merged' }>((resolve) => {
+      resultDeferred.resolve = resolve;
+    });
+
+    vi.mocked(startChild).mockResolvedValue({
+      result: vi.fn(() => resultPromise),
+      signal: vi.fn().mockRejectedValue(new Error('child already completed')),
+    });
+
+    const unhandledRejections: unknown[] = [];
+    const originalHandler = process.listeners('unhandledRejection')[0];
+    process.on('unhandledRejection', (reason) => {
+      unhandledRejections.push(reason);
+    });
+
+    try {
+      const devCyclePromise = devCycle({
+        taskId: 't',
+        project: 'p',
+        repo: 'o/r',
+        issueRef: 'o/r#5',
+        goal: 'fix',
+        config,
+      });
+
+      // Let the workflow run to the point where landingChild is set
+      await Promise.resolve();
+
+      const resumeHandler = handlers.get('resume');
+      expect(resumeHandler).toBeDefined();
+      resumeHandler?.();
+
+      // Let the signal rejection be handled
+      await Promise.resolve();
+
+      resultDeferred.resolve?.({ outcome: 'merged' });
+      const result = await devCyclePromise;
+
+      expect(result.landingOutcome).toBe('merged');
+      expect(result.status).toBe('done');
+      expect(unhandledRejections).toHaveLength(0);
+      expect(logMock.warn).toHaveBeenCalledWith(
+        'failed to forward signal to prLanding child',
+        expect.objectContaining({
+          signalName: 'resume',
+        }),
+      );
+    } finally {
+      process.removeAllListeners('unhandledRejection');
+      if (originalHandler) {
+        process.on('unhandledRejection', originalHandler);
+      }
+    }
   });
 });
