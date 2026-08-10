@@ -1,10 +1,9 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest';
 import type { TaskInput } from '@agentops/contracts';
 
-const handlers = new Map<string, Function>();
-const logMock = { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() };
-
 const {
+  handlers,
+  logMock,
   labelIssue,
   unlabelIssue,
   getIssue,
@@ -20,6 +19,8 @@ const {
   patched,
   startChild,
 } = vi.hoisted(() => {
+  const handlers = new Map<string, () => void>();
+  const logMock = { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() };
   const runAgentFn = vi.fn().mockImplementation(async (req: { stage: string }) => {
     const outputs: Record<string, string> = {
       context: 'ctx',
@@ -39,6 +40,8 @@ const {
     };
   });
   return {
+    handlers,
+    logMock,
     labelIssue: vi.fn().mockResolvedValue(undefined),
     unlabelIssue: vi.fn().mockResolvedValue(undefined),
     getIssue: vi.fn().mockResolvedValue({ ref: 'o/r#5', title: 'fix', body: '', labels: [] }),
@@ -102,7 +105,7 @@ vi.mock('@temporalio/workflow', () => ({
   sleep: vi.fn().mockResolvedValue(undefined),
   defineQuery: vi.fn(() => 'stateQuery'),
   defineSignal: vi.fn((name: string) => name),
-  setHandler: vi.fn((sig: string, handler: Function) => {
+  setHandler: vi.fn((sig: string, handler: () => void) => {
     handlers.set(sig, handler);
   }),
   log: logMock,
@@ -284,7 +287,9 @@ describe('devCycle child-signal forwarding', () => {
       });
 
       // Let the workflow run to the point where landingChild is set
-      await Promise.resolve();
+      for (let i = 0; i < 50; i++) {
+        await Promise.resolve();
+      }
 
       const cancelHandler = handlers.get('cancel');
       expect(cancelHandler).toBeDefined();
@@ -341,7 +346,9 @@ describe('devCycle child-signal forwarding', () => {
       });
 
       // Let the workflow run to the point where landingChild is set
-      await Promise.resolve();
+      for (let i = 0; i < 50; i++) {
+        await Promise.resolve();
+      }
 
       const resumeHandler = handlers.get('resume');
       expect(resumeHandler).toBeDefined();
