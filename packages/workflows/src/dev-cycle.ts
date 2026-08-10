@@ -577,6 +577,29 @@ interface BuildPrBodyInput {
   findingsSummary: string;
 }
 
+/**
+ * Linear's GitHub integration only auto-links issue identifiers written as
+ * `Fixes: TEAM-123` (or the same magic words without a colon). The engine's
+ * tracker tag `linear:TEAM-123` is required for TrackerPort routing, but must
+ * not appear in the PR body -- `Fixes linear:DX-1` is ignored by Linear.
+ * GitHub issue refs (`owner/repo#n`) stay as-is.
+ */
+export function formatFixesLine(issueRef: string): string {
+  const identifier = issueRef.startsWith('linear:') ? issueRef.slice('linear:'.length) : issueRef;
+  return `Fixes: ${identifier}\n\n`;
+}
+
+/**
+ * Prefer the full tracker issue body under ## Problem. The previous 10-line /
+ * 700-char excerpt routinely cut Rollbar investigation reports mid-heading
+ * (right after "## What happened"), leaving a useless "(truncated)" stub.
+ */
+export function formatProblemSection(issueBody: string | undefined, goal: string): string {
+  const source = (issueBody ?? '').trim();
+  if (source) return `## Problem\n\n${source}\n\n`;
+  return `## Problem\n\n${goal}\n\n`;
+}
+
 function buildRichPrBody(input: BuildPrBodyInput): string {
   const {
     taskId,
@@ -592,16 +615,9 @@ function buildRichPrBody(input: BuildPrBodyInput): string {
     findingsSummary,
   } = input;
 
-  const fixesLine = issueRef ? `Fixes ${issueRef}\n\n` : '';
+  const fixesLine = issueRef ? formatFixesLine(issueRef) : '';
 
-  const problemSection = issueBody
-    ? (() => {
-        const lines = issueBody.split(/\r?\n/);
-        const excerpt = lines.slice(0, 10).join('\n').trim();
-        const truncated = lines.length > 10 || excerpt.length > 700;
-        return `## Problem\n\n> ${excerpt}${truncated ? '\n\n(truncated)' : ''}\n\n`;
-      })()
-    : `## Problem\n\n${goal}\n\n`;
+  const problemSection = formatProblemSection(issueBody, goal);
 
   const brainstorm = extractBrainstormSummary(designContent);
 

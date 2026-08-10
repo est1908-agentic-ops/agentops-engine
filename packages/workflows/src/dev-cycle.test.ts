@@ -118,7 +118,7 @@ vi.mock('@temporalio/workflow', () => ({
   },
 }));
 
-import { devCycle } from './dev-cycle';
+import { devCycle, formatFixesLine, formatProblemSection } from './dev-cycle';
 
 const config: TaskInput['config'] = {
   fastVerifyCommands: [],
@@ -375,5 +375,114 @@ describe('devCycle child-signal forwarding', () => {
         process.on('unhandledRejection', originalHandler);
       }
     }
+  });
+});
+
+
+describe('formatFixesLine', () => {
+  it('uses Fixes: TEAM-123 so Linear\'s GitHub integration can link the issue', () => {
+    expect(formatFixesLine('linear:DX-854')).toBe('Fixes: DX-854\n\n');
+  });
+
+  it('keeps GitHub issue refs as-is under the same Fixes: prefix', () => {
+    expect(formatFixesLine('o/r#5')).toBe('Fixes: o/r#5\n\n');
+  });
+});
+
+describe('formatProblemSection', () => {
+  it('includes the full multi-section issue body without a truncated stub', () => {
+    const body = [
+      '> badge line',
+      '',
+      '> ⚡ **TL;DR** — something broke.',
+      '',
+      '**Rollbar project:** employee-hub',
+      '',
+      '---',
+      '',
+      '## 🔍 What happened',
+      '',
+      '- The focus effect ran on a detached node.',
+      '- Login swaps the tree twice before mount.',
+      '',
+      '## 👥 Who is affected',
+      '',
+      '- Safari users on /login.',
+      '',
+      '## 🧠 Why it happens',
+      '',
+      '- Missing isConnected guard.',
+      '',
+      '## 🔧 Possible fix',
+      '',
+      '- Guard focus with isConnected.',
+    ].join('\n');
+    const section = formatProblemSection(body, 'fallback goal');
+    expect(section).toContain('## Problem');
+    expect(section).toContain('## 🔍 What happened');
+    expect(section).toContain('- The focus effect ran on a detached node.');
+    expect(section).toContain('## 🔧 Possible fix');
+    expect(section).not.toContain('(truncated)');
+  });
+
+  it('falls back to the goal when the issue body is empty', () => {
+    expect(formatProblemSection('', 'goal text')).toBe('## Problem\n\ngoal text\n\n');
+    expect(formatProblemSection(undefined, 'goal text')).toBe('## Problem\n\ngoal text\n\n');
+  });
+});
+
+describe('devCycle PR body for Linear-linked rollbar autofix', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    handlers.clear();
+    vi.mocked(patched).mockReturnValue(false);
+    vi.mocked(getIssue).mockResolvedValue({
+      ref: 'linear:DX-854',
+      title: 'NotFoundError',
+      body: [
+        '🔴 **Low confidence**',
+        '',
+        '> ⚡ **TL;DR** — focus on detached node.',
+        '',
+        '**Rollbar project:** employee-hub',
+        '',
+        '---',
+        '',
+        '## 🔍 What happened',
+        '',
+        '- autoFocus effect called focus without isConnected.',
+        '',
+        '## 👥 Who is affected',
+        '',
+        '- WebKit login users.',
+        '',
+        '## 🧠 Why it happens',
+        '',
+        '- Detached DOM node.',
+        '',
+        '## 🔧 Possible fix',
+        '',
+        '- Guard with isConnected.',
+      ].join('\n'),
+      labels: [],
+    });
+  });
+
+  it('opens a PR that links Linear with Fixes: DX-n and keeps What happened intact', async () => {
+    await devCycle({
+      taskId: 'rollbar-autofix-employee-hub-1796617949',
+      project: 'employee-hub-monorepo',
+      repo: 'flair-hr/employee-hub-monorepo',
+      issueRef: 'linear:DX-854',
+      goal: 'fix(employee-hub): Rollbar item 1796617949',
+      config,
+    });
+    const call = vi.mocked(openPr).mock.calls.at(-1)?.[0];
+    expect(call).toBeDefined();
+    expect(call!.body.startsWith('Fixes: DX-854\n\n')).toBe(true);
+    expect(call!.body).not.toContain('Fixes linear:DX-854');
+    expect(call!.body).toContain('## 🔍 What happened');
+    expect(call!.body).toContain('- autoFocus effect called focus without isConnected.');
+    expect(call!.body).not.toContain('(truncated)');
   });
 });
