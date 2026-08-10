@@ -1,5 +1,11 @@
 import { z } from 'zod';
 
+export const AGENT_SCHEDULE_ID_PREFIX = 'agent:';
+
+export function isAgentScheduleId(id: string): boolean {
+  return id.startsWith(AGENT_SCHEDULE_ID_PREFIX);
+}
+
 export const AgentScheduleSummarySchema = z.object({
   scheduleId: z.string().min(1),
   project: z.string().min(1),

@@ -651,10 +651,12 @@ describe('createControlServer agents API', () => {
   let server: ReturnType<typeof createControlServer>;
   let port: number;
   let trigger: ReturnType<typeof vi.fn>;
+  let getHandle: ReturnType<typeof vi.fn>;
   let deps: ControlDeps;
 
   beforeEach(() => {
     trigger = vi.fn().mockResolvedValue(undefined);
+    getHandle = vi.fn(() => ({ trigger }));
     const list = async function* () {
       yield {
         scheduleId: 'agent:acme:nb',
@@ -667,7 +669,7 @@ describe('createControlServer agents API', () => {
     deps = {
       client: {
         workflow: { start: vi.fn(), list: async function* () {}, getHandle: vi.fn() },
-        schedule: { list, getHandle: () => ({ trigger }) },
+        schedule: { list, getHandle },
       } as never,
       taskQueue: 'agentops-engine',
       namespace: 'default',
@@ -705,7 +707,35 @@ describe('createControlServer agents API', () => {
       headers: CRUD_HEADERS,
     });
     expect(ok.status).toBe(202);
+    expect(getHandle).toHaveBeenCalled();
     expect(trigger).toHaveBeenCalled();
+  });
+
+  it('POST /api/agents/reconcile:all/run returns 404 without calling getHandle', async () => {
+    getHandle.mockClear();
+    trigger.mockClear();
+    const res = await fetch(
+      `http://127.0.0.1:${port}/api/agents/${encodeURIComponent('reconcile:all')}/run`,
+      {
+        method: 'POST',
+        headers: CRUD_HEADERS,
+      },
+    );
+    expect(res.status).toBe(404);
+    expect(getHandle).not.toHaveBeenCalled();
+    expect(trigger).not.toHaveBeenCalled();
+  });
+
+  it('POST /api/agents/self-heal/run returns 404 without calling getHandle', async () => {
+    getHandle.mockClear();
+    trigger.mockClear();
+    const res = await fetch(`http://127.0.0.1:${port}/api/agents/${encodeURIComponent('self-heal')}/run`, {
+      method: 'POST',
+      headers: CRUD_HEADERS,
+    });
+    expect(res.status).toBe(404);
+    expect(getHandle).not.toHaveBeenCalled();
+    expect(trigger).not.toHaveBeenCalled();
   });
 
   it('POST /api/agents/:id/run returns 401 with no token when CRUD token is unconfigured (fail-closed regression)', async () => {
