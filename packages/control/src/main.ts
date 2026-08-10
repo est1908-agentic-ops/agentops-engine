@@ -104,17 +104,16 @@ async function main(): Promise<void> {
   } else {
     console.log('agentops control: /api/budgets disabled (no ENGINE_DB_HOST)');
   }
-  // Read-only: /api/projects and /api/registry/repos always work (no gating,
-  // no schema to ensure) -- they read a mounted ConfigMap dir, not a DB.
+  // All /api/* routes are gated by the control-API token.
   console.log('agentops control: /api/projects (read-only) serving from ' + (process.env.MANAGED_PROJECTS_DIR ?? '/etc/managed-projects'));
   const projectCrudAuthToken = process.env.CONTROL_CRUD_TOKEN;
   if (projectCrudAuthToken) {
     console.log(
-      'agentops control: mutating routes (platform/devcycle run-starts, chats, tiers PUT, self-heal PUT, agent triggers) are token-protected (CONTROL_CRUD_TOKEN set)',
+      'agentops control: all /api/* routes (reads and writes) require CONTROL_CRUD_TOKEN; /healthz and static assets remain open',
     );
   } else {
     console.warn(
-      'agentops control: CONTROL_CRUD_TOKEN is not set -- all mutating routes (platform/devcycle run-starts, chats, tiers PUT, self-heal PUT, agent triggers) fail-closed with 401',
+      'agentops control: CONTROL_CRUD_TOKEN is not set -- all /api/* routes (reads and writes) fail-closed with 401; only /healthz and static assets are served',
     );
   }
 
