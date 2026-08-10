@@ -489,8 +489,23 @@ describe('GithubScmPort — getPrFeedback', () => {
     status: 403,
   });
 
-  it('degrades to unreadable (never throws) when BOTH check-runs and statuses are inaccessible (403)', async () => {
-    const scm = setupCi({ checks: forbidden, status: forbidden });
+  it('degrades to unreadable (never throws) when Checks REST, Statuses REST, and GraphQL rollup are all inaccessible', async () => {
+    const client = fakeClient();
+    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: defaultPrData(),
+    });
+    (client.rest.checks.listForRef as ReturnType<typeof vi.fn>).mockRejectedValue(forbidden);
+    (client.rest.repos.getCombinedStatusForRef as ReturnType<typeof vi.fn>).mockRejectedValue(
+      forbidden,
+    );
+    (client.graphql as ReturnType<typeof vi.fn>).mockImplementation(async (query: string) => {
+      if (query.includes('statusCheckRollup')) {
+        throw forbidden;
+      }
+      return { repository: { pullRequest: { reviewThreads: { nodes: [] } } } };
+    });
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
     const feedback = await scm.getPrFeedback('octocat/hello-world#7');
     expect(feedback.ciStatus).toBe('unreadable');
   });
