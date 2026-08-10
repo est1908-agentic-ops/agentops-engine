@@ -22,8 +22,8 @@ function makeExecution(overrides: Record<string, unknown> = {}) {
   };
 }
 
-async function getJson(port: number, path: string) {
-  const res = await fetch(`http://127.0.0.1:${port}${path}`);
+async function getJson(port: number, path: string, headers?: Record<string, string>) {
+  const res = await fetch(`http://127.0.0.1:${port}${path}`, headers ? { headers } : undefined);
   const body: unknown = await res.json();
   return { status: res.status, body };
 }
@@ -193,7 +193,7 @@ describe('createControlServer', () => {
         yield makeExecution({ memo: { prompt: 'a'.repeat(150) } });
       });
       await listen();
-      const { status, body } = await getJson(port, '/api/platform/runs');
+      const { status, body } = await getJson(port, '/api/platform/runs', CRUD_HEADERS);
       expect(status).toBe(200);
       expect(body).toHaveLength(1);
       const items = body as Array<{ workflowId: string; promptSnippet: string }>;
@@ -208,8 +208,33 @@ describe('createControlServer', () => {
         yield makeExecution({ workflowId: 'platform-3' });
       });
       await listen();
-      const { body } = await getJson(port, '/api/platform/runs?limit=2');
+      const { body } = await getJson(port, '/api/platform/runs?limit=2', CRUD_HEADERS);
       expect(body).toHaveLength(2);
+    });
+
+    it('responds 401 when no token is present', async () => {
+      list.mockImplementation(async function* () {
+        yield makeExecution();
+      });
+      await listen();
+      const { status } = await getJson(port, '/api/platform/runs');
+      expect(status).toBe(401);
+      expect(list).not.toHaveBeenCalled();
+    });
+
+    it('responds 401 with a wrong token', async () => {
+      await listen();
+      const { status } = await getJson(port, '/api/platform/runs', { 'x-control-crud-token': 'wrong' });
+      expect(status).toBe(401);
+      expect(list).not.toHaveBeenCalled();
+    });
+
+    it('responds 401 when token is unconfigured (fail-closed)', async () => {
+      delete deps.projectCrudAuthToken;
+      await listen();
+      const { status } = await getJson(port, '/api/platform/runs', CRUD_HEADERS);
+      expect(status).toBe(401);
+      expect(list).not.toHaveBeenCalled();
     });
   });
 
@@ -224,7 +249,7 @@ describe('createControlServer', () => {
         result: vi.fn().mockResolvedValue({ summary: 'all quiet', actionsTaken: [], childWorkflows: [] }),
       });
       await listen();
-      const { status, body } = await getJson(port, '/api/platform/runs/platform-1');
+      const { status, body } = await getJson(port, '/api/platform/runs/platform-1', CRUD_HEADERS);
       const detail = body as {
         status: string;
         prompt: string;
@@ -244,7 +269,7 @@ describe('createControlServer', () => {
         result: vi.fn(),
       });
       await listen();
-      const { body } = await getJson(port, '/api/platform/runs/platform-1');
+      const { body } = await getJson(port, '/api/platform/runs/platform-1', CRUD_HEADERS);
       const detail = body as { status: string; result?: unknown; error?: string };
       expect(detail.status).toBe('RUNNING');
       expect(detail.result).toBeUndefined();
@@ -254,7 +279,7 @@ describe('createControlServer', () => {
     it('responds 404 when describe() throws (unknown workflowId)', async () => {
       getHandle.mockReturnValue({ describe: vi.fn().mockRejectedValue(new Error('not found')), result: vi.fn() });
       await listen();
-      const { status } = await getJson(port, '/api/platform/runs/does-not-exist');
+      const { status } = await getJson(port, '/api/platform/runs/does-not-exist', CRUD_HEADERS);
       expect(status).toBe(404);
     });
 
@@ -264,7 +289,7 @@ describe('createControlServer', () => {
         result: vi.fn().mockResolvedValue({ nope: true }),
       });
       await listen();
-      const { status, body } = await getJson(port, '/api/platform/runs/platform-1');
+      const { status, body } = await getJson(port, '/api/platform/runs/platform-1', CRUD_HEADERS);
       const detail = body as { result?: unknown; error?: string };
       expect(status).toBe(200);
       expect(detail.result).toBeUndefined();
@@ -277,10 +302,33 @@ describe('createControlServer', () => {
         result: vi.fn(),
       });
       await listen();
-      const { body } = await getJson(port, '/api/platform/runs/platform-1');
+      const { body } = await getJson(port, '/api/platform/runs/platform-1', CRUD_HEADERS);
       const detail = body as { status: string; error: string };
       expect(detail.status).toBe('FAILED');
       expect(detail.error).toContain('FAILED');
+    });
+
+    it('responds 401 when no token is present', async () => {
+      getHandle.mockReturnValue({ describe: vi.fn().mockResolvedValue({ runId: 'run-1', status: { code: 1, name: 'RUNNING' }, memo: {} } as never), result: vi.fn() });
+      await listen();
+      const { status } = await getJson(port, '/api/platform/runs/platform-1');
+      expect(status).toBe(401);
+      expect(getHandle).not.toHaveBeenCalled();
+    });
+
+    it('responds 401 with a wrong token', async () => {
+      await listen();
+      const { status } = await getJson(port, '/api/platform/runs/platform-1', { 'x-control-crud-token': 'wrong' });
+      expect(status).toBe(401);
+      expect(getHandle).not.toHaveBeenCalled();
+    });
+
+    it('responds 401 when token is unconfigured (fail-closed)', async () => {
+      delete deps.projectCrudAuthToken;
+      await listen();
+      const { status } = await getJson(port, '/api/platform/runs/platform-1', CRUD_HEADERS);
+      expect(status).toBe(401);
+      expect(getHandle).not.toHaveBeenCalled();
     });
   });
 
@@ -291,14 +339,14 @@ describe('createControlServer', () => {
     ]);
     await listen();
 
-    const { status, body } = await getJson(port, '/api/registry/repos');
+    const { status, body } = await getJson(port, '/api/registry/repos', CRUD_HEADERS);
     expect(status).toBe(200);
     expect(body).toEqual({ repos: ['est1908/agentops-engine', 'est1908/agentops-platform'] });
   });
 
   it('GET /api/registry/repos returns no hints when no managed-project store is configured', async () => {
     await listen();
-    const { status, body } = await getJson(port, '/api/registry/repos');
+    const { status, body } = await getJson(port, '/api/registry/repos', CRUD_HEADERS);
     expect(status).toBe(200);
     expect(body).toEqual({ repos: [] });
   });
@@ -409,7 +457,7 @@ describe('createControlServer', () => {
           yield makeExecution({ workflowId: 'prompt-engine-t1', memo: { prompt: 'add a widget' } });
         });
         await listen();
-        const { status, body } = await getJson(port, '/api/devcycle/runs');
+        const { status, body } = await getJson(port, '/api/devcycle/runs', CRUD_HEADERS);
         expect(status).toBe(200);
         const items = body as Array<{ workflowId: string; promptSnippet?: string }>;
         expect(items[0].workflowId).toBe('prompt-engine-t1');
@@ -441,7 +489,7 @@ describe('createControlServer', () => {
           result: vi.fn(),
         });
         await listen();
-        const { status, body } = await getJson(port, '/api/devcycle/runs/prompt-engine-t1');
+        const { status, body } = await getJson(port, '/api/devcycle/runs/prompt-engine-t1', CRUD_HEADERS);
         const detail = body as { status: string; prompt: string; state?: { stage: string } };
         expect(status).toBe(200);
         expect(detail.status).toBe('RUNNING');
@@ -456,7 +504,7 @@ describe('createControlServer', () => {
           result: vi.fn(),
         });
         await listen();
-        const { status, body } = await getJson(port, '/api/devcycle/runs/prompt-engine-t1');
+        const { status, body } = await getJson(port, '/api/devcycle/runs/prompt-engine-t1', CRUD_HEADERS);
         const detail = body as { state?: unknown; error?: string };
         expect(status).toBe(200);
         expect(detail.state).toBeUndefined();
@@ -470,7 +518,7 @@ describe('createControlServer', () => {
           result: vi.fn().mockResolvedValue({ ...RUNNING_STATE, stage: 'done', status: 'done', prRef: 'pr-1' }),
         });
         await listen();
-        const { body } = await getJson(port, '/api/devcycle/runs/prompt-engine-t1');
+        const { body } = await getJson(port, '/api/devcycle/runs/prompt-engine-t1', CRUD_HEADERS);
         const detail = body as { state?: { prRef: string | null }; error?: string };
         expect(detail.state?.prRef).toBe('pr-1');
         expect(detail.error).toBeUndefined();
@@ -483,7 +531,7 @@ describe('createControlServer', () => {
           result: vi.fn().mockResolvedValue({ nope: true }),
         });
         await listen();
-        const { status, body } = await getJson(port, '/api/devcycle/runs/prompt-engine-t1');
+        const { status, body } = await getJson(port, '/api/devcycle/runs/prompt-engine-t1', CRUD_HEADERS);
         const detail = body as { state?: unknown; error?: string };
         expect(status).toBe(200);
         expect(detail.state).toBeUndefined();
@@ -493,7 +541,7 @@ describe('createControlServer', () => {
       it('responds 404 when describe() throws', async () => {
         getHandle.mockReturnValue({ describe: vi.fn().mockRejectedValue(new Error('not found')), query: vi.fn(), result: vi.fn() });
         await listen();
-        const { status } = await getJson(port, '/api/devcycle/runs/nope');
+        const { status } = await getJson(port, '/api/devcycle/runs/nope', CRUD_HEADERS);
         expect(status).toBe(404);
       });
     });
@@ -501,7 +549,7 @@ describe('createControlServer', () => {
     describe('GET /api/devcycle/targets', () => {
       it('returns an empty target list when no managed-project store is configured', async () => {
         await listen();
-        const { status, body } = await getJson(port, '/api/devcycle/targets');
+        const { status, body } = await getJson(port, '/api/devcycle/targets', CRUD_HEADERS);
         expect(status).toBe(200);
         expect(body).toEqual({ targets: [] });
       });
@@ -512,7 +560,7 @@ describe('createControlServer', () => {
           { repo: 'acme/app', project: 'acme-app' },
         ]);
         await listen();
-        const { body } = await getJson(port, '/api/devcycle/targets');
+        const { body } = await getJson(port, '/api/devcycle/targets', CRUD_HEADERS);
         const { targets } = body as { targets: Array<{ repo: string; project: string }> };
         // sorted by project slug: 'acme-app' before 'engine-managed'; no static entries
         expect(targets).toEqual([
@@ -535,7 +583,7 @@ describe('createControlServer', () => {
       await rm(uiDistPath, { recursive: true, force: true });
     });
 
-    it('serves the built SPA shell when uiDistPath is configured', async () => {
+    it('serves the built SPA shell when uiDistPath is configured (non-/api GET, not gated)', async () => {
       deps.uiDistPath = uiDistPath;
       await listen();
       const res = await fetch(`http://127.0.0.1:${port}/`);
@@ -580,7 +628,7 @@ describe('createControlServer managed-project routes (read-only)', () => {
           linearCredentialSet: true,
         }),
       ]),
-      // No projectCrudAuthToken set at all -- these routes must not require one.
+      projectCrudAuthToken: CRUD_TOKEN,
     };
   });
 
@@ -588,9 +636,9 @@ describe('createControlServer managed-project routes (read-only)', () => {
     server?.close();
   });
 
-  it('GET /api/projects lists projects with no auth token, and never echoes a token', async () => {
+  it('GET /api/projects lists projects with the auth token, and never echoes a token', async () => {
     await listen();
-    const { status, body } = await getJson(port, '/api/projects');
+    const { status, body } = await getJson(port, '/api/projects', CRUD_HEADERS);
     expect(status).toBe(200);
     const projects = body as Array<Record<string, unknown>>;
     expect(projects).toHaveLength(2);
@@ -601,17 +649,17 @@ describe('createControlServer managed-project routes (read-only)', () => {
 
   it('GET /api/projects/:repo returns 200 and URL-decodes the repo, or 404', async () => {
     await listen();
-    const found = await getJson(port, `/api/projects/${encodeURIComponent('acme/web')}`);
+    const found = await getJson(port, `/api/projects/${encodeURIComponent('acme/web')}`, CRUD_HEADERS);
     expect(found.status).toBe(200);
     expect((found.body as { repo: string }).repo).toBe('acme/web');
 
-    const missing = await getJson(port, `/api/projects/${encodeURIComponent('acme/nope')}`);
+    const missing = await getJson(port, `/api/projects/${encodeURIComponent('acme/nope')}`, CRUD_HEADERS);
     expect(missing.status).toBe(404);
   });
 
   it('GET /api/projects/:repo returns the linear-tracked project shape', async () => {
     await listen();
-    const { status, body } = await getJson(port, `/api/projects/${encodeURIComponent('acme/linear-tracked')}`);
+    const { status, body } = await getJson(port, `/api/projects/${encodeURIComponent('acme/linear-tracked')}`, CRUD_HEADERS);
     expect(status).toBe(200);
     expect(body).toMatchObject({ trackerType: 'linear', linearTeamKey: 'ENG', linearCredentialSet: true });
   });
@@ -619,29 +667,77 @@ describe('createControlServer managed-project routes (read-only)', () => {
   it('GET /api/projects returns an empty list when no store is configured (no crash)', async () => {
     delete deps.managedProjectStore;
     await listen();
-    const { status, body } = await getJson(port, '/api/projects');
+    const { status, body } = await getJson(port, '/api/projects', CRUD_HEADERS);
     expect(status).toBe(200);
     expect(body).toEqual([]);
   });
 
-  it('there is no write path -- POST/PUT/DELETE all 404', async () => {
+  it('GET /api/projects responds 401 with no token', async () => {
+    await listen();
+    const { status } = await getJson(port, '/api/projects');
+    expect(status).toBe(401);
+  });
+
+  it('GET /api/projects/:repo responds 401 with no token', async () => {
+    await listen();
+    const { status } = await getJson(port, `/api/projects/${encodeURIComponent('acme/web')}`);
+    expect(status).toBe(401);
+  });
+
+  it('GET /api/projects responds 401 with a wrong token', async () => {
+    await listen();
+    const { status } = await getJson(port, '/api/projects', { 'x-control-crud-token': 'wrong' });
+    expect(status).toBe(401);
+  });
+
+  it('GET /api/projects responds 401 when token is unconfigured (fail-closed)', async () => {
+    delete deps.projectCrudAuthToken;
+    await listen();
+    const { status } = await getJson(port, '/api/projects', CRUD_HEADERS);
+    expect(status).toBe(401);
+  });
+
+  it('there is no write path -- POST/PUT/DELETE all 401 without token (gated before routing)', async () => {
     await listen();
     const post = await fetch(`http://127.0.0.1:${port}/api/projects`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ project: 'new-one', repo: 'acme/new', token: 'ghp_x' }),
     });
-    expect(post.status).toBe(404);
+    expect(post.status).toBe(401);
 
     const put = await fetch(`http://127.0.0.1:${port}/api/projects/${encodeURIComponent('acme/web')}`, {
       method: 'PUT',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ token: 'ghp_new' }),
     });
+    expect(put.status).toBe(401);
+
+    const del = await fetch(`http://127.0.0.1:${port}/api/projects/${encodeURIComponent('acme/web')}`, {
+      method: 'DELETE',
+    });
+    expect(del.status).toBe(401);
+  });
+
+  it('there is no write path -- POST/PUT/DELETE all 404 with token (route not found after gate)', async () => {
+    await listen();
+    const post = await fetch(`http://127.0.0.1:${port}/api/projects`, {
+      method: 'POST',
+      headers: { ...CRUD_HEADERS, 'content-type': 'application/json' },
+      body: JSON.stringify({ project: 'new-one', repo: 'acme/new', token: 'ghp_x' }),
+    });
+    expect(post.status).toBe(404);
+
+    const put = await fetch(`http://127.0.0.1:${port}/api/projects/${encodeURIComponent('acme/web')}`, {
+      method: 'PUT',
+      headers: { ...CRUD_HEADERS, 'content-type': 'application/json' },
+      body: JSON.stringify({ token: 'ghp_new' }),
+    });
     expect(put.status).toBe(404);
 
     const del = await fetch(`http://127.0.0.1:${port}/api/projects/${encodeURIComponent('acme/web')}`, {
       method: 'DELETE',
+      headers: CRUD_HEADERS,
     });
     expect(del.status).toBe(404);
   });
@@ -687,11 +783,21 @@ describe('createControlServer agents API', () => {
     server?.close();
   });
 
-  it('GET /api/agents lists agent:* schedules (ungated)', async () => {
-    const { status, body } = await getJson(port, '/api/agents');
+  it('GET /api/agents lists agent:* schedules', async () => {
+    const { status, body } = await getJson(port, '/api/agents', CRUD_HEADERS);
     expect(status).toBe(200);
     expect((body as { agents: Array<{ project: string }> }).agents).toHaveLength(1);
     expect((body as { agents: Array<{ project: string }> }).agents[0].project).toBe('acme');
+  });
+
+  it('GET /api/agents responds 401 without a token', async () => {
+    const { status } = await getJson(port, '/api/agents');
+    expect(status).toBe(401);
+  });
+
+  it('GET /api/agents responds 401 with a wrong token', async () => {
+    const { status } = await getJson(port, '/api/agents', { 'x-control-crud-token': 'wrong' });
+    expect(status).toBe(401);
   });
 
   it('POST /api/agents/:id/run triggers the schedule (gated: 401 without token)', async () => {
@@ -778,10 +884,20 @@ describe('createControlServer self-heal settings API', () => {
     server?.close();
   });
 
-  it('GET /api/settings/self-heal returns stored settings (ungated)', async () => {
-    const { status, body } = await getJson(port, '/api/settings/self-heal');
+  it('GET /api/settings/self-heal returns stored settings', async () => {
+    const { status, body } = await getJson(port, '/api/settings/self-heal', CRUD_HEADERS);
     expect(status).toBe(200);
     expect(body).toMatchObject({ enabled: true, cron: '*/30 * * * *', scheduleActive: true });
+  });
+
+  it('GET /api/settings/self-heal responds 401 without a token', async () => {
+    const { status } = await getJson(port, '/api/settings/self-heal');
+    expect(status).toBe(401);
+  });
+
+  it('GET /api/settings/self-heal responds 401 with a wrong token', async () => {
+    const { status } = await getJson(port, '/api/settings/self-heal', { 'x-control-crud-token': 'wrong' });
+    expect(status).toBe(401);
   });
 
   it('PUT /api/settings/self-heal updates enabled and applies the schedule (gated)', async () => {

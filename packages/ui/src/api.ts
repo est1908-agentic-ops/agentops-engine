@@ -34,11 +34,11 @@ import {
   type UpdateSelfHealSettingsRequest,
 } from '@agentops/contracts';
 
-// The managed-project CRUD routes are bearer-token-gated (CONTROL_CRUD_TOKEN).
+// All /api/* routes are bearer-token-gated (CONTROL_CRUD_TOKEN).
 // The browser holds the operator's copy of that token in localStorage and
-// sends it as an Authorization header; it never leaves the operator's
-// browser into the served app bundle. Issue #4 (Traefik basic-auth on the
-// control ingress) is still required before the ingress goes public.
+// sends it as X-Control-Crud-Token header on all reads and writes; it never
+// leaves the operator's browser into the served app bundle. Issue #4 (Traefik
+// basic-auth on the control ingress) is still required before the ingress goes public.
 const CRUD_TOKEN_STORAGE_KEY = 'agentops.controlCrudToken';
 
 export function getCrudToken(): string {
@@ -107,17 +107,19 @@ export async function startRun(input: StartRunRequest): Promise<StartRunResponse
 }
 
 export async function listRuns(limit = 20): Promise<RunListItem[]> {
-  const res = await fetch(`/api/platform/runs?limit=${limit}`);
+  const res = await fetch(`/api/platform/runs?limit=${limit}`, { headers: crudHeaders(false) });
   return parseJsonResponse(res, z.array(RunListItemSchema));
 }
 
 export async function getRun(workflowId: string): Promise<RunDetail> {
-  const res = await fetch(`/api/platform/runs/${encodeURIComponent(workflowId)}`);
+  const res = await fetch(`/api/platform/runs/${encodeURIComponent(workflowId)}`, {
+    headers: crudHeaders(false),
+  });
   return parseJsonResponse(res, RunDetailSchema);
 }
 
 export async function listRepos(): Promise<string[]> {
-  const res = await fetch('/api/registry/repos');
+  const res = await fetch('/api/registry/repos', { headers: crudHeaders(false) });
   const parsed = await parseJsonResponse(res, RepoListResponseSchema);
   return parsed.repos;
 }
@@ -134,17 +136,19 @@ export async function startDevCycleRun(input: StartDevCycleRequest): Promise<Sta
 }
 
 export async function listDevCycleRuns(limit = 20): Promise<RunListItem[]> {
-  const res = await fetch(`/api/devcycle/runs?limit=${limit}`);
+  const res = await fetch(`/api/devcycle/runs?limit=${limit}`, { headers: crudHeaders(false) });
   return parseJsonResponse(res, z.array(RunListItemSchema));
 }
 
 export async function getDevCycleRun(workflowId: string): Promise<DevCycleRunDetail> {
-  const res = await fetch(`/api/devcycle/runs/${encodeURIComponent(workflowId)}`);
+  const res = await fetch(`/api/devcycle/runs/${encodeURIComponent(workflowId)}`, {
+    headers: crudHeaders(false),
+  });
   return parseJsonResponse(res, DevCycleRunDetailSchema);
 }
 
 export async function listDevCycleTargets(): Promise<DevCycleTarget[]> {
-  const res = await fetch('/api/devcycle/targets');
+  const res = await fetch('/api/devcycle/targets', { headers: crudHeaders(false) });
   const parsed = await parseJsonResponse(res, DevCycleTargetsResponseSchema);
   return parsed.targets;
 }
@@ -181,7 +185,7 @@ export async function getProject(repo: string): Promise<ManagedProject> {
 // --- agent schedules (SP3 run-from-UI) ---
 
 export async function listAgents(): Promise<{ agents: AgentScheduleSummary[] }> {
-  const res = await fetch('/api/agents');
+  const res = await fetch('/api/agents', { headers: crudHeaders(false) });
   return parseJsonResponse(res, ListAgentSchedulesResponseSchema);
 }
 
@@ -246,7 +250,7 @@ export const TiersTableSchema = z.record(z.string().min(1), z.array(ModelRefSche
 export type TiersTable = z.infer<typeof TiersTableSchema>;
 
 export async function listTiers(): Promise<TiersTable> {
-  const res = await fetch('/api/tiers');
+  const res = await fetch('/api/tiers', { headers: crudHeaders(false) });
   return parseJsonResponse(res, TiersTableSchema);
 }
 
@@ -264,7 +268,7 @@ export async function replaceTiers(tiers: TiersTable): Promise<TiersTable> {
 export type { SelfHealSettingsResponse, UpdateSelfHealSettingsRequest };
 
 export async function getSelfHealSettings(): Promise<SelfHealSettingsResponse> {
-  const res = await fetch('/api/settings/self-heal');
+  const res = await fetch('/api/settings/self-heal', { headers: crudHeaders(false) });
   return parseJsonResponse(res, SelfHealSettingsResponseSchema);
 }
 
@@ -283,7 +287,7 @@ export async function updateSelfHealSettings(
 // --- budgets (simple slice) ---
 
 export async function getBudgets(): Promise<BudgetsResponse> {
-  const res = await fetch('/api/budgets');
+  const res = await fetch('/api/budgets', { headers: crudHeaders(false) });
   return parseJsonResponse(res, BudgetsResponseSchema);
 }
 

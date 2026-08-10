@@ -48,9 +48,8 @@ export interface ControlDeps {
   // worker/gateway/cli stopped needing them (see
   // docs/superpowers/plans/2026-07-25-engine-projects-configmap-resolver.md).
   // `GET /api/projects` and `GET /api/projects/:repo` read straight from it;
-  // there is no write path anymore, so unlike the routes below this needs no
-  // auth token -- it never exposes a token, only `credentialSet`/`tokenSecret`
-  // (a Secret *name*, not a value).
+  // all routes reading from it are gated by the control-API token (see
+  // projectCrudAuthToken below), like all other `/api/*` routes.
   managedProjectStore?: ManagedProjectStore;
   // Tier table CRUD (SP3-B). Only needs ENGINE_DB_HOST; not credential-gated
   // like managed projects (tier edits are operational, not secret-bearing).
@@ -58,18 +57,13 @@ export interface ControlDeps {
   engineSettingsStore?: PostgresEngineSettingsStore;
   // Stats reader for budgets dashboard (simple slice). Same ENGINE_DB connection.
   statsStore?: { all(): Promise<RunStats[]> };
-  // General control-mutation bearer token (sent as X-Control-Crud-Token),
-  // fail-closed (401) when unset. Originally added to gate the managed-project
-  // CRUD routes (now retired -- see managedProjectStore above), it has since
-  // been reused to gate every other mutating route control exposes: POST
-  // /api/platform/runs, POST /api/devcycle/runs, /api/platform/chats/*, PUT
-  // /api/tiers, PUT /api/settings/self-heal, and POST /api/agents/:id/run.
-  // Kept under its original name (and the CONTROL_CRUD_TOKEN env var / chart
-  // knob) deliberately: it is still live-configured in the deployed cluster
-  // (agentops-platform's engine values set projectCrudTokenSecretName) to
-  // protect those routes, so removing it here would silently 401-lock all of
-  // them. Issue #4 (Traefik basic-auth) is still required before the control
-  // ingress goes public.
+  // General control-API bearer token (sent as X-Control-Crud-Token),
+  // fail-closed (401) when unset. Gates every `/api/*` route (reads and writes),
+  // so every data-bearing endpoint requires authentication. Kept under its
+  // original name (and the CONTROL_CRUD_TOKEN env var / chart knob) deliberately:
+  // it is still live-configured in the deployed cluster (agentops-platform's
+  // engine values set projectCrudTokenSecretName), so removing it would silently
+  // 401-lock all routes. /healthz and static SPA assets (non-/api GETs) stay open.
   projectCrudAuthToken?: string;
 }
 
@@ -191,9 +185,9 @@ function authorizeControlToken(deps: ControlDeps, req: IncomingMessage): boolean
   return constantTimeTokenEqual(deps.projectCrudAuthToken, req.headers['x-control-crud-token']);
 }
 
-// Read-only -- no auth token required (see the ControlDeps.managedProjectStore
-// doc comment: nothing sensitive is exposed here anymore). No store configured
-// means an empty list / a 404, same "graceful no-op" shape handleListRepos uses.
+// Read-only (all `/api/*` routes are gated by the control-API token).
+// No store configured means an empty list / a 404, same "graceful no-op" shape
+// handleListRepos uses.
 async function handleListProjects(deps: ControlDeps): Promise<HandlerResponse> {
   const projects = deps.managedProjectStore ? await deps.managedProjectStore.list() : [];
   return { status: 200, body: projects };
@@ -214,10 +208,13 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
   if (req.method === 'GET' && pathname === '/healthz') {
     return { status: 200 };
   }
+
+  // Gate all `/api/*` routes behind the control-API token; fail-closed.
+  if (pathname.startsWith('/api/') && !authorizeControlToken(deps, req)) {
+    return { status: 401, body: { error: 'unauthorized' } };
+  }
+
   if (req.method === 'POST' && pathname === '/api/platform/runs') {
-    if (!authorizeControlToken(deps, req)) {
-      return { status: 401, body: { error: 'unauthorized' } };
-    }
     return handleStartRun(deps, req);
   }
   if (req.method === 'GET' && pathname === '/api/platform/runs') {
@@ -228,9 +225,6 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
     return handleGetRun(deps, runMatch.params.workflowId);
   }
   if (req.method === 'POST' && pathname === '/api/devcycle/runs') {
-    if (!authorizeControlToken(deps, req)) {
-      return { status: 401, body: { error: 'unauthorized' } };
-    }
     return handleStartDevCycleRun(deps, req);
   }
   if (req.method === 'GET' && pathname === '/api/devcycle/runs') {
@@ -254,15 +248,9 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
   }
   const agentRun = matchPath('/api/agents/:scheduleId/run', pathname);
   if (req.method === 'POST' && agentRun) {
-    if (!authorizeControlToken(deps, req)) {
-      return { status: 401, body: { error: 'unauthorized' } };
-    }
     return handleTriggerAgent(deps, agentRun.params.scheduleId);
   }
   if (pathname === '/api/platform/chats' || pathname.startsWith('/api/platform/chats/')) {
-    if (!authorizeControlToken(deps, req)) {
-      return { status: 401, body: { error: 'unauthorized' } };
-    }
     if (req.method === 'POST' && pathname === '/api/platform/chats') {
       return handleStartChat(deps, req);
     }
@@ -291,9 +279,6 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
       return handleGetSelfHealSettings(deps);
     }
     if (req.method === 'PUT') {
-      if (!authorizeControlToken(deps, req)) {
-        return { status: 401, body: { error: 'unauthorized' } };
-      }
       return handleUpdateSelfHealSettings(deps, req);
     }
   }
@@ -301,19 +286,16 @@ async function dispatch(deps: ControlDeps, req: IncomingMessage): Promise<Handle
     if (req.method === 'GET') {
       return handleListTiers(deps);
     }
-    // PUT rewrites the whole fleet's model routing -- gate it behind the same
-    // bearer token as the other mutating routes (GET stays open). Reuses
-    // projectCrudAuthToken rather than introducing a second token: one
-    // operator secret governs all fleet-mutating writes. Issue #4 (Traefik
-    // basic-auth) is still required before the control ingress goes public.
+    // PUT rewrites the whole fleet's model routing. tierStore is feature-gated
+    // (backend must be configured); auth is gated at the /api/* level above.
     if (req.method === 'PUT') {
-      if (!deps.tierStore || !authorizeControlToken(deps, req)) {
+      if (!deps.tierStore) {
         return { status: 401, body: { error: 'unauthorized' } };
       }
       return handleReplaceTiers(deps, req);
     }
   }
-  // Read-only (see ControlDeps.managedProjectStore) -- no auth, no 503 gating.
+  // Read-only (all `/api/*` routes are gated by the control-API token).
   // The write CRUD (POST/PUT/DELETE) was retired; the console is a viewer now.
   if (req.method === 'GET' && pathname === '/api/projects') {
     return handleListProjects(deps);
