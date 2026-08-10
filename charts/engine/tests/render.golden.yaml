@@ -29,7 +29,6 @@ spec:
     - ports:
         - protocol: TCP
           port: 443
-
 ---
 # Source: engine/templates/gateway-serviceaccount.yaml
 apiVersion: v1
@@ -37,7 +36,6 @@ kind: ServiceAccount
 metadata:
   name: engine-gateway
   namespace: dev-agents
-
 ---
 # Source: engine/templates/platform-agent-serviceaccount.yaml
 apiVersion: v1
@@ -45,7 +43,6 @@ kind: ServiceAccount
 metadata:
   name: engine-platform-agent
   namespace: dev-agents
-
 ---
 # Source: engine/templates/serviceaccount.yaml
 apiVersion: v1
@@ -53,7 +50,6 @@ kind: ServiceAccount
 metadata:
   name: engine-worker
   namespace: dev-agents
-
 ---
 # Source: engine/templates/pvc.yaml
 apiVersion: v1
@@ -80,7 +76,6 @@ spec:
   resources:
     requests:
       storage: 20Gi
-
 ---
 # Source: engine/templates/platform-agent-clusterrole.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -94,7 +89,6 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets"]
     verbs: ["get", "list", "watch"]
-
 ---
 # Source: engine/templates/platform-agent-clusterrolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -109,7 +103,6 @@ subjects:
   - kind: ServiceAccount
     name: engine-platform-agent
     namespace: dev-agents
-
 ---
 # Source: engine/templates/gateway-role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -121,7 +114,6 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get"]
-
 ---
 # Source: engine/templates/role.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -142,7 +134,6 @@ rules:
   - apiGroups: [""]
     resources: ["secrets"]
     verbs: ["get"]
-
 ---
 # Source: engine/templates/gateway-rolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -158,7 +149,6 @@ subjects:
   - kind: ServiceAccount
     name: engine-gateway
     namespace: dev-agents
-
 ---
 # Source: engine/templates/rolebinding.yaml
 apiVersion: rbac.authorization.k8s.io/v1
@@ -174,7 +164,6 @@ subjects:
   - kind: ServiceAccount
     name: engine-worker
     namespace: dev-agents
-
 ---
 # Source: engine/templates/gateway-service.yaml
 apiVersion: v1
@@ -188,7 +177,6 @@ spec:
   ports:
     - port: 3000
       targetPort: 3000
-
 ---
 # Source: engine/templates/deployment.yaml
 apiVersion: apps/v1
@@ -260,6 +248,8 @@ spec:
               value: "claude-credentials"
             - name: PI_AUTH_SECRET_NAME
               value: "pi-credentials"
+            - name: GROK_AUTH_SECRET_NAME
+              value: "grok-credentials"
             - name: PLATFORM_AGENT_SERVICE_ACCOUNT
               value: "engine-platform-agent"
             - name: IMAGE_PULL_SECRET_NAME
@@ -288,7 +278,6 @@ spec:
             claimName: workspace-cache
         - name: managed-projects
           configMap: { name: managed-projects }
-
 ---
 # Source: engine/templates/gateway-deployment.yaml
 apiVersion: apps/v1

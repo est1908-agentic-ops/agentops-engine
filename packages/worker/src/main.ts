@@ -32,6 +32,7 @@ loadEnv();
 import {
   batchApiFromClient,
   createClaudeCliSpec,
+  createGrokCliSpec,
   createPiCliSpec,
   K8sJobRunner,
   ProcessCliRunner,
@@ -353,6 +354,9 @@ export function assertLiveBackendConfig(env: NodeJS.ProcessEnv): void {
   if (!env.PI_AUTH_SECRET_NAME) {
     missing.push('PI_AUTH_SECRET_NAME');
   }
+  if (!env.GROK_AUTH_SECRET_NAME) {
+    missing.push('GROK_AUTH_SECRET_NAME');
+  }
   if (missing.length > 0) {
     throw new Error(
       `refusing to start in-cluster: missing or placeholder backend config:\n- ${missing.join('\n- ')}`,
@@ -368,6 +372,7 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
     process.env.AGENT_RUNNER_IMAGE ?? 'ghcr.io/CHANGEME/agentops-engine/agent-runner:CHANGEME';
   const claudeSpec = createClaudeCliSpec({ image: agentImage });
   const piSpec = createPiCliSpec({ image: agentImage });
+  const grokSpec = createGrokCliSpec({ image: agentImage });
   if (!inCluster) {
     const claudeRateWindowLimiter = buildRateWindowLimiter('CLAUDE');
     return {
@@ -378,6 +383,7 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
         'claude',
       ),
       pi: wrapWithRateWindow(new ProcessCliRunner(piSpec), buildRateWindowLimiter('PI'), 'pi'),
+      grok: wrapWithRateWindow(new ProcessCliRunner(grokSpec), buildRateWindowLimiter('GROK'), 'grok'),
       // Same CLI/model/rate window as claude (see the in-cluster branch below for why).
       platform: wrapWithRateWindow(
         new ProcessCliRunner(claudeSpec),
@@ -395,9 +401,9 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
   return {
     stub: new StubBackend(),
     // claude and platform now share one auth secret and one rate window --
-    // see the platform entry's comment below for why. pi's stays separate:
-    // its env vars are provider-dependent (images/agent-runner/Dockerfile),
-    // not guaranteed to be the same shape as claude's.
+    // see the platform entry's comment below for why. pi and grok stay
+    // separate: their env vars are provider-dependent
+    // (images/agent-runner/Dockerfile), not the same shape as claude's.
     claude: wrapWithRateWindow(
       new K8sJobRunner(
         claudeSpec,
@@ -413,6 +419,14 @@ export function buildBackends(inCluster: boolean): Record<string, AgentBackend> 
       ),
       buildRateWindowLimiter('PI'),
       'pi',
+    ),
+    grok: wrapWithRateWindow(
+      new K8sJobRunner(
+        grokSpec,
+        buildJobRunnerOptions(batchApi, { authSecretName: process.env.GROK_AUTH_SECRET_NAME }),
+      ),
+      buildRateWindowLimiter('GROK'),
+      'grok',
     ),
     // Same CLI/model/credential/rate-window limiter as claude (they share one
     // Anthropic subscription window, deliberately -- see

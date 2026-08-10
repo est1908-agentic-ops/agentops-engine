@@ -110,6 +110,10 @@ workspace:
 
 claudeAuthSecretName: claude-credentials
 piAuthSecretName: pi-credentials
+# Native Grok Build CLI (backend: grok). Secret must contain XAI_API_KEY
+# (console.x.ai). Mounted into agent-runner Jobs the same way as
+# claude/pi credentials.
+grokAuthSecretName: grok-credentials
 
 # Empty by default -- same "chart ships no cluster assumption" pattern as
 # otelExporterOtlpEndpoint above. Unset means RateLimitFallbackBackend is a
