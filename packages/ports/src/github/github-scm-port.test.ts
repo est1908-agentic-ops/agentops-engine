@@ -2,7 +2,12 @@ import { describe, expect, it, vi } from 'vitest';
 import { ApplicationFailure } from '@temporalio/common';
 import type { GitCommandRunner } from '../git/git-command-runner';
 import type { GithubClient } from './github-client';
-import { GithubScmPort, isPermanentPushPermissionRejection } from './github-scm-port';
+import {
+  GithubScmPort,
+  isPermanentPushPermissionRejection,
+  mapStatusCheckRollupState,
+  mergeCiSignals,
+} from './github-scm-port';
 
 function defaultPrData(overrides: Record<string, unknown> = {}) {
   return {
@@ -538,12 +543,93 @@ describe('GithubScmPort — getPrFeedback', () => {
   // `unknown` (could be anything), so this must stay conservative -- unlike the
   // both-confirmed-none case above, this does NOT resolve to green, and unlike
   // a real in-progress CI it should not be conflated with `pending` either.
-  it('reports unreadable when checks are inaccessible (403) even though statuses confirm zero -- one unknown side blocks green', async () => {
-    const scm = setupCi({
-      checks: forbidden,
-      status: { data: { state: 'pending', total_count: 0 } },
+  it('reports unreadable when Checks REST and GraphQL rollup are both inaccessible -- no source can speak for CI', async () => {
+    const client = fakeClient();
+    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: defaultPrData(),
     });
+    (client.rest.checks.listForRef as ReturnType<typeof vi.fn>).mockRejectedValue(forbidden);
+    (client.rest.repos.getCombinedStatusForRef as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { state: 'pending', total_count: 0 },
+    });
+    (client.graphql as ReturnType<typeof vi.fn>).mockImplementation(async (query: string) => {
+      if (query.includes('statusCheckRollup')) {
+        throw Object.assign(new Error('Resource not accessible by personal access token'), {
+          status: 403,
+        });
+      }
+      return { repository: { pullRequest: { reviewThreads: { nodes: [] } } } };
+    });
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
     expect((await scm.getPrFeedback('octocat/hello-world#7')).ciStatus).toBe('unreadable');
+  });
+
+  it('treats Checks REST 403 + empty Statuses + empty GraphQL rollup as green (fine-grained PAT, no CI configured)', async () => {
+    const client = fakeClient();
+    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: defaultPrData(),
+    });
+    (client.rest.checks.listForRef as ReturnType<typeof vi.fn>).mockRejectedValue(forbidden);
+    (client.rest.repos.getCombinedStatusForRef as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { state: 'pending', total_count: 0 },
+    });
+    (client.graphql as ReturnType<typeof vi.fn>).mockImplementation(async (query: string) => {
+      if (query.includes('statusCheckRollup')) {
+        return { repository: { object: { statusCheckRollup: null } } };
+      }
+      return { repository: { pullRequest: { reviewThreads: { nodes: [] } } } };
+    });
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
+    expect((await scm.getPrFeedback('octocat/hello-world#7')).ciStatus).toBe('green');
+  });
+
+  // Fine-grained PATs cannot call the Checks REST API (GitHub known limitation)
+  // and usually see zero legacy statuses on Actions-only repos. GraphQL
+  // statusCheckRollup.state still works and must unstick prLanding.
+  it('uses GraphQL statusCheckRollup.state when Checks REST is 403 and Statuses are empty (fine-grained PAT)', async () => {
+    const client = fakeClient();
+    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: defaultPrData(),
+    });
+    (client.rest.checks.listForRef as ReturnType<typeof vi.fn>).mockRejectedValue(forbidden);
+    (client.rest.repos.getCombinedStatusForRef as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { state: 'pending', total_count: 0 },
+    });
+    (client.graphql as ReturnType<typeof vi.fn>).mockImplementation(async (query: string) => {
+      if (query.includes('statusCheckRollup')) {
+        return {
+          repository: { object: { statusCheckRollup: { state: 'FAILURE' } } },
+        };
+      }
+      return { repository: { pullRequest: { reviewThreads: { nodes: [] } } } };
+    });
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
+    expect((await scm.getPrFeedback('octocat/hello-world#7')).ciStatus).toBe('failed');
+  });
+
+  it('maps GraphQL statusCheckRollup SUCCESS to green when REST Checks is inaccessible', async () => {
+    const client = fakeClient();
+    (client.rest.pulls.get as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: defaultPrData(),
+    });
+    (client.rest.checks.listForRef as ReturnType<typeof vi.fn>).mockRejectedValue(forbidden);
+    (client.rest.repos.getCombinedStatusForRef as ReturnType<typeof vi.fn>).mockResolvedValue({
+      data: { state: 'pending', total_count: 0 },
+    });
+    (client.graphql as ReturnType<typeof vi.fn>).mockImplementation(async (query: string) => {
+      if (query.includes('statusCheckRollup')) {
+        return {
+          repository: { object: { statusCheckRollup: { state: 'SUCCESS' } } },
+        };
+      }
+      return { repository: { pullRequest: { reviewThreads: { nodes: [] } } } };
+    });
+    const { git } = fakeGit();
+    const scm = new GithubScmPort(client, git);
+    expect((await scm.getPrFeedback('octocat/hello-world#7')).ciStatus).toBe('green');
   });
 
   it('confirmed-zero checks combined with a real green from statuses is green', async () => {
@@ -764,5 +850,40 @@ describe('GithubScmPort — mergePr', () => {
     await expect(
       scm.mergePr({ prRef: 'octocat/hello-world#7', expectedHeadSha: 'abc123' }),
     ).rejects.toMatchObject({ status: 500 });
+  });
+});
+
+describe('mergeCiSignals', () => {
+  it('lets a real rollup signal win over Checks REST unknown + empty Statuses', () => {
+    expect(mergeCiSignals('unknown', 'none', 'failed')).toBe('failed');
+    expect(mergeCiSignals('unknown', 'none', 'green')).toBe('green');
+    expect(mergeCiSignals('unknown', 'none', 'pending')).toBe('pending');
+  });
+
+  it('treats confirmed-empty rollup as green even when Checks REST is unknown (fine-grained PAT)', () => {
+    expect(mergeCiSignals('unknown', 'none', 'none')).toBe('green');
+  });
+
+  it('stays unreadable when Checks is unknown and rollup is also unreadable', () => {
+    expect(mergeCiSignals('unknown', 'none')).toBe('unreadable');
+    expect(mergeCiSignals('unknown', 'none', 'unknown')).toBe('unreadable');
+    expect(mergeCiSignals('unknown', 'unknown', 'unknown')).toBe('unreadable');
+  });
+
+  it('REST-only confirmed-empty pair is green', () => {
+    expect(mergeCiSignals('none', 'none')).toBe('green');
+    expect(mergeCiSignals('none', 'none', 'none')).toBe('green');
+  });
+});
+
+describe('mapStatusCheckRollupState', () => {
+  it('maps GitHub StatusState enum values', () => {
+    expect(mapStatusCheckRollupState(null)).toBe('none');
+    expect(mapStatusCheckRollupState(undefined)).toBe('none');
+    expect(mapStatusCheckRollupState('SUCCESS')).toBe('green');
+    expect(mapStatusCheckRollupState('FAILURE')).toBe('failed');
+    expect(mapStatusCheckRollupState('ERROR')).toBe('failed');
+    expect(mapStatusCheckRollupState('PENDING')).toBe('pending');
+    expect(mapStatusCheckRollupState('EXPECTED')).toBe('pending');
   });
 });

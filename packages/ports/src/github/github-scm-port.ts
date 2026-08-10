@@ -30,27 +30,52 @@ const REVIEW_THREADS_QUERY = `
   }
 `;
 
-// A PR's CI state is split across two independent GitHub APIs with different
-// auth models: the Checks API (check runs -- what GitHub Actions and other Apps
-// post) and the legacy Statuses API (commit statuses). A personal access token
-// frequently CAN'T read the Checks API at all ("Resource not accessible by
-// personal access token", 403) because it's App-oriented, and a repo may report
-// via one API or the other. So getPrFeedback reads BOTH, tolerates a 403/404 on
-// either (treating that source as `unknown` rather than throwing), and merges.
-// See est1908/agents getPrFeedback 403 (2026-07-13).
+interface GraphqlStatusCheckRollupResult {
+  repository: {
+    object: {
+      statusCheckRollup: { state: string } | null;
+    } | null;
+  } | null;
+}
+
+// Aggregate only -- do NOT request rollup contexts/CheckRun nodes. Fine-grained
+// PATs can read `statusCheckRollup.state` but get FORBIDDEN on individual
+// CheckRun nodes under contexts (GitHub fine-grained PAT Checks limitation).
+const STATUS_CHECK_ROLLUP_QUERY = `
+  query($owner: String!, $repo: String!, $oid: GitObjectID!) {
+    repository(owner: $owner, name: $repo) {
+      object(oid: $oid) {
+        ... on Commit {
+          statusCheckRollup { state }
+        }
+      }
+    }
+  }
+`;
+
+// A PR's CI state is split across independent GitHub surfaces with different
+// auth models:
+//   1. REST Checks API (check runs -- what GitHub Actions and other Apps post)
+//   2. REST Statuses API (legacy commit statuses)
+//   3. GraphQL Commit.statusCheckRollup.state (aggregate over checks+statuses)
+//
+// Fine-grained PATs are documented to be unable to call the Checks REST API
+// (and cannot read rollup *contexts* / CheckRun nodes). They CAN, however, read
+// the rollup's aggregate `state` via GraphQL. Classic PATs can use REST Checks.
+// A repo may report via any subset of these surfaces, so getPrFeedback reads
+// all three in parallel, tolerates a 403/404 on each (treating that source as
+// `unknown` rather than throwing), and merges. See est1908/agents getPrFeedback
+// 403 (2026-07-13) and the fine-grained PAT Checks API limitation.
 //
 // `unknown` and `none` are both "zero signal" but mean different things and
-// merge differently: `unknown` is a source we COULDN'T read (403/404, or GitHub
-// itself defaulting an empty combined-status to "pending") -- it must never
-// become merge-ready, since the real CI could be anything. `none` is a source
-// that answered with a genuine 200 reporting zero check runs / zero statuses --
-// a confirmed fact, not a gap. When BOTH sources confirm `none`, there is no CI
-// configured for this ref at all, and nothing will ever arrive to babysit-poll
-// for, so that combination resolves to `green` instead of hanging until the
-// babysit brake trips. See est1908/agents PR #5 (2026-07-13): zero check runs
-// (Checks API 403'd -> unknown) and zero statuses (confirmed `none`) -- that
-// PR still correctly resolves to `unreadable` rather than `green`, since one
-// side remains unreadable and its real state could be anything.
+// merge differently: `unknown` is a source we COULDN'T read (403/404) -- it
+// must never alone become merge-ready, since the real CI could be anything.
+// `none` is a source that answered with a genuine empty result -- a confirmed
+// fact. When EVERY source that answered confirms `none` (and none is
+// `unknown`), there is no CI configured for this ref at all, so that
+// combination resolves to `green` instead of hanging until the babysit brake
+// trips. A Checks REST 403 + empty Statuses used to resolve to `unreadable`
+// forever on fine-grained PATs; the GraphQL rollup state closes that gap.
 type CiSignal = 'green' | 'failed' | 'pending' | 'unknown' | 'none';
 
 function isNotAccessible(err: unknown): boolean {
@@ -99,27 +124,50 @@ function mapCombinedStatus(state: string, total: number): CiSignal {
   return 'pending';
 }
 
-// Failure dominates; then pending (a real signal from the other side means CI
-// is genuinely still running -- worth waiting on); then green; two
-// confirmed-empty sources (`none`) mean no CI is configured anywhere for this
-// ref, so that combination is merge-ready too. Every remaining combination
-// necessarily involves an `unknown` paired with `none` or another `unknown`
-// (see the exhaustive case analysis: anything with `failed`/`pending`/`green`
-// is already handled above) -- i.e. neither source gave a real signal at all.
-// That's not "still running," it's "we structurally can't tell" (e.g. a token
-// that can't read the Checks API, see est1908/agents getPrFeedback 403
-// (2026-07-13)) -- retrying won't change it, so surface it distinctly as
-// `unreadable` instead of defaulting to `pending`, which would babysit-poll
-// forever on a permission problem no amount of waiting will fix.
+// Failure dominates; then pending (a real in-progress signal is worth waiting
+// on); then green; every answered source confirmed-empty (`none`) means no CI
+// is configured anywhere for this ref, so that combination is merge-ready.
+// Remaining combinations necessarily involve at least one `unknown` with no
+// real signal from any other source -- "we structurally can't tell" -- so
+// surface `unreadable` instead of defaulting to `pending` (which would
+// babysit-poll forever on a permission problem no amount of waiting will fix).
 export function mergeCiSignals(
-  a: CiSignal,
-  b: CiSignal,
+  checks: CiSignal,
+  status: CiSignal,
+  rollup: CiSignal = 'unknown',
 ): 'green' | 'failed' | 'pending' | 'unreadable' {
-  if (a === 'failed' || b === 'failed') return 'failed';
-  if (a === 'pending' || b === 'pending') return 'pending';
-  if (a === 'green' || b === 'green') return 'green';
-  if (a === 'none' && b === 'none') return 'green';
+  // Real signals dominate regardless of source. Failure beats pending beats green.
+  const signals = [checks, status, rollup];
+  if (signals.some((s) => s === 'failed')) return 'failed';
+  if (signals.some((s) => s === 'pending')) return 'pending';
+  if (signals.some((s) => s === 'green')) return 'green';
+
+  // GraphQL statusCheckRollup is GitHub's aggregate over check runs + legacy
+  // statuses. A confirmed-empty rollup means there is nothing to babysit, even
+  // when Checks REST is `unknown` (fine-grained PAT Checks API limitation).
+  if (rollup === 'none') return 'green';
+
+  // Without a readable rollup, both REST sources must confirm empty.
+  if (checks === 'none' && status === 'none') return 'green';
+
   return 'unreadable';
+}
+
+// GitHub StatusState / StatusCheckRollup state enum (GraphQL).
+export function mapStatusCheckRollupState(state: string | null | undefined): CiSignal {
+  if (state == null) return 'none'; // confirmed: no rollup (no checks/statuses on this commit)
+  switch (state.toUpperCase()) {
+    case 'SUCCESS':
+      return 'green';
+    case 'FAILURE':
+    case 'ERROR':
+      return 'failed';
+    case 'PENDING':
+    case 'EXPECTED':
+      return 'pending';
+    default:
+      return 'unknown';
+  }
 }
 
 export class GithubScmPort implements ScmPort {
@@ -249,20 +297,22 @@ export class GithubScmPort implements ScmPort {
     }
   }
 
-  // Read CI from the Checks API and the Statuses API in parallel and merge. A
-  // 403/404 on either (e.g. a PAT that can't read check runs) degrades that
-  // source to `unknown` instead of failing the whole activity; other errors
-  // (5xx/network) still propagate so Temporal's retry can absorb them.
+  // Read CI from Checks REST, Statuses REST, and GraphQL statusCheckRollup in
+  // parallel and merge. A 403/404 on any source (e.g. a fine-grained PAT that
+  // can't call the Checks REST API) degrades that source to `unknown` instead
+  // of failing the whole activity; other errors (5xx/network) still propagate
+  // so Temporal's retry can absorb them.
   private async readCiStatus(
     owner: string,
     repo: string,
     ref: string,
   ): Promise<'green' | 'failed' | 'pending' | 'unreadable'> {
-    const [checks, status] = await Promise.all([
+    const [checks, status, rollup] = await Promise.all([
       this.readCheckRuns(owner, repo, ref),
       this.readCombinedStatus(owner, repo, ref),
+      this.readStatusCheckRollup(owner, repo, ref),
     ]);
-    return mergeCiSignals(checks, status);
+    return mergeCiSignals(checks, status, rollup);
   }
 
   private async readCheckRuns(owner: string, repo: string, ref: string): Promise<CiSignal> {
@@ -282,6 +332,41 @@ export class GithubScmPort implements ScmPort {
       return mapCombinedStatus(data.state, data.total_count);
     } catch (err) {
       if (isNotAccessible(err)) return 'unknown';
+      throw err;
+    }
+  }
+
+  private async readStatusCheckRollup(
+    owner: string,
+    repo: string,
+    oid: string,
+  ): Promise<CiSignal> {
+    try {
+      const data = await this.client.graphql<GraphqlStatusCheckRollupResult>(
+        STATUS_CHECK_ROLLUP_QUERY,
+        { owner, repo, oid },
+      );
+      // Missing object usually means the mock / response has no Commit -- treat
+      // as confirmed-empty rather than unknown so REST-only test doubles still
+      // merge the same way they did before this third source existed.
+      const state = data.repository?.object?.statusCheckRollup?.state;
+      if (data.repository?.object == null) return 'none';
+      return mapStatusCheckRollupState(state);
+    } catch (err) {
+      if (isNotAccessible(err)) return 'unknown';
+      // @octokit/graphql throws GraphqlResponseError with .errors; map the
+      // fine-grained FORBIDDEN on Checks-adjacent fields the same as REST 403.
+      const errors = (err as { errors?: Array<{ type?: string; message?: string }> }).errors;
+      if (
+        Array.isArray(errors) &&
+        errors.some(
+          (e) =>
+            e.type === 'FORBIDDEN' ||
+            (e.message ?? '').includes('Resource not accessible by personal access token'),
+        )
+      ) {
+        return 'unknown';
+      }
       throw err;
     }
   }
