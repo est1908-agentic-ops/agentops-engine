@@ -13,7 +13,7 @@ import {
 } from '@agentops/contracts';
 import type { PostgresEngineSettingsStore, PostgresTierStore } from '@agentops/activities';
 import { platform } from '@agentops/workflows';
-import { listRunsByType, memoPrompt, readJsonBody, type HandlerResponse } from './handler-util';
+import { listRunsByType, memoPrompt, readJsonBody, isPayloadTooLarge, type HandlerResponse, DEFAULT_MAX_BODY_BYTES } from './handler-util';
 import {
   handleGetDevCycleRun,
   handleListDevCycleRuns,
@@ -71,13 +71,17 @@ export interface ControlDeps {
   // them. Issue #4 (Traefik basic-auth) is still required before the control
   // ingress goes public.
   projectCrudAuthToken?: string;
+  maxBodyBytes?: number;
 }
 
 async function handleStartRun(deps: ControlDeps, req: IncomingMessage): Promise<HandlerResponse> {
   let rawBody: unknown;
   try {
-    rawBody = await readJsonBody(req);
-  } catch {
+    rawBody = await readJsonBody(req, deps.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES);
+  } catch (err) {
+    if (isPayloadTooLarge(err)) {
+      return { status: 413, body: { error: 'payload too large' } };
+    }
     return { status: 400, body: { error: 'invalid JSON body' } };
   }
 

@@ -11,7 +11,7 @@ import {
 } from '@agentops/contracts';
 import { devCycle } from '@agentops/workflows';
 import type { ControlDeps } from './create-control-server';
-import { listRunsByType, memoPrompt, readJsonBody, type HandlerResponse } from './handler-util';
+import { listRunsByType, memoPrompt, readJsonBody, isPayloadTooLarge, DEFAULT_MAX_BODY_BYTES, type HandlerResponse } from './handler-util';
 
 // Managed store only -- the static PROJECT_REGISTRY_JSON registry this
 // fell back to no longer exists (see the Linear trigger design doc's DB-only
@@ -30,8 +30,11 @@ async function resolveProjectSlug(deps: ControlDeps, repo: string): Promise<stri
 export async function handleStartDevCycleRun(deps: ControlDeps, req: IncomingMessage): Promise<HandlerResponse> {
   let rawBody: unknown;
   try {
-    rawBody = await readJsonBody(req);
-  } catch {
+    rawBody = await readJsonBody(req, deps.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES);
+  } catch (err) {
+    if (isPayloadTooLarge(err)) {
+      return { status: 413, body: { error: 'payload too large' } };
+    }
     return { status: 400, body: { error: 'invalid JSON body' } };
   }
   const parsed = StartDevCycleRequestSchema.safeParse(rawBody);

@@ -185,6 +185,15 @@ describe('createControlServer', () => {
       expect(status).toBe(401);
       expect(start).not.toHaveBeenCalled();
     });
+
+    it('rejects a request body that exceeds maxBodyBytes with 413', async () => {
+      deps.maxBodyBytes = 16;
+      await listen();
+      const { status, body } = await postJsonWithHeaders(port, '/api/platform/runs', { prompt: 'add a really long prompt' }, CRUD_HEADERS);
+      expect(status).toBe(413);
+      expect((body as { error: string }).error).toBeTruthy();
+      expect(start).not.toHaveBeenCalled();
+    });
   });
 
   describe('GET /api/platform/runs', () => {

@@ -126,6 +126,15 @@ async function main(): Promise<void> {
   // doesn't crash.
   const uiDistPath = join(__dirname, '../../ui/dist');
 
+  const maxBodyBytesStr = process.env.CONTROL_MAX_BODY_BYTES;
+  let maxBodyBytes: number | undefined;
+  if (maxBodyBytesStr) {
+    const parsed = Number.parseInt(maxBodyBytesStr, 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      maxBodyBytes = parsed;
+    }
+  }
+
   const server = createControlServer({
     client,
     taskQueue: process.env.TASK_QUEUE ?? 'agentops-devcycle',
@@ -137,6 +146,7 @@ async function main(): Promise<void> {
     engineSettingsStore,
     statsStore,
     projectCrudAuthToken,
+    maxBodyBytes,
   });
 
   const port = Number(process.env.PORT ?? 3001);
