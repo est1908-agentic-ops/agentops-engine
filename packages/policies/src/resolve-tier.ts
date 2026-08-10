@@ -5,20 +5,28 @@ import type { ModelRef } from '@agentops/contracts';
 // primary preference (entries[0] is the primary) AND the session-limit
 // fallback chain (SessionLimitError advances to entries[1], [2], ...).
 // See docs/superpowers/specs/2026-07-10-model-tiering-fallback-design.md.
+// Native Grok CLI is the preferred first cross-backend hop after Claude:
+// it leaves the Anthropic subscription domain entirely (own XAI_API_KEY via
+// grok-credentials), runs the same coding-agent harness shape as Claude, and
+// needs no OpenRouter middleman. Codex via pi/OpenRouter stays as the next
+// hop; Deepseek remains a last-resort entry where a third hop is useful.
 export const DEFAULT_TIERS: Record<string, ModelRef[]> = {
   smart: [
     { backend: 'claude', model: 'opus', effort: 'high' },
-    { backend: 'pi', model: 'zai/glm-5.2' },
+    { backend: 'grok', model: 'grok-4.5', effort: 'high' },
+    { backend: 'pi', model: 'openrouter/openai/gpt-5.3-codex', effort: 'high' },
     { backend: 'pi', model: 'openrouter/deepseek-v4-pro' },
   ],
   implementation: [
     { backend: 'claude', model: 'haiku', effort: 'high' },
+    { backend: 'grok', model: 'grok-4.5', effort: 'high' },
+    { backend: 'pi', model: 'openrouter/openai/gpt-5.3-codex', effort: 'high' },
     { backend: 'pi', model: 'openrouter/deepseek-v4-flash', effort: 'high' },
-    { backend: 'pi', model: 'zai/glm-5.2', effort: 'low' },
   ],
   review: [
     { backend: 'claude', model: 'opus', effort: 'high' },
-    { backend: 'pi', model: 'zai/glm-5.2' },
+    { backend: 'grok', model: 'grok-4.5', effort: 'high' },
+    { backend: 'pi', model: 'openrouter/openai/gpt-5.3-codex', effort: 'high' },
   ],
   escalation: [{ backend: 'claude', model: 'opus', effort: 'max' }],
   // The 'platform' role uses a distinct worker backend entry ('platform', not
@@ -26,11 +34,13 @@ export const DEFAULT_TIERS: Record<string, ModelRef[]> = {
   // platform.ts.
   platform: [
     { backend: 'platform', model: 'claude-sonnet-5', effort: 'high' },
-    { backend: 'pi', model: 'openrouter/deepseek-v4-pro' },
+    { backend: 'grok', model: 'grok-4.5', effort: 'high' },
+    { backend: 'pi', model: 'openrouter/openai/gpt-5.3-codex', effort: 'high' },
   ],
   bughunt: [
     { backend: 'claude', model: 'claude-sonnet-5', effort: 'high' },
-    { backend: 'pi', model: 'openrouter/deepseek-v4-pro' },
+    { backend: 'grok', model: 'grok-4.5', effort: 'high' },
+    { backend: 'pi', model: 'openrouter/openai/gpt-5.3-codex', effort: 'high' },
   ],
   // Zero-cost demo/test tier: routes every stage to the stub backend (always
   // present in buildBackends) so devCycle runs end-to-end without spending

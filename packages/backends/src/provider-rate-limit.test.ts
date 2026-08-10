@@ -28,12 +28,26 @@ describe('isSessionLimitMessage', () => {
     expect(isSessionLimitMessage("You've hit your session limit · resets 9:30am (UTC)")).toBe(true);
   });
 
+  it('matches the real Claude weekly-limit phrasing from rollbar-investigation 2026-08-10', () => {
+    expect(
+      isSessionLimitMessage("You've hit your weekly limit · resets Aug 11, 7pm (UTC)"),
+    ).toBe(true);
+  });
+
+  it('matches a daily-limit message with a reset time', () => {
+    expect(isSessionLimitMessage("You've hit your daily limit · resets tomorrow")).toBe(true);
+  });
+
   it('matches a session-limit message with a reset time', () => {
     expect(isSessionLimitMessage('session limit reached. resets at 2026-07-10T09:30:00Z')).toBe(true);
   });
 
   it('does not match "session limit" without a reset phrase', () => {
     expect(isSessionLimitMessage('session limit exceeded, contact support')).toBe(false);
+  });
+
+  it('does not match weekly limit without a reset phrase', () => {
+    expect(isSessionLimitMessage("You've hit your weekly limit")).toBe(false);
   });
 
   it('does not match an unrelated rate-limit message', () => {

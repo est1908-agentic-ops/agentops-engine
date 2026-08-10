@@ -73,6 +73,7 @@ const validLiveEnv: NodeJS.ProcessEnv = {
   AGENT_RUNNER_IMAGE: 'gitactions.est1908.top/agentic-ops/agent-runner:abc123',
   CLAUDE_AUTH_SECRET_NAME: 'claude-credentials',
   PI_AUTH_SECRET_NAME: 'pi-credentials',
+  GROK_AUTH_SECRET_NAME: 'grok-credentials',
 };
 
 describe('assertLiveBackendConfig', () => {
@@ -108,9 +109,14 @@ describe('assertLiveBackendConfig', () => {
     expect(() => assertLiveBackendConfig(rest)).toThrow(/PI_AUTH_SECRET_NAME/);
   });
 
+  it('throws when GROK_AUTH_SECRET_NAME is unset', () => {
+    const { GROK_AUTH_SECRET_NAME: _drop, ...rest } = validLiveEnv;
+    expect(() => assertLiveBackendConfig(rest)).toThrow(/GROK_AUTH_SECRET_NAME/);
+  });
+
   it('lists every missing setting at once, not just the first', () => {
     expect(() => assertLiveBackendConfig({})).toThrow(
-      /AGENT_RUNNER_IMAGE.*CLAUDE_AUTH_SECRET_NAME.*PI_AUTH_SECRET_NAME/s,
+      /AGENT_RUNNER_IMAGE.*CLAUDE_AUTH_SECRET_NAME.*PI_AUTH_SECRET_NAME.*GROK_AUTH_SECRET_NAME/s,
     );
   });
 });
