@@ -141,12 +141,12 @@ export function createClaudeCliSpec(opts: ClaudeCliSpecOptions = {}): CliSpec {
         if (AUTH_ERROR_PATTERN.test(parsed.result)) {
           throw new ProcessCliAuthError(message);
         }
-        // A subscription session cap ("You've hit your session limit · resets
-        // 9:30am") is account-wide on claude-credentials and lasts hours -- a
-        // same-backend retry is pointless. Classify it so SP2's TierFallbackBackend
-        // can advance to a different credential domain (claude -> pi). This is the
-        // gap issue-broccoli-94 hit: today it is a generic ProcessCliProcessError
-        // that just re-hits the cap 5x and dies.
+        // Account-wide subscription caps ("You've hit your session limit · resets
+        // 9:30am" or "You've hit your weekly limit · resets <time>") are account-wide
+        // on claude-credentials and last hours/days -- a same-backend retry is pointless.
+        // Classify it so SP2's TierFallbackBackend can advance to a different credential
+        // domain (claude -> pi). This is the gap issue-broccoli-94 hit: today it is a
+        // generic ProcessCliProcessError that just re-hits the cap 5x and dies.
         if (isSessionLimitMessage(parsed.result)) {
           throw new SessionLimitError(message);
         }

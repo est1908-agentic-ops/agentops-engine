@@ -251,6 +251,31 @@ describe('ClaudeBackend', () => {
     expect(error).not.toBeInstanceOf(ClaudeBackendProcessError);
   });
 
+  it('throws SessionLimitError when is_error:true carries the Claude subscription weekly-limit phrasing', async () => {
+    const { child } = fakeChildProcess();
+    const spawnFn = vi.fn(() => {
+      queueMicrotask(() => {
+        child.stdout.end(
+          streamJson({ is_error: true, result: "You've hit your weekly limit · resets 9:30am (UTC)", usage: { input_tokens: 1, output_tokens: 1 }, duration_ms: 5 }),
+        );
+        child.stderr.end('');
+        child.emit('close', 0);
+      });
+      return child;
+    });
+    const backend = new ProcessCliRunner(createClaudeCliSpec(), { spawn: spawnFn as never });
+
+    let error: unknown;
+    try {
+      await backend.run(baseRequest);
+    } catch (err) {
+      error = err;
+    }
+
+    expect(error).toBeInstanceOf(SessionLimitError);
+    expect(error).not.toBeInstanceOf(ClaudeBackendProcessError);
+  });
+
   it('throws RateLimitError when is_error:true carries a 429 rate-limit phrasing', async () => {
     const { child } = fakeChildProcess();
     const spawnFn = vi.fn(() => {

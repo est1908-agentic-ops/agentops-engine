@@ -8,12 +8,14 @@ export class RateLimitError extends Error {
   }
 }
 
-// Account-wide subscription cap (e.g. the Claude Code CLI "You've hit your
-// session limit · resets 9:30am (UTC)" from issue-broccoli-94). Lasts hours,
-// not minutes, so a same-backend retry is pointless -- this is the class SP2's
-// TierFallbackBackend catches to advance to a different credential domain.
-// Narrow on purpose: requires BOTH "session limit" and a "reset" phrase so a
-// generic outage that happens to mention sessions isn't misclassified.
+// Account-wide subscription caps: the Claude Code CLI "session limit"
+// ("You've hit your session limit · resets 9:30am (UTC)" from issue-broccoli-94)
+// and "weekly limit" ("You've hit your weekly limit · resets <time> (UTC)").
+// Both last hours/days, not minutes, so a same-backend retry is pointless --
+// this is the class SP2's TierFallbackBackend catches to advance to a
+// different credential domain. Narrow on purpose: requires BOTH "(session|weekly)
+// limit" and a "reset" phrase so a generic outage that happens to mention
+// limits isn't misclassified.
 export class SessionLimitError extends Error {
   constructor(message?: string) {
     super(message);
@@ -40,6 +42,10 @@ export function isRateLimitMessage(message: string): boolean {
   return /\b429\b/.test(message) && /(fair usage policy|rate limit|request frequency)/i.test(message);
 }
 
+// Detect account-wide subscription caps (session or weekly) from the Claude Code CLI.
+// Both caps include a reset phrase, so the check remains narrow on purpose:
+// requires BOTH "(session|weekly) limit" and a "reset" phrase to avoid misclassifying
+// generic quota/limit mentions.
 export function isSessionLimitMessage(message: string): boolean {
-  return /session limit/i.test(message) && /\breset/i.test(message);
+  return /(session|weekly) limit/i.test(message) && /\breset/i.test(message);
 }
