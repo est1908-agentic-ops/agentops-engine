@@ -36,6 +36,18 @@ describe('isSessionLimitMessage', () => {
     expect(isSessionLimitMessage('session limit exceeded, contact support')).toBe(false);
   });
 
+  it('matches the real Claude subscription weekly-limit phrasing', () => {
+    expect(isSessionLimitMessage("You've hit your weekly limit · resets 9:30am (UTC)")).toBe(true);
+  });
+
+  it('matches a weekly-limit message with a reset timestamp', () => {
+    expect(isSessionLimitMessage('weekly limit reached. resets at 2026-08-18T09:30:00Z')).toBe(true);
+  });
+
+  it('does not match "weekly limit" without a reset phrase', () => {
+    expect(isSessionLimitMessage('weekly limit exceeded, contact support')).toBe(false);
+  });
+
   it('does not match an unrelated rate-limit message', () => {
     expect(isSessionLimitMessage('429 Too Many Requests: rate limit exceeded')).toBe(false);
   });
