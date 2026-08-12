@@ -43,5 +43,8 @@ export const BlockReasonSchema = z.enum([
   // status 'failed' as a fail-fast, not a resumable block.
   'unregistered-repo',
   'pr-landing-blocked',
+  // Set together with status='blocked' for a resumable pause while human
+  // remediates git push credentials (GitPushPermissionError from the scm port).
+  'git-push-permission-denied',
 ]);
 export type BlockReason = z.infer<typeof BlockReasonSchema>;

@@ -69,7 +69,9 @@ describe('BlockReasonSchema', () => {
       'babysit-brake',
       'max-attempts',
       'hook-required-failed',
+      'unregistered-repo',
       'pr-landing-blocked',
+      'git-push-permission-denied',
     ];
     for (const reason of reasons) {
       expect(BlockReasonSchema.parse(reason)).toBe(reason);

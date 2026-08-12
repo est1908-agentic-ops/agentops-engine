@@ -29,6 +29,7 @@ import {
 } from '@agentops/policies';
 import type { DevCycleActivities } from './activities-api';
 import { prLanding, prLandingCancelSignal, prLandingResumeSignal } from './pr-landing';
+import { isGitPushPermissionFailure } from './push-failures';
 
 // No step retries forever: a failure that keeps recurring attempt after attempt
 // (a bad git ref, a repo that no longer exists, a deterministic backend error) is
@@ -190,6 +191,29 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
   const waitForResumeOrCancel = async (): Promise<boolean> => {
     await condition(() => cancelled || state.status === 'running');
     return cancelled;
+  };
+
+  const pushBranchOrBlock = async (contentHash: string): Promise<boolean> => {
+    // returns true => caller should tear down and return (cancelled while blocked)
+    //         false => push ultimately succeeded
+    while (true) {
+      try {
+        await activities.pushBranch(input.repo, state.workspaceRef, state.branch, contentHash);
+        return false;
+      } catch (err) {
+        if (!isGitPushPermissionFailure(err)) throw err; // preserve fail-the-workflow for all other errors
+        state.status = 'blocked';
+        state.blockReason = 'git-push-permission-denied';
+        if (await waitForResumeOrCancel()) {
+          state.stage = 'failed';
+          state.status = 'failed';
+          await dropAgentWorking();
+          await activities.cleanupWorkspace(state.workspaceRef, input.repo);
+          return true;
+        }
+        // resumed: credentials presumed fixed; loop retries the idempotent --force push
+      }
+    }
   };
 
   type RoutableStage = keyof Routing;
@@ -362,12 +386,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
   }
 
   state.stage = 'pr';
-  await activities.pushBranch(
-    input.repo,
-    state.workspaceRef,
-    state.branch,
-    `${input.taskId}-${implementAttempt}`,
-  );
+  if (await pushBranchOrBlock(`${input.taskId}-${implementAttempt}`)) return state;
 
   // Read the committed design/plan artifacts from the canonical superpowers locations
   // (right after the final push, before opening the PR — per design).
@@ -505,12 +524,7 @@ export async function devCycle(input: TaskInput): Promise<DevCycleState> {
       });
       state.implementAttempts = implementAttempt;
       state.iterations += 1;
-      await activities.pushBranch(
-        input.repo,
-        state.workspaceRef,
-        state.branch,
-        `${input.taskId}-${implementAttempt}`,
-      );
+      if (await pushBranchOrBlock(`${input.taskId}-${implementAttempt}`)) return state;
       state.stage = 'pr_babysit';
       continue;
     }
