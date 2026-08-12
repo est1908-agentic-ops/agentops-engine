@@ -13,7 +13,25 @@ const {
   resolveRepoConfig,
   runAgent,
   patched,
+  ActivityFailure,
+  ApplicationFailure,
 } = vi.hoisted(() => {
+  class ActivityFailure extends Error {
+    cause?: unknown;
+    constructor(message?: string) {
+      super(message);
+      this.name = 'ActivityFailure';
+    }
+  }
+
+  class ApplicationFailure extends Error {
+    type = '';
+    constructor(message?: string, type?: string) {
+      super(message);
+      this.name = 'ApplicationFailure';
+      if (type) this.type = type;
+    }
+  }
   const runAgentFn = vi.fn().mockImplementation(async (req: { stage: string }) => {
     const outputs: Record<string, string> = {
       implement: 'diff',
@@ -43,6 +61,8 @@ const {
     resolveRepoConfig: vi.fn().mockResolvedValue({ config: null }),
     runAgent: runAgentFn,
     patched: vi.fn().mockReturnValue(false),
+    ActivityFailure,
+    ApplicationFailure,
   };
 });
 
@@ -79,10 +99,8 @@ vi.mock('@temporalio/workflow', () => ({
     }
   }),
   trace: { getActiveSpan: () => ({ setAttributes: vi.fn() }) },
-  ActivityFailure: class ActivityFailure extends Error {},
-  ApplicationFailure: class ApplicationFailure extends Error {
-    type = '';
-  },
+  ActivityFailure,
+  ApplicationFailure,
 }));
 
 import { devCyclePrRepair } from './dev-cycle-pr-repair';
@@ -159,5 +177,29 @@ describe('devCyclePrRepair babysit brake cancel', () => {
     expect(result.status).toBe('failed');
     expect(result.stage).toBe('failed');
     expect(cleanupWorkspace).toHaveBeenCalledWith('ws', 'owner/repo');
+  });
+});
+
+describe('devCyclePrRepair git push permission error handling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    patched.mockReturnValue(false);
+    cancelHandler = null;
+  });
+
+  it('rethrows non-permission push errors without blocking', async () => {
+    const genericError = new Error('git push failed');
+    pushBranch.mockRejectedValueOnce(genericError);
+
+    const input: DevCyclePrRepairInput = {
+      taskId: 'task-123',
+      project: 'test-project',
+      repo: 'owner/repo',
+      prRef: 'owner/repo#42',
+      config,
+    };
+
+    // The workflow should fail with the generic error, not block
+    await expect(devCyclePrRepair(input)).rejects.toThrow('git push failed');
   });
 });

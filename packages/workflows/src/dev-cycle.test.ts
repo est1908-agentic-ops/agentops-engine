@@ -18,7 +18,25 @@ const {
   runAgent,
   patched,
   startChild,
+  ActivityFailure,
+  ApplicationFailure,
 } = vi.hoisted(() => {
+  class ActivityFailure extends Error {
+    cause?: unknown;
+    constructor(message?: string) {
+      super(message);
+      this.name = 'ActivityFailure';
+    }
+  }
+
+  class ApplicationFailure extends Error {
+    type = '';
+    constructor(message?: string, type?: string) {
+      super(message);
+      this.name = 'ApplicationFailure';
+      if (type) this.type = type;
+    }
+  }
   const handlers = new Map<string, () => void>();
   const logMock = { warn: vi.fn(), error: vi.fn(), info: vi.fn(), debug: vi.fn() };
   const runAgentFn = vi.fn().mockImplementation(async (req: { stage: string }) => {
@@ -77,6 +95,8 @@ const {
     recordStageResult: vi.fn().mockResolvedValue(undefined),
     recordRunStats: vi.fn().mockResolvedValue(undefined),
     runAgent: runAgentFn,
+    ActivityFailure,
+    ApplicationFailure,
   };
 });
 
@@ -112,10 +132,8 @@ vi.mock('@temporalio/workflow', () => ({
   patched,
   startChild,
   trace: { getActiveSpan: () => ({ setAttributes: vi.fn() }) },
-  ActivityFailure: class ActivityFailure extends Error {},
-  ApplicationFailure: class ApplicationFailure extends Error {
-    type = '';
-  },
+  ActivityFailure,
+  ApplicationFailure,
 }));
 
 import { devCycle } from './dev-cycle';
@@ -375,5 +393,30 @@ describe('devCycle child-signal forwarding', () => {
         process.on('unhandledRejection', originalHandler);
       }
     }
+  });
+});
+
+describe('devCycle git push permission error handling', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    handlers.clear();
+    vi.mocked(patched).mockReturnValue(false);
+  });
+
+  it('rethrows non-permission push errors without blocking', async () => {
+    const genericError = new Error('git push failed');
+    vi.mocked(pushBranch).mockRejectedValueOnce(genericError);
+
+    const devCyclePromise = devCycle({
+      taskId: 't',
+      project: 'p',
+      repo: 'o/r',
+      issueRef: 'o/r#5',
+      goal: 'fix',
+      config,
+    });
+
+    // The workflow should fail with the error, not convert it to a block
+    await expect(devCyclePromise).rejects.toThrow('git push failed');
   });
 });

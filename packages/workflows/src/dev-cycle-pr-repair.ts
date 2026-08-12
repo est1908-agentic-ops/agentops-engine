@@ -18,6 +18,7 @@ import type {
 import { babysitDecision, nextRepairAction, parseVerdict } from '@agentops/policies';
 import { feedbackHash } from '@agentops/contracts';
 import type { DevCycleActivities } from './activities-api';
+import { isGitPushPermissionFailure } from './push-failures';
 
 // Reuse the same activity proxies and constants as dev-cycle for determinism.
 const activities = proxyActivities<DevCycleActivities>({
@@ -88,6 +89,28 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
   const waitForResumeOrCancel = async (): Promise<boolean> => {
     await condition(() => cancelled || state.status === 'running');
     return cancelled;
+  };
+
+  const pushBranchOrBlock = async (contentHash: string): Promise<boolean> => {
+    // returns true => caller should tear down and return (cancelled while blocked)
+    //         false => push ultimately succeeded
+    while (true) {
+      try {
+        await activities.pushBranch(input.repo, state.workspaceRef, state.branch, contentHash);
+        return false;
+      } catch (err) {
+        if (!isGitPushPermissionFailure(err)) throw err; // preserve fail-the-workflow for all other errors
+        state.status = 'blocked';
+        state.blockReason = 'git-push-permission-denied';
+        if (await waitForResumeOrCancel()) {
+          state.stage = 'failed';
+          state.status = 'failed';
+          await activities.cleanupWorkspace(state.workspaceRef, input.repo);
+          return true;
+        }
+        // resumed: credentials presumed fixed; loop retries the idempotent --force push
+      }
+    }
   };
 
   const runStageAgent = async (
@@ -205,12 +228,7 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
   }
 
   // Push the changes
-  await activities.pushBranch(
-    input.repo,
-    state.workspaceRef,
-    state.branch,
-    `${input.taskId}-repair-${implementAttempt}`,
-  );
+  if (await pushBranchOrBlock(`${input.taskId}-repair-${implementAttempt}`)) return state;
 
   // Full babysit (identical to devCycle)
   const seen = new Set<string>();
@@ -269,12 +287,7 @@ export async function devCyclePrRepair(input: DevCyclePrRepairInput): Promise<De
         reviewFindings: lastReview,
         prReviewFeedback: reviewComments,
       });
-      await activities.pushBranch(
-        input.repo,
-        state.workspaceRef,
-        state.branch,
-        `${input.taskId}-repair-${implementAttempt}`,
-      );
+      if (await pushBranchOrBlock(`${input.taskId}-repair-${implementAttempt}`)) return state;
       state.stage = 'pr_babysit';
       continue;
     }
